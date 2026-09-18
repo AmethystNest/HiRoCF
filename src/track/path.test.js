@@ -55,4 +55,18 @@ describe('TrackPath', () => {
     expect(path.wrap(-1)).toBe(path.count - 1);
     expect(path.wrap(path.count)).toBe(0);
   });
+
+  it('setTunnelRange flags a route range independently of deck/zLevel', () => {
+    const path = buildSquareLoop();
+    path.setLayerRange(0.0, 1.0, 1, 2); // whole loop elevated
+    path.setTunnelRange(0.3, 0.4);
+
+    const inside = Math.floor(path.count * 0.35);
+    const outside = Math.floor(path.count * 0.1);
+    expect(path.tunnelFlags[inside]).toBe(1);
+    expect(path.tunnelFlags[outside]).toBe(0);
+    // tunnel flag must not disturb the deck metadata set separately
+    expect(path.deckIds[inside]).toBe(1);
+    expect(path.zLevels[inside]).toBe(2);
+  });
 });

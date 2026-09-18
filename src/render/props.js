@@ -369,6 +369,19 @@ export function buildProps(path, sheet, shadowTex, {
     sp.height = h;
     holder.addChild(sp);
 
+    // Soft glow under the light fixtures only (street_light/floodlight) --
+    // reads as an actual light source at night rather than a dark pole
+    // silhouette, without touching the sprite art itself. Positioned near
+    // the sprite's top (fixture head), not its base, using the same anchor
+    // convention as the sprite above.
+    if (name === 'street_light' || name === 'floodlight') {
+      const glow = new Graphics();
+      const gy = -h * 0.72;
+      glow.circle(0, gy, w * 0.95).fill({ color: 0xfff0b8, alpha: 0.10 });
+      glow.circle(0, gy, w * 0.42).fill({ color: 0xfff0b8, alpha: 0.28 });
+      holder.addChild(glow);
+    }
+
     if (info.kind === 'billboard') {
       // Fixed in world space, same as every other layer (asphalt, kerb,
       // buildings) -- aligned to the local track direction, matching the

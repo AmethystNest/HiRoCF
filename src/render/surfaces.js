@@ -609,3 +609,113 @@ export function buildRampStructure(path, { wallHalf = 355 } = {}) {
 
   return layer;
 }
+
+/**
+ * Per-point tunnel "depth" (0..1), derived from TrackPath's own tunnelFlags:
+ * ramps up from 0 over `fadeDist` world units at the start of each tunnel
+ * run, holds at 1 through the middle, ramps back down to 0 over the same
+ * distance at the end. A run shorter than 2*fadeDist never reaches full
+ * depth, which reads correctly as a short tunnel rather than a jump cut.
+ * Independent of computeElevationProfile -- a tunnel can sit anywhere a
+ * stage marks one, ground-level or elevated.
+ */
+export function computeTunnelDepth(path, fadeDist = 220) {
+  const n = path.count;
+  const depth = new Float32Array(n);
+  const fadeSteps = Math.max(1, fadeDist / path.spacing);
+
+  let i = 0;
+  while (i < n) {
+    if (!path.tunnelFlags[i]) { i++; continue; }
+    let j = i;
+    while (j < n && path.tunnelFlags[j]) j++;
+    // run is [i, j). Handle a run that wraps past index n-1 back to 0 by
+    // just treating it as ending at the array boundary -- stages are
+    // expected to keep a tunnel's start/end away from index 0 (the
+    // start/finish line), so this edge case does not occur in practice.
+    const runLen = j - i;
+    for (let k = i; k < j; k++) {
+      const fromStart = k - i;
+      const fromEnd = j - 1 - k;
+      depth[k] = Math.min(1, fromStart / fadeSteps, fromEnd / fadeSteps, runLen / fadeSteps);
+    }
+    i = j;
+  }
+  return depth;
+}
+
+/**
+ * Tunnel treatment: darkens the road, raises solid side walls and adds
+ * ceiling-light points, purely as a visual read of an existing stretch of
+ * route -- not a different road, not registered with nearest()/collision/
+ * AI/race progress (same footing as buildRampStructure/
+ * buildVisualHighwayDeck). Fades in/out with computeTunnelDepth so there is
+ * no hard cut at the tunnel mouth.
+ *
+ * The dark overlay and light points are drawn as discrete quads/circles
+ * rather than a ribbon, since ribbonMesh only takes one alpha for its whole
+ * strip -- a per-point fade needs per-segment alpha, which only a Graphics
+ * fill can give here.
+ */
+export function buildTunnelStructure(path, { roadHalf = 300, wallHalf = 355 } = {}) {
+  const layer = new Container();
+  layer.label = 'tunnel';
+  const depth = computeTunnelDepth(path);
+  let any = false;
+  for (let i = 0; i < depth.length; i++) { if (depth[i] > 0.001) { any = true; break; } }
+  if (!any) return layer;
+
+  const wallReach = 30;
+
+  // side walls: solid, well-lit concrete, widening from zero with depth --
+  // same zero-width-when-absent trick as buildRampStructure.
+  for (const side of [1, -1]) {
+    layer.addChild(ribbonMesh(path, Texture.WHITE, {
+      innerOffset: side * (roadHalf + 6),
+      outerOffset: (k) => side * (roadHalf + 6 + depth[k] * wallReach),
+      tint: 0x54585c, alpha: 1,
+    }));
+    layer.addChild(ribbonMesh(path, Texture.WHITE, {
+      innerOffset: side * (roadHalf + 6),
+      outerOffset: (k) => side * (roadHalf + 6 + depth[k] * wallReach * 0.3),
+      tint: 0x2b2e31, alpha: 1,
+    }));
+  }
+
+  // dark overlay across the full carriageway width, opacity following
+  // depth -- fine-grained quads (not the ribbon's single alpha) so the
+  // mouth fades smoothly rather than cutting hard.
+  const overlay = new Graphics();
+  const overlayStep = Math.max(1, Math.round(40 / path.spacing));
+  const overlayHalf = wallHalf + wallReach + 20;
+  for (let i = 0; i < path.count; i += overlayStep) {
+    if (depth[i] < 0.02) continue;
+    const j = Math.min(path.count - 1, i + overlayStep);
+    const a = path.points[i], b = path.points[j];
+    const an = [path.normals[i * 2], path.normals[i * 2 + 1]];
+    const bn = [path.normals[j * 2], path.normals[j * 2 + 1]];
+    overlay.poly([
+      a[0] - an[0] * overlayHalf, a[1] - an[1] * overlayHalf,
+      b[0] - bn[0] * overlayHalf, b[1] - bn[1] * overlayHalf,
+      b[0] + bn[0] * overlayHalf, b[1] + bn[1] * overlayHalf,
+      a[0] + an[0] * overlayHalf, a[1] + an[1] * overlayHalf,
+    ]).fill({ color: 0x05060a, alpha: depth[i] * 0.72 });
+  }
+  layer.addChild(overlay);
+
+  // ceiling lights: evenly spaced points down the centreline, only where
+  // the tunnel is substantially dark (depth > 0.6) so they never appear to
+  // float at the mouth before the walls/overlay have caught up.
+  const lights = new Graphics();
+  const lightStep = Math.max(1, Math.round(140 / path.spacing));
+  for (let i = 0; i < path.count; i += lightStep) {
+    if (depth[i] < 0.6) continue;
+    const p = path.points[i];
+    const a = Math.min(1, (depth[i] - 0.6) / 0.4);
+    lights.circle(p[0], p[1], 14).fill({ color: 0xfff3c4, alpha: a * 0.85 });
+    lights.circle(p[0], p[1], 30).fill({ color: 0xfff3c4, alpha: a * 0.22 });
+  }
+  layer.addChild(lights);
+
+  return layer;
+}

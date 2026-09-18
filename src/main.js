@@ -1,7 +1,7 @@
 import { Application, Assets, Container, Graphics, Sprite, Texture, Rectangle } from './pixi.js';
 import { STAGES, PHYSICS, CAR_SIZE, CAR_VISUAL_SCALE, DRIFT_MARK_LIFE } from './config.js';
 import { STAGE_PATHS } from './track/stages.js';
-import { buildSurface, surfaceExtent, buildVisualHighwayDeck, buildRampStructure } from './render/surfaces.js';
+import { buildSurface, surfaceExtent, buildVisualHighwayDeck, buildRampStructure, buildTunnelStructure } from './render/surfaces.js';
 import { buildProps, buildGroundPatches, buildSideStreets } from './render/props.js';
 import { buildMiniMap } from './render/minimap.js';
 import { buildFinishFX } from './render/finishfx.js';
@@ -111,6 +111,10 @@ export class Game {
     // of the shoulder wherever the route's own zLevel climbs (see
     // buildRampStructure). No-ops on any stage whose path stays at zLevel 0.
     this.world.addChild(buildRampStructure(path, { wallHalf: cfg.wallHalf }));
+
+    // Tunnel: darkens/walls/lights whatever stretch of route the stage
+    // marks with setTunnelRange(). No-ops on any stage that marks none.
+    this.world.addChild(buildTunnelStructure(path, { roadHalf: cfg.roadHalf, wallHalf: cfg.wallHalf }));
 
     // V12 overpass depth pass.
     // Preserve V11 geometry/gameplay. Improve only the physical reading of

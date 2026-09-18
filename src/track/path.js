@@ -114,6 +114,11 @@ export class TrackPath {
     // 2.5D route metadata. Existing stages default to the ground deck.
     this.deckIds = new Int16Array(count);
     this.zLevels = new Int16Array(count);
+    // Tunnel flag, independent of deck/zLevel -- a tunnel is a visual-only
+    // treatment of an existing ground-level (or elevated) stretch, not a
+    // different logical road, so it never affects nearest()/collision/AI/
+    // race progress. Existing stages default to no tunnel anywhere.
+    this.tunnelFlags = new Uint8Array(count);
 
     // per-point tangent angle and unit normal (left-hand side positive)
     this.tangents = new Float32Array(count);
@@ -148,6 +153,19 @@ export class TrackPath {
     } else {
       for(let i=a;i<n;i++){ this.deckIds[i]=deckId; this.zLevels[i]=zLevel; }
       for(let i=0;i<b;i++){ this.deckIds[i]=deckId; this.zLevels[i]=zLevel; }
+    }
+    return this;
+  }
+
+  /** Mark a normalized route range as inside a tunnel (visual-only). */
+  setTunnelRange(from01, to01) {
+    const n=this.count;
+    let a=this.wrap(Math.floor(from01*n)), b=Math.min(n,Math.ceil(to01*n));
+    if (from01 <= to01) {
+      for(let i=a;i<b;i++){ this.tunnelFlags[i]=1; }
+    } else {
+      for(let i=a;i<n;i++){ this.tunnelFlags[i]=1; }
+      for(let i=0;i<b;i++){ this.tunnelFlags[i]=1; }
     }
     return this;
   }

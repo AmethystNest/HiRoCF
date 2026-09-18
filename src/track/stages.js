@@ -239,6 +239,12 @@ export function buildStage4Path() {
   path.setLayerRange(0.10,0.24,1,2);
   path.setLayerRange(0.24,0.28,1,1);
   path.setLayerRange(0.28,1.00,0,0);
+
+  // Tunnel on the ground-level straight opposite the elevated run (0.641-
+  // 0.729 is the plain .line() segment above, not a wave/arc, so the walls
+  // never have to follow a curve). Kept well inside that straight's own
+  // boundaries so the fade never reaches into the arcs on either side.
+  path.setTunnelRange(0.66, 0.71);
   return path;
 }
 

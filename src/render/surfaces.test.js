@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { PathBuilder } from '../track/path.js';
-import { computeElevationProfile, buildRampStructure } from './surfaces.js';
+import { computeElevationProfile, buildRampStructure, computeTunnelDepth, buildTunnelStructure } from './surfaces.js';
 
 function buildLoop() {
   return new PathBuilder()
@@ -66,5 +66,49 @@ describe('buildRampStructure', () => {
     // 4 ribbon meshes per side (shadow, wall base, wall cap, girder) = 8,
     // plus one Graphics object holding every pier.
     expect(layer.children.length).toBe(9);
+  });
+});
+
+describe('computeTunnelDepth', () => {
+  it('is all zero when the path has no tunnel range set', () => {
+    const path = buildLoop();
+    const depth = computeTunnelDepth(path);
+    expect(depth.every((d) => d === 0)).toBe(true);
+  });
+
+  it('fades 0 -> 1 -> 0 across a marked tunnel range', () => {
+    const path = buildLoop();
+    path.setTunnelRange(0.4, 0.6);
+    const depth = computeTunnelDepth(path, 220);
+    const n = path.count;
+
+    expect(depth[Math.floor(n * 0.3)]).toBe(0); // well before the tunnel
+    expect(depth[Math.floor(n * 0.5)]).toBeCloseTo(1, 1); // tunnel middle
+    expect(depth[Math.floor(n * 0.8)]).toBe(0); // well after the tunnel
+
+    // depth should rise monotonically through the first half of the range
+    const start = Math.floor(n * 0.4);
+    const mid = Math.floor(n * 0.5);
+    let prev = depth[start];
+    for (let i = start + 1; i <= mid; i++) {
+      expect(depth[i]).toBeGreaterThanOrEqual(prev);
+      prev = depth[i];
+    }
+  });
+});
+
+describe('buildTunnelStructure', () => {
+  it('adds nothing for a path with no tunnel range', () => {
+    const path = buildLoop();
+    const layer = buildTunnelStructure(path, { roadHalf: 300, wallHalf: 355 });
+    expect(layer.children.length).toBe(0);
+  });
+
+  it('adds wall ribbons plus the overlay/light Graphics once a tunnel is marked', () => {
+    const path = buildLoop();
+    path.setTunnelRange(0.4, 0.6);
+    const layer = buildTunnelStructure(path, { roadHalf: 300, wallHalf: 355 });
+    // 2 ribbon meshes per side (base, cap) = 4, plus overlay + lights Graphics.
+    expect(layer.children.length).toBe(6);
   });
 });
