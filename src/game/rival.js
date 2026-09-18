@@ -191,6 +191,9 @@ export class RivalCar {
 
     this.x = 0; this.y = 0; this.angle = 0;
     this.speed = 0;
+    // Rolling centreline index, so route lookups stay on this car's own
+    // stretch of road where the course crosses over itself.
+    this._routeHint = null;
     this.line = -48;              // preferred lateral offset from the centreline
     this._raceLine = this.line;   // smoothed apex-hugging target, see update()
     // Apex-hugging line is a per-stage look, not a universal upgrade to
@@ -233,6 +236,16 @@ export class RivalCar {
    *  flag rather than a bare timer. */
   get boosting() { return this.boostTimer > 0; }
 
+  /**
+   * Nearest centreline point on this car's own stretch of route, tracked by
+   * a rolling index hint -- see TrackPath.nearestLocal.
+   */
+  nearestOnRoute(x, y) {
+    const n = this.path.nearestLocal(x, y, this._routeHint, 90, this.wallHalf * 4);
+    this._routeHint = n.index;
+    return n;
+  }
+
   placeAtStart(distance, lateral) {
     this.openingStraightReleased = false;
     const s = this.path.sample(distance);
@@ -240,6 +253,7 @@ export class RivalCar {
     this.x = s.x + this.path.normals[k * 2] * lateral;
     this.y = s.y + this.path.normals[k * 2 + 1] * lateral;
     this.angle = s.angle;
+    this._routeHint = k;
     this.speed = 0;
     this.line = lateral;
     this._raceLine = lateral;
@@ -274,7 +288,11 @@ export class RivalCar {
     }
 
     const path = this.path;
-    const near = path.nearest(this.x, this.y);
+    // Progress-local, not global: at a crossing the other deck shares this
+    // XY, and a global search would hand the AI the wrong stretch of route
+    // to follow -- which reads as the rival suddenly cutting across the
+    // course. See TrackPath.nearestLocal.
+    const near = this.nearestOnRoute(this.x, this.y);
     const here = near.index;
 
     if (this.holdOpeningStraight && !this.openingStraightReleased) {
@@ -558,7 +576,7 @@ export class RivalCar {
     }
 
     // --- soft containment so it never beaches itself on a barrier ---
-    const after = path.nearest(this.x, this.y);
+    const after = this.nearestOnRoute(this.x, this.y);
     if (after.dist > this.roadHalf + 35) {
       this.x += (after.x - this.x) * 0.09;
       this.y += (after.y - this.y) * 0.09;

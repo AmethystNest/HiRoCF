@@ -1,7 +1,7 @@
 import { Application, Assets, Container, Graphics, Sprite, Texture, Rectangle } from './pixi.js';
 import { STAGES, PHYSICS, CAR_SIZE, CAR_VISUAL_SCALE, DRIFT_MARK_LIFE } from './config.js';
 import { STAGE_PATHS } from './track/stages.js';
-import { buildSurface, surfaceExtent, buildVisualHighwayDeck, buildRampStructure, buildTunnelStructure } from './render/surfaces.js';
+import { buildSurface, surfaceExtent, buildRampStructure, buildTunnelStructure, buildElevatedRoadOverlay, buildElevatedDeckShadow, elevatedRuns } from './render/surfaces.js';
 import { buildProps, buildGroundPatches, buildSideStreets } from './render/props.js';
 import { buildMiniMap } from './render/minimap.js';
 import { buildFinishFX } from './render/finishfx.js';
@@ -107,81 +107,57 @@ export class Game {
       preset,
     }));
 
-    // Ramp reveal: grows a retaining wall / girder fascia / cast shadow out
-    // of the shoulder wherever the route's own zLevel climbs (see
-    // buildRampStructure). No-ops on any stage whose path stays at zLevel 0.
-    this.world.addChild(buildRampStructure(path, { wallHalf: cfg.wallHalf }));
-
     // Tunnel: darkens/walls/lights whatever stretch of route the stage
-    // marks with setTunnelRange(). No-ops on any stage that marks none.
+    // marks with setTunnelRange(). Drawn against the ground surface, before
+    // anything elevated, since a tunnel is cut into the level it sits on.
+    // No-ops on any stage that marks none.
     this.world.addChild(buildTunnelStructure(path, { roadHalf: cfg.roadHalf, wallHalf: cfg.wallHalf }));
 
-    // V12 overpass depth pass.
-    // Preserve V11 geometry/gameplay. Improve only the physical reading of
-    // the bridge: compact under-shadow, visible girder fascia and restrained
-    // rectangular/elliptical supports.
-    if (stageId === 4) {
-      const crossI=Math.floor(path.count*0.17);
-      const cp=path.points[crossI];
-      const nx=path.normals[crossI*2], ny=path.normals[crossI*2+1];
-      const tx=-ny, ty=nx, L=2350;
+    // --- grade separation, by layer order ---
+    // buildSurface() above laid the WHOLE route down in one set of full-loop
+    // ribbons, so where stage 4's course crosses over itself both passes are
+    // in the same meshes and neither is reliably on top. These two passes
+    // resolve it: the raised road is re-laid over the ground one, then the
+    // deck's own structure (walls, fascia, piers, cast shadow) frames it.
+    // Both no-op on a stage whose route never leaves zLevel 0.
+    this.world.addChild(buildElevatedDeckShadow(path, { roadHalf: cfg.roadHalf }));
+    this.elevatedDeck = buildElevatedRoadOverlay(path, this.tex, {
+      roadHalf: cfg.roadHalf,
+      preset,
+    });
+    this.world.addChild(this.elevatedDeck);
+    this.world.addChild(buildRampStructure(path, { wallHalf: cfg.wallHalf }));
 
-      this.world.addChild(buildVisualHighwayDeck([
-        [cp[0]-nx*L,cp[1]-ny*L],
-        [cp[0]-nx*1175,cp[1]-ny*1175],
-        [cp[0],cp[1]],
-        [cp[0]+nx*1175,cp[1]+ny*1175],
-        [cp[0]+nx*L,cp[1]+ny*L],
-      ],{roadHalf:255,wallHalf:305,upper:false}));
-
-      // Shadow belongs only to the footprint of the upper bridge.
-      const shadow=new Graphics();
-      const along=505, across=355;
-      shadow.poly([
-        cp[0]-tx*along-nx*across+34,cp[1]-ty*along-ny*across+42,
-        cp[0]+tx*along-nx*across+34,cp[1]+ty*along-ny*across+42,
-        cp[0]+tx*along+nx*across+34,cp[1]+ty*along+ny*across+42,
-        cp[0]-tx*along+nx*across+34,cp[1]-ty*along+ny*across+42,
-      ]).fill({color:0x05080b,alpha:.58});
-      this.world.addChild(shadow);
-
-      const upperPts=[];
-      for(let o=-16;o<=16;o+=2){
-        const i=path.wrap(crossI+o);
-        upperPts.push([path.points[i][0],path.points[i][1]]);
+    // Grid of just the elevated points, so update() can ask "is the player
+    // underneath the deck right now" in O(1). A top-down camera has no way
+    // to show one road passing under another: the deck is opaque, so at the
+    // crossing it would simply cover the car, and the player loses the car
+    // they are steering. Fading the deck road (its shadow and its walls stay
+    // put, so the bridge keeps its outline) is what makes "I am under it"
+    // legible. See the fade in update().
+    this._deckGrid = null;
+    if (elevatedRuns(path).length) {
+      const cell = 400;
+      const grid = new Map();
+      for (let i = 0; i < path.count; i++) {
+        if (path.zLevels[i] < 2) continue;
+        const q = path.points[i];
+        const k = `${Math.floor(q[0] / cell)},${Math.floor(q[1] / cell)}`;
+        let b = grid.get(k);
+        if (!b) grid.set(k, (b = []));
+        b.push(i);
       }
-      this.world.addChild(buildVisualHighwayDeck(
-        upperPts,{roadHalf:cfg.roadHalf,wallHalf:cfg.wallHalf,upper:true}
-      ));
-
-      // Bridge-girder fascia: two dark structural strips immediately outside
-      // the upper deck. They provide actual visual thickness instead of a
-      // second giant translucent road-shaped slab.
-      const girder=new Graphics();
-      const span=510, deckEdge=cfg.wallHalf+20, fascia=34;
-      for(const side of [-1,1]){
-        const a=side*deckEdge, b=side*(deckEdge+fascia);
-        girder.poly([
-          cp[0]-tx*span+nx*a,cp[1]-ty*span+ny*a,
-          cp[0]+tx*span+nx*a,cp[1]+ty*span+ny*a,
-          cp[0]+tx*span+nx*b+16,cp[1]+ty*span+ny*b+20,
-          cp[0]-tx*span+nx*b+16,cp[1]-ty*span+ny*b+20,
-        ]).fill({color:0x3f464b,alpha:1});
-      }
-      this.world.addChild(girder);
-
-      // Two compact bridge piers, kept outside traffic lanes.
-      const piers=new Graphics();
-      for(const side of [-1,1]){
-        const x=cp[0]+nx*side*455, y=cp[1]+ny*side*455;
-        // elongated base/shadow, not a large top-down circle
-        // Shuto-style compact rectangular support instead of a top-down disc.
-        piers.roundRect(x-28+16,y-44+22,56,88,10).fill({color:0x0b0f13,alpha:.34});
-        piers.roundRect(x-28,y-44,56,88,8).fill({color:0x73797e,alpha:1});
-        piers.roundRect(x-20,y-36,40,66,6).fill({color:0xaeb3b6,alpha:1});
-      }
-      this.world.addChild(piers);
+      this._deckGrid = { grid, cell, reach: cfg.roadHalf + 70 };
     }
+
+    // (The old stage-4 pass here painted a decorative overpass at a fixed
+    // fraction of the route -- a bridge-shaped picture beside the road,
+    // deliberately not registered with nearest()/collision/AI, because the
+    // route of the day never actually crossed itself. The course now has a
+    // real grade separation that the player and rival both drive, handled by
+    // the deck metadata and the layer order above, so the stand-in is gone.
+    // buildVisualHighwayDeck is kept in render/surfaces.js for future
+    // scenery that genuinely isn't part of the route.)
 
     const layout = LAYOUTS[stageId] || null;
     const edge = surfaceExtent(cfg.roadHalf, preset);
@@ -288,6 +264,13 @@ export class Game {
     if (cfg.rival.tint) this.rivalSprite.tint = cfg.rival.tint;
     this.actors.addChild(this.rivalSprite);
 
+    // Deck state has to be right from the grid, not only once the lights go
+    // out: update() only syncs it while racing, so without this both cars
+    // would sit on whatever deck they were last left on through the VS card
+    // and the countdown.
+    this.syncDeck(this.player);
+    this.syncDeck(this.rival);
+
     // --- race progression ---
     // startBack keeps lap/finish thresholds aligned with the painted line
     // instead of the grid position the cars actually start from.
@@ -304,6 +287,18 @@ export class Game {
     return { path, cfg };
   }
 
+  /**
+   * Read a car's deck/zLevel from the route position it is already tracking.
+   * Cars that keep no hint (anything driven by something other than their own
+   * update()) fall back to a global lookup.
+   */
+  syncDeck(car) {
+    const idx = car._routeHint ?? this.path.nearest(car.x, car.y).index;
+    const layer = this.path.layerAtIndex(idx);
+    car.deckId = layer.deckId;
+    car.zLevel = layer.zLevel;
+  }
+
   update(dt) {
     const state = this.race.state;
     const p = this.player;
@@ -311,37 +306,26 @@ export class Game {
     if (state === 'racing') {
       p.update(dt, this.input);
 
-      // Stage4 layer-state foundation: resolve the live route's logical layer
-      // from its nearest progress-local point. This is deliberately local,
-      // so a stacked road at the same XY cannot steal the player's route.
-      if (this.stageId === 4) {
-        const hint = p._layerHintIndex ?? 0;
-        // Do not filter by the OLD deck here: ramps are exactly where the
-        // route must transition 0 -> 1 or 1 -> 0. Progress-local lookup is
-        // already enough to prevent a same-XY crossing from stealing route.
-        const near = this.path.nearestNearIndex(p.x, p.y, hint, 150, null);
-        p._layerHintIndex = near.index;
-        const layer = this.path.layerAtIndex(near.index);
-        p.deckId = layer.deckId;
-        p.zLevel = layer.zLevel;
-      }
+      // Which deck each car is on, read straight off the route hint the car
+      // already maintains. That hint IS the car's position on the route --
+      // the same lookup that decides its wall, its off-road test and its
+      // racing line -- so taking the deck from it keeps "which road am I on"
+      // and "which deck am I on" in agreement by construction.
+      //
+      // These used to be two independent hints (a separate _layerHintIndex,
+      // re-derived with its own local search). On a course that never
+      // actually crossed itself they always agreed; on one that does they
+      // can drift apart at the crossing, and then a car can be driving the
+      // ground road while being treated as on the bridge -- i.e. passing
+      // through the other car instead of hitting it.
+      this.syncDeck(p);
       this.rival.update(dt, {
         lap: this.rivalEntry.progress.lap, totalLaps: this.race.totalLaps,
         player: p, gap: this.rivalEntry.progress.total - this.playerEntry.progress.total,
       });
-      // Keep the rival on the same logical deck system as the player.
-      // Same physical route => same deck => normal contact.
-      // Only genuinely stacked roads with different deckIds may pass through.
-      if (this.stageId === 4) {
-        const rhint = this.rival._layerHintIndex ?? 0;
-        const rnear = this.path.nearestNearIndex(
-          this.rival.x, this.rival.y, rhint, 150, null
-        );
-        this.rival._layerHintIndex = rnear.index;
-        const rlayer = this.path.layerAtIndex(rnear.index);
-        this.rival.deckId = rlayer.deckId;
-        this.rival.zLevel = rlayer.zLevel;
-      }
+      // Same for the rival: same route, same rule, so two cars on the same
+      // physical stretch always agree about whether they can touch.
+      this.syncDeck(this.rival);
       // Hull sizes must be in WORLD units (screen size * 1/zoom), matching
       // how the sprites are actually scaled -- passing the raw screen-pixel
       // CAR_SIZE here made every hull ~2.5x too small, so cars could drive
@@ -379,6 +363,33 @@ export class Game {
       autoDrivePostRace(this.rival, this.path, dt, 390, 52);
     }
     this.race.update(dt);
+
+    // Fade the elevated deck road while the player is underneath it, so the
+    // car stays visible where the course crosses over itself. Only the deck
+    // ROAD fades -- its cast shadow and its walls/fascia/piers are separate
+    // layers and stay put, so the bridge keeps a clear outline overhead
+    // instead of vanishing. Eased rather than switched, otherwise the whole
+    // bridge pops the instant the car's nose reaches its edge.
+    if (this._deckGrid && this.elevatedDeck) {
+      const { grid, cell, reach } = this._deckGrid;
+      let under = false;
+      if ((p.zLevel ?? 0) < 2) {
+        const gx = Math.floor(p.x / cell), gy = Math.floor(p.y / cell);
+        const r2 = reach * reach;
+        for (let dy = -1; dy <= 1 && !under; dy++) {
+          for (let dx = -1; dx <= 1 && !under; dx++) {
+            const bucket = grid.get(`${gx + dx},${gy + dy}`);
+            if (!bucket) continue;
+            for (const i of bucket) {
+              const q = this.path.points[i];
+              if ((q[0] - p.x) ** 2 + (q[1] - p.y) ** 2 < r2) { under = true; break; }
+            }
+          }
+        }
+      }
+      const target = under ? 0.42 : 1;
+      this.elevatedDeck.alpha += (target - this.elevatedDeck.alpha) * (1 - Math.exp(-dt * 9));
+    }
 
     // race.update() can flip state to 'finished' just now (checked fresh,
     // since the `state` captured above is from before that call ran)

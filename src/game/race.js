@@ -27,13 +27,23 @@ export class Progress {
     this.lap = 1;
     this.total = -this.startBack; // distance past the start/finish line
     this.lastS = null;
+    this._hint = null;
     this.finished = false;
     this.finishTime = null;
   }
 
   /** Call once per frame with the car's current world position. */
   update(car) {
-    const near = this.path.nearest(car.x, car.y);
+    // Progress-local lookup. On a course that crosses over itself, both
+    // decks share an XY, so a global search can report the crossing's OTHER
+    // pass -- a huge jump in `s`, which the teleport guard below then
+    // discards, silently freezing lap progress at the crossing. The car's
+    // own rolling hint (PlayerCar/RivalCar keep one) is preferred so that
+    // progress and the car's own route agree; anything without one falls
+    // back to this Progress's own hint.
+    const hint = car._routeHint ?? this._hint;
+    const near = this.path.nearestLocal(car.x, car.y, hint, 90, (car.wallHalf ?? 500) * 4);
+    this._hint = near.index;
     const s = near.distance;
     const len = this.path.length;
 
@@ -134,7 +144,11 @@ function hullCircles(car, size) {
  * world-units-per-second convention consistent with normal driving.
  */
 export function autoDrivePostRace(car, path, dt, targetSpeed, laneOffset = 0) {
-  const near = path.nearest(car.x, car.y);
+  // Route lookups here follow the car's own rolling hint for the same
+  // reason the live driving code does -- a crossing would otherwise hand
+  // this the other deck and drive the car off across the course.
+  const near = path.nearestLocal(car.x, car.y, car._routeHint, 90, (car.wallHalf ?? 500) * 4);
+  car._routeHint = near.index;
   const lookAhead = path.offsetPoint(near.index + 10, laneOffset);
   const desired = Math.atan2(lookAhead.y - car.y, lookAhead.x - car.x);
   const diff = Math.atan2(Math.sin(desired - car.angle), Math.cos(desired - car.angle));
@@ -147,7 +161,8 @@ export function autoDrivePostRace(car, path, dt, targetSpeed, laneOffset = 0) {
   car.x += Math.cos(car.angle) * move * dt;
   car.y += Math.sin(car.angle) * move * dt;
 
-  const after = path.nearest(car.x, car.y);
+  const after = path.nearestLocal(car.x, car.y, car._routeHint, 90, (car.wallHalf ?? 500) * 4);
+  car._routeHint = after.index;
   const roadHalf = car.roadHalf ?? near.dist;
   if (after.dist > roadHalf - 30) {
     car.x += (after.x - car.x) * Math.min(1, 2.5 * dt);

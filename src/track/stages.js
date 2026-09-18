@@ -9,6 +9,75 @@ import { PathBuilder } from './path.js';
 
 const SPACING = 26;
 
+/**
+ * Turtle-style course builder: carries exact position and heading, so a
+ * course closes on its start point by construction instead of by
+ * hand-solved trig. Stage 2's switchback grid was generated this way
+ * offline; stage 4's crossing layout needs it inline, because there the
+ * closure AND the crossing point both have to be exact -- a course that
+ * crosses over itself has no margin for a few units of drift at the join.
+ *
+ * Step counts are derived from real distance (matching the ~56-67 world
+ * units per authored point the hand-written stages use) rather than being
+ * passed in, so a corner never silently becomes a polygon after resampling.
+ *
+ * Headings are in degrees, screen-space: 0 = +x (east), +90 = +y (south),
+ * -90 = -y (north). `turn(r, deg)` with a negative angle turns left.
+ */
+class Turtle {
+  constructor(x, y, headingDeg) {
+    this.b = new PathBuilder();
+    this.x = x;
+    this.y = y;
+    this.h = (headingDeg * Math.PI) / 180;
+  }
+
+  /** Straight run of `dist` world units along the current heading. */
+  fwd(dist) {
+    const nx = this.x + Math.cos(this.h) * dist;
+    const ny = this.y + Math.sin(this.h) * dist;
+    this.b.line(this.x, this.y, nx, ny, Math.max(4, Math.round(dist / 67)));
+    this.x = nx;
+    this.y = ny;
+    return this;
+  }
+
+  /**
+   * Straight run with a sine S-bend layered on. The bend fades to zero at
+   * both ends (PathBuilder.wave), so the turtle's end position and heading
+   * are exactly those of a plain fwd() -- an S-curve never affects closure.
+   */
+  waveFwd(dist, amplitude, waves = 1) {
+    const nx = this.x + Math.cos(this.h) * dist;
+    const ny = this.y + Math.sin(this.h) * dist;
+    this.b.wave(this.x, this.y, nx, ny, Math.max(20, Math.round(dist / 67)), amplitude, waves);
+    this.x = nx;
+    this.y = ny;
+    return this;
+  }
+
+  /** Circular turn of `deg` degrees at `radius`; negative turns left. */
+  turn(radius, deg) {
+    const rad = (deg * Math.PI) / 180;
+    const sgn = Math.sign(deg);
+    const centreAngle = this.h + (sgn * Math.PI) / 2;
+    const cx = this.x + Math.cos(centreAngle) * radius;
+    const cy = this.y + Math.sin(centreAngle) * radius;
+    const a0 = Math.atan2(this.y - cy, this.x - cx);
+    const a1 = a0 + rad;
+    const arcLen = Math.abs(rad) * radius;
+    this.b.arc(cx, cy, radius, a0, a1, Math.max(12, Math.round(arcLen / 56)));
+    this.x = cx + Math.cos(a1) * radius;
+    this.y = cy + Math.sin(a1) * radius;
+    this.h += rad;
+    return this;
+  }
+
+  build(spacing) {
+    return this.b.build(spacing);
+  }
+}
+
 export function buildStage1Path() {
   const L = -3400, R = 3400, T = -1500, B = 1500, CR = 520, TOP_MID = 350;
   return new PathBuilder()
@@ -209,42 +278,100 @@ export function buildStage3Path() {
 
 
 /**
- * Stage 4 — metropolitan elevated expressway.
- * A large, fast loop built around long straights, broad 90-degree sweepers
- * and gentle high-speed S bends. The geometry deliberately stays far apart
- * so the very wide elevated deck, barriers and city backdrop never overlap
- * another live section of road.
+ * Stage 4 — metropolitan elevated expressway that crosses over itself.
+ *
+ * Shape: a big outer ring (long straights, 2100-radius sweepers, high-speed
+ * S-bends) with an inner elevated loop threaded through the middle of it.
+ * The route enters that inner loop on an elevated deck, runs it as a raised
+ * ring, comes back down, and then passes UNDER its own entry viaduct on the
+ * way out -- one genuine grade separation, at a right angle, both passes
+ * being live road the player and rival actually drive.
+ *
+ * That crossing is what the deckIds/zLevels metadata on TrackPath exists
+ * for: the two passes share an XY, so everything that asks "where am I on
+ * the route" has to ask locally rather than globally. The earlier layout
+ * only ever marked deck levels along a route that never actually overlapped
+ * itself, so nothing was exercising that. See TrackPath.nearestLocal and
+ * the hint plumbing in PlayerCar/RivalCar/Progress; without those, a car
+ * reaching the crossing snaps onto the other deck's centreline and its
+ * wall, racing line and lap progress all jump to the wrong stretch.
+ *
+ * Built with the Turtle above rather than hand-written coordinates. At a
+ * crossing there is no slack: the loop has to close exactly AND the two
+ * passes have to intersect where intended, and the previous layout's
+ * hand-solved coordinates were already at the limit of what was checkable
+ * by eye. Segment separation is asserted by the course test rather than
+ * trusted -- the road's full visual swath is 2*(roadHalf 360 + bands 104)
+ * = 928 units wide, so any two non-adjacent stretches closer than that
+ * would overlap on screen.
+ *
+ * Turtle log (screen space, +y is south; left turns are negative):
+ *   start (-7900, 6400) heading east
+ *   fwd 5700          south side, west half
+ *   turn L 1000       onto the entry viaduct
+ *   fwd 3000          entry viaduct north  <-- crossed later at y=3400
+ *   turn R 1000       into the inner loop
+ *   fwd 2800 / L / fwd 2000 / L / fwd 5800 / L / fwd 4000 / L
+ *                     inner elevated ring, clockwise on screen
+ *   fwd 3600          exit road east       <-- passes UNDER x=-1200
+ *   turn R 1000 / fwd 1000 / turn L 1000
+ *                     back down onto the south side
+ *   fwd 4100 / turn L 2100
+ *   waveFwd 8600      east side
+ *   turn L 2100
+ *   waveFwd 14400     north side, the long one
+ *   turn L 2100
+ *   waveFwd 8600      west side
+ *   turn L 2100       closes exactly on the start point
  */
 export function buildStage4Path() {
-  // Stage 4 V8: first genuinely drivable elevated section.
-  // One continuous logical route: ground -> ramp -> upper deck -> ramp -> ground.
-  const R = 1850;
-  const path = new PathBuilder()
-    .line(-6200, 5000, -1500, 5000, 70)
-    .wave(-1500, 5000, 5000, 5000, 105, 430, 1)
-    .arc(5000, 3150, R, Math.PI/2, 0, 52)
-    .wave(6850, 3150, 6850, -3150, 105, 390, 1)
-    .arc(5000, -3150, R, 0, -Math.PI/2, 52)
-    .wave(5000, -5000, -1800, -5000, 110, -470, 1)
-    .line(-1800, -5000, -6200, -5000, 68)
-    .arc(-6200, -3150, R, -Math.PI/2, -Math.PI, 52)
-    .wave(-8050, -3150, -8050, 3150, 105, -390, 1)
-    .arc(-6200, 3150, R, Math.PI, Math.PI/2, 52)
+  const R = 2100; // outer sweepers
+  const r = 1000; // inner-loop and ramp corners
+
+  const path = new Turtle(-7900, 6400, 0)
+    .fwd(5700)          // south side, west half
+    .turn(r, -90)       // climb onto the entry viaduct
+    .fwd(3000)          // entry viaduct, northbound  (crossing at y = 3400)
+    .turn(r, 90)        // right, into the inner loop
+    .fwd(2800)          // inner loop, south side
+    .turn(r, -90)
+    .fwd(2000)          // inner loop, east side
+    .turn(r, -90)
+    .fwd(5800)          // inner loop, north side
+    .turn(r, -90)
+    .fwd(4000)          // inner loop, west side
+    .turn(r, -90)
+    .fwd(3600)          // exit road, eastbound  (passes under x = -1200)
+    .turn(r, 90)        // right, back toward the south side
+    .fwd(1000)
+    .turn(r, -90)
+    .fwd(4100)          // south side, east half
+    .turn(R, -90)       // south-east sweeper
+    .waveFwd(8600, 420) // east side
+    .turn(R, -90)       // north-east sweeper
+    .waveFwd(14400, 520, 2) // north side -- the long one
+    .turn(R, -90)       // north-west sweeper
+    .waveFwd(8600, -420)    // west side
+    .turn(R, -90)       // south-west sweeper, closes on the start point
     .build(SPACING);
 
-  // First elevated run is deliberately on the long upper/eastbound side.
-  // 0.06-0.10 = ascent, 0.10-0.24 = upper deck, 0.24-0.28 = descent.
-  path.setLayerRange(0.00,0.06,0,0);
-  path.setLayerRange(0.06,0.10,1,1);
-  path.setLayerRange(0.10,0.24,1,2);
-  path.setLayerRange(0.24,0.28,1,1);
-  path.setLayerRange(0.28,1.00,0,0);
+  // Deck levels. The inner loop is the elevated ring: the route climbs onto
+  // it just before the entry viaduct, stays up for the whole ring, and comes
+  // back down on the last inner corner -- so the exit road is at ground
+  // level by the time it reaches the crossing and passes underneath.
+  // Fractions come from the measured layout (see the course test, which
+  // asserts the crossing falls inside the elevated range on one pass and
+  // the ground range on the other).
+  path.setLayerRange(0.000, 0.066, 0, 0); // ground: south side, west half
+  path.setLayerRange(0.066, 0.086, 1, 1); // ascent onto the viaduct
+  path.setLayerRange(0.086, 0.345, 1, 2); // elevated: viaduct + inner ring
+  path.setLayerRange(0.345, 0.370, 1, 1); // descent off the ring
+  path.setLayerRange(0.370, 1.000, 0, 0); // ground: exit road (under the
+                                          // viaduct) and the whole outer ring
 
-  // Tunnel on the ground-level straight opposite the elevated run (0.641-
-  // 0.729 is the plain .line() segment above, not a wave/arc, so the walls
-  // never have to follow a curve). Kept well inside that straight's own
-  // boundaries so the fade never reaches into the arcs on either side.
-  path.setTunnelRange(0.66, 0.71);
+  // Tunnel on the long north straight, well inside it so neither fade
+  // reaches the sweepers at either end.
+  path.setTunnelRange(0.60, 0.65);
   return path;
 }
 

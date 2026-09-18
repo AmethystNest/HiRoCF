@@ -56,6 +56,43 @@ describe('TrackPath', () => {
     expect(path.wrap(path.count)).toBe(0);
   });
 
+  it('nearestLocal searches around the hint instead of globally', () => {
+    const path = buildSquareLoop();
+    const target = path.points[10];
+
+    // hint already near the point: finds it
+    const near = path.nearestLocal(target[0], target[1], 10, 20, 1e9);
+    expect(Math.abs(near.index - 10)).toBeLessThan(3);
+
+    // hint on the far side of the loop, with the safety valve effectively
+    // off: the search stays where the hint says rather than snapping to the
+    // globally nearest point. This is exactly what keeps a car on its own
+    // deck where a course crosses over itself.
+    const far = Math.floor(path.count / 2);
+    const stayed = path.nearestLocal(target[0], target[1], far, 20, 1e9);
+    expect(Math.abs(stayed.index - far)).toBeLessThanOrEqual(21);
+  });
+
+  it('nearestLocal falls back to a global search when the hint is stale', () => {
+    const path = buildSquareLoop();
+    const target = path.points[10];
+    const far = Math.floor(path.count / 2);
+    // same stale hint, but a realistic maxDist: nothing that far away is
+    // within reach, so it re-acquires the real nearest point
+    const recovered = path.nearestLocal(target[0], target[1], far, 20, 200);
+    expect(Math.abs(recovered.index - 10)).toBeLessThan(3);
+  });
+
+  it('nearestLocal matches nearest() when the hint is current', () => {
+    const path = buildSquareLoop();
+    const x = 500, y = 40;
+    const global = path.nearest(x, y);
+    const local = path.nearestLocal(x, y, global.index, 30, 1e9);
+    expect(local.index).toBe(global.index);
+    expect(local.dist).toBeCloseTo(global.dist, 6);
+    expect(local.distance).toBeCloseTo(global.distance, 6);
+  });
+
   it('setTunnelRange flags a route range independently of deck/zLevel', () => {
     const path = buildSquareLoop();
     path.setLayerRange(0.0, 1.0, 1, 2); // whole loop elevated

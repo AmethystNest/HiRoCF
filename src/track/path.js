@@ -273,7 +273,44 @@ export class TrackPath {
       }
     }
 
-    // refine against the two adjacent segments for a smooth distance value
+    return this._refineNearest(x, y, bestIdx);
+  }
+
+  /**
+   * Same result as nearest(), but the coarse search is limited to `window`
+   * indices either side of `hintIndex`.
+   *
+   * Required on any course that crosses over itself: at a crossing the two
+   * decks share the same XY, so a global search can snap a car onto the
+   * OTHER deck's centreline -- which reads as the wall barrier, the racing
+   * line and lap progress all jumping to a different part of the course
+   * mid-corner. Searching near where the car already was keeps it on its
+   * own stretch of road.
+   *
+   * `maxDist` is a safety valve: if nothing within the window is that
+   * close, the hint has gone stale (a respawn, a teleport, a car shoved
+   * right off the route) and a global search re-acquires the real nearest
+   * point rather than locking the car to a wrong stretch forever. Callers
+   * refresh their own hint from `index` on the returned value.
+   */
+  nearestLocal(x, y, hintIndex, window = 90, maxDist = Infinity) {
+    if (hintIndex == null || !Number.isFinite(hintIndex)) return this.nearest(x, y);
+    const n = this.count;
+    const h = this.wrap(Math.round(hintIndex));
+    const w = Math.max(4, Math.min(Math.floor(n / 2), Math.round(window)));
+    let best = Infinity, bestIdx = h;
+    for (let o = -w; o <= w; o++) {
+      const i = this.wrap(h + o);
+      const p = this.points[i];
+      const d2 = (p[0] - x) ** 2 + (p[1] - y) ** 2;
+      if (d2 < best) { best = d2; bestIdx = i; }
+    }
+    if (best > maxDist * maxDist) return this.nearest(x, y);
+    return this._refineNearest(x, y, bestIdx);
+  }
+
+  /** Refine a coarse nearest-point index against its two adjacent segments. */
+  _refineNearest(x, y, bestIdx) {
     let bx = 0, by = 0, bd2 = Infinity, bt = 0, bi = bestIdx;
     for (const i of [this.wrap(bestIdx - 1), bestIdx]) {
       const a = this.points[i], b = this.points[this.wrap(i + 1)];

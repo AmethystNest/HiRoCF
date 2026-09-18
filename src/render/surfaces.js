@@ -611,6 +611,119 @@ export function buildRampStructure(path, { wallHalf = 355 } = {}) {
 }
 
 /**
+ * Redraws just the fully-elevated stretches of road, on top of everything
+ * already laid down at ground level.
+ *
+ * This is what makes a grade separation actually read as one. buildSurface()
+ * lays the entire route down as single full-loop ribbons, so where the
+ * course crosses over itself both passes live in the same meshes and
+ * whichever triangles happen to come later win -- the bridge and the road
+ * under it interleave. Re-laying the raised run afterwards puts it
+ * unambiguously above the stretch it spans.
+ *
+ * Only the road surface itself (asphalt, wear, edge shading, paint, lane
+ * markings). The raised deck's walls, girder fascia, piers and cast shadow
+ * are buildRampStructure's job and are drawn after this, so they frame the
+ * deck rather than being buried under it.
+ *
+ * Ramp runs (zLevel 1) are deliberately NOT redrawn: a ramp is mid-climb and
+ * should blend into the ground surface it is rising out of, otherwise its
+ * start reads as a step rather than a slope.
+ */
+export function elevatedRuns(path) {
+  const runs = [];
+  let start = -1;
+  for (let i = 0; i < path.count; i++) {
+    const up = path.zLevels[i] >= 2;
+    if (up && start < 0) start = i;
+    else if (!up && start >= 0) { runs.push([start, i - start]); start = -1; }
+  }
+  if (start >= 0) runs.push([start, path.count - start]);
+  return runs;
+}
+
+/**
+ * The elevated deck's cast shadow, as its own layer so it can sit on the
+ * ground surface while the deck road itself (which fades when the player
+ * drives underneath -- see main.js) is drawn separately above it.
+ *
+ * At the crossing this is what darkens the ground-level road passing
+ * beneath; without it the bridge reads as painted onto the road it is
+ * supposed to span. Slightly wider than the carriageway so a sliver shows
+ * past the deck edge, which is what makes the deck stand off the ground
+ * rather than lie on it. buildRampStructure's own cast shadow sits further
+ * out still (from wallHalf outward, about the deck lifting away from the
+ * shoulder), so the two do not overlap.
+ */
+export function buildElevatedDeckShadow(path, { roadHalf = 360 } = {}) {
+  const layer = new Container();
+  layer.label = 'elevated-deck-shadow';
+  for (const [from, span] of elevatedRuns(path)) {
+    layer.addChild(ribbonMesh(path, Texture.WHITE, {
+      innerOffset: -(roadHalf + 46), outerOffset: roadHalf + 46,
+      tint: 0x04060a, alpha: 0.55, fromIndex: from, spanIndices: span,
+    }));
+  }
+  return layer;
+}
+
+export function buildElevatedRoadOverlay(path, tex, { roadHalf = 360, preset = 'highway' } = {}) {
+  const P = SURFACE_PRESETS[preset] || SURFACE_PRESETS.circuit;
+  const layer = new Container();
+  layer.label = 'elevated-road-overlay';
+
+  const runs = elevatedRuns(path);
+  if (!runs.length) return layer;
+
+  for (const [from, span] of runs) {
+    const range = { fromIndex: from, spanIndices: span };
+
+    layer.addChild(ribbonMesh(path, tex[P.asphalt.texture], {
+      innerOffset: -roadHalf, outerOffset: roadHalf,
+      uInner: 0, uOuter: P.asphalt.uRepeat, vPerWorldUnit: P.asphalt.vPer,
+      tint: P.asphalt.tint, ...range,
+    }));
+
+    if (P.ruts) {
+      for (const off of [-P.ruts.offset, P.ruts.offset]) {
+        layer.addChild(ribbonMesh(path, tex.rut_overlay, {
+          innerOffset: off - P.ruts.width / 2, outerOffset: off + P.ruts.width / 2,
+          uInner: 0, uOuter: 1, vPerWorldUnit: P.ruts.vPer, alpha: P.ruts.alpha, ...range,
+        }));
+      }
+    }
+
+    for (const side of [1, -1]) {
+      layer.addChild(ribbonMesh(path, tex.edge_shadow, {
+        innerOffset: side * roadHalf, outerOffset: side * (roadHalf - 110),
+        uInner: 0, uOuter: 1, vPerWorldUnit: 1 / 2048, alpha: 0.9, ...range,
+      }));
+    }
+
+    if (P.edgeLine) {
+      for (const side of [1, -1]) {
+        const inner = side * (roadHalf - P.edgeLine.inset);
+        layer.addChild(ribbonMesh(path, Texture.WHITE, {
+          innerOffset: inner, outerOffset: inner - side * P.edgeLine.width,
+          tint: P.edgeLine.tint, alpha: P.edgeLine.alpha, ...range,
+        }));
+      }
+    }
+
+    if (P.highwayLanes) {
+      for (const off of [-roadHalf / 3, roadHalf / 3]) {
+        layer.addChild(ribbonMesh(path, tex.dash_white, {
+          innerOffset: off - 6, outerOffset: off + 6,
+          uInner: 0, uOuter: 1, vPerWorldUnit: 1 / 165, alpha: 0.94, ...range,
+        }));
+      }
+    }
+  }
+
+  return layer;
+}
+
+/**
  * Per-point tunnel "depth" (0..1), derived from TrackPath's own tunnelFlags:
  * ramps up from 0 over `fadeDist` world units at the start of each tunnel
  * run, holds at 1 through the middle, ramps back down to 0 over the same

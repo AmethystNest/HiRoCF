@@ -40,7 +40,21 @@ export class PlayerCar {
 
     this.speedTarget = 0;
     this.speedTargetTimer = 0;
+    // Rolling centreline index, so route lookups stay on this car's own
+    // stretch of road where the course crosses over itself.
+    this._routeHint = null;
     this.rollSpeedTarget();
+  }
+
+  /**
+   * Nearest centreline point on this car's own stretch of route. Tracked by
+   * a rolling index hint rather than searched globally -- see
+   * TrackPath.nearestLocal for why that matters at a crossing.
+   */
+  nearestOnRoute(x, y) {
+    const n = this.path.nearestLocal(x, y, this._routeHint, 90, this.wallHalf * 4);
+    this._routeHint = n.index;
+    return n;
   }
 
   rollSpeedTarget() {
@@ -54,6 +68,7 @@ export class PlayerCar {
     this.x = s.x + this.path.normals[k * 2] * lateral;
     this.y = s.y + this.path.normals[k * 2 + 1] * lateral;
     this.angle = s.angle;
+    this._routeHint = k;
     this.speed = 0;
     this.boostEnergy = 100;
     this.boosting = false;
@@ -80,7 +95,12 @@ export class PlayerCar {
   }
 
   update(dt, input) {
-    const near = this.path.nearest(this.x, this.y);
+    // Progress-local lookup, not a global one: on a course that crosses over
+    // itself the two decks share an XY, and a global search would snap the
+    // car's "own" centreline (hence its wall, its off-road test and its
+    // racing line) onto whichever deck happens to be marginally closer.
+    // See TrackPath.nearestLocal.
+    const near = this.nearestOnRoute(this.x, this.y);
     const onGrass = near.dist > this.roadHalf;
 
     // --- boost ---
@@ -198,7 +218,7 @@ export class PlayerCar {
     }
 
     // --- barrier: push back in and re-aim rather than hard-stopping ---
-    const after = this.path.nearest(this.x, this.y);
+    const after = this.nearestOnRoute(this.x, this.y);
     const wallTrigger = this.wallHalf + this.wallTriggerExtra;
     if (after.dist > wallTrigger) {
       const dx = this.x - after.x, dy = this.y - after.y;
