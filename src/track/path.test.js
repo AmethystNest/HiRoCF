@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { PathBuilder, TrackPath } from './path.js';
+import { PathBuilder } from './path.js';
 
 function buildSquareLoop() {
   // simple closed square loop, 1000 units per side

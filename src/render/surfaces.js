@@ -559,5 +559,53 @@ export function buildRampStructure(path, { wallHalf = 355 } = {}) {
     }));
   }
 
+  // Rectangular piers at a regular interval, only where the deck is
+  // substantially elevated (height > 0.5) -- a ramp mid-climb doesn't need
+  // its own support shown yet, but a long upper-deck run reads as an
+  // unsupported floating road without them. Offset sits just outside the
+  // girder fascia so a pier never overlaps the bridge structure above it.
+  // Each pier fades in with the same height value used everywhere else
+  // above (no per-vertex alpha on a Graphics fill, so it is baked in per
+  // pier instead of interpolated along its own length -- piers are discrete
+  // objects, not a continuous ribbon, so this reads the same either way).
+  const pierGfx = new Graphics();
+  const pierOffset = wallHalf + 8 + wallReach + girderGap + girderReach + 42;
+  const pierStep = Math.max(1, Math.round(260 / path.spacing));
+  const pierHalfW = 30, pierHalfL = 46;
+  for (let i = 0; i < path.count; i += pierStep) {
+    if (height[i] < 0.5) continue;
+    const alpha = Math.min(1, (height[i] - 0.5) * 2); // fades in over the back half of the climb
+    const px = path.points[i][0], py = path.points[i][1];
+    const nx = path.normals[i * 2], ny = path.normals[i * 2 + 1];
+    const tx = -ny, ty = nx;
+    for (const side of [1, -1]) {
+      const cx = px + nx * side * pierOffset, cy = py + ny * side * pierOffset;
+      // cast shadow, offset toward the road so the pier reads as standing
+      // proud of the ground rather than painted flat onto it
+      pierGfx.poly([
+        cx - tx * pierHalfW - nx * side * pierHalfL + 10, cy - ty * pierHalfW - ny * side * pierHalfL + 14,
+        cx + tx * pierHalfW - nx * side * pierHalfL + 10, cy + ty * pierHalfW - ny * side * pierHalfL + 14,
+        cx + tx * pierHalfW + nx * side * pierHalfL + 10, cy + ty * pierHalfW + ny * side * pierHalfL + 14,
+        cx - tx * pierHalfW + nx * side * pierHalfL + 10, cy - ty * pierHalfW + ny * side * pierHalfL + 14,
+      ]).fill({ color: 0x05080a, alpha: alpha * 0.32 });
+      // dark base
+      pierGfx.poly([
+        cx - tx * pierHalfW - nx * side * pierHalfL, cy - ty * pierHalfW - ny * side * pierHalfL,
+        cx + tx * pierHalfW - nx * side * pierHalfL, cy + ty * pierHalfW - ny * side * pierHalfL,
+        cx + tx * pierHalfW + nx * side * pierHalfL, cy + ty * pierHalfW + ny * side * pierHalfL,
+        cx - tx * pierHalfW + nx * side * pierHalfL, cy - ty * pierHalfW + ny * side * pierHalfL,
+      ]).fill({ color: 0x6f757a, alpha });
+      // brighter face, inset, for a readable top-down sense of a rectangular column
+      const iw = pierHalfW * 0.7, il = pierHalfL * 0.72;
+      pierGfx.poly([
+        cx - tx * iw - nx * side * il, cy - ty * iw - ny * side * il,
+        cx + tx * iw - nx * side * il, cy + ty * iw - ny * side * il,
+        cx + tx * iw + nx * side * il, cy + ty * iw + ny * side * il,
+        cx - tx * iw + nx * side * il, cy - ty * iw + ny * side * il,
+      ]).fill({ color: 0xa9aeb1, alpha });
+    }
+  }
+  layer.addChild(pierGfx);
+
   return layer;
 }

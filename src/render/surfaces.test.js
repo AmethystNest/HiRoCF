@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { PathBuilder } from '../track/path.js';
-import { computeElevationProfile } from './surfaces.js';
+import { computeElevationProfile, buildRampStructure } from './surfaces.js';
 
 function buildLoop() {
   return new PathBuilder()
@@ -44,5 +44,27 @@ describe('computeElevationProfile', () => {
       prev = height[i];
     }
     expect(prev).toBeCloseTo(1, 1);
+  });
+});
+
+describe('buildRampStructure', () => {
+  it('adds nothing (empty layer) for a path that never leaves zLevel 0', () => {
+    const path = buildLoop();
+    const layer = buildRampStructure(path, { wallHalf: 420 });
+    expect(layer.children.length).toBe(0);
+  });
+
+  it('adds ribbon meshes and piers once the path climbs', () => {
+    const path = buildLoop();
+    path.setLayerRange(0.0, 0.1, 0, 0);
+    path.setLayerRange(0.1, 0.2, 1, 1);
+    path.setLayerRange(0.2, 0.6, 1, 2);
+    path.setLayerRange(0.6, 0.7, 1, 1);
+    path.setLayerRange(0.7, 1.0, 0, 0);
+
+    const layer = buildRampStructure(path, { wallHalf: 420 });
+    // 4 ribbon meshes per side (shadow, wall base, wall cap, girder) = 8,
+    // plus one Graphics object holding every pier.
+    expect(layer.children.length).toBe(9);
   });
 });
