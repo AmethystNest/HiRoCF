@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#161a1e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>TOPDOWN RACER</title>
+<style>
+  :root{ --ctrl: clamp(86px, 23vw, 106px); --ctrlWide: clamp(104px, 27vw, 124px); }
+  html,body{margin:0;height:100%;overflow:hidden;background:#161a1e;
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    touch-action:none;-webkit-user-select:none;user-select:none;
+    -webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+  #app{position:fixed;inset:0}
+  #app canvas{display:block;width:100%;height:100%}
+
+  .hud{position:fixed;inset:0;pointer-events:none;color:#fff;font-weight:700;
+    text-shadow:0 2px 5px rgba(0,0,0,.75)}
+  .hud .top{position:absolute;top:max(10px,env(safe-area-inset-top));left:14px;right:14px;
+    display:flex;justify-content:space-between;align-items:flex-start;font-size:14px}
+  .hud .speed{position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + var(--ctrl) + 40px);
+    text-align:center;font-size:22px;letter-spacing:.02em}
+  .hud .speed small{font-size:11px;opacity:.75;margin-left:4px;font-weight:600}
+  .hud .boostWrap{position:absolute;left:50%;transform:translateX(-50%);
+    bottom:calc(env(safe-area-inset-bottom) + var(--ctrl) + 14px);
+    width:min(46vw,200px)}
+  .hud .boostBar{height:7px;border-radius:6px;background:rgba(255,255,255,.16);overflow:hidden}
+  .hud .boostFill{height:100%;width:100%;transform-origin:left center;transform:scaleX(0);
+    background:linear-gradient(90deg,#49b7ff,#8ef0ff)}
+  .hud .boostLabel{font-size:9px;opacity:.7;text-align:center;margin-top:3px;letter-spacing:.1em}
+  .hud .note{position:absolute;left:14px;top:calc(env(safe-area-inset-top) + 46px);
+    font-size:11px;opacity:.5;font-weight:600}
+
+  .controls{position:fixed;left:0;right:0;bottom:0;
+    padding:0 10px calc(env(safe-area-inset-bottom) + 12px);
+    display:flex;justify-content:space-between;pointer-events:none}
+  .controls .side{display:flex;gap:10px;pointer-events:auto}
+  .controls button{width:var(--ctrl);height:var(--ctrl);border:2px solid rgba(255,255,255,.16);border-radius:22px;
+    background:rgba(255,255,255,.14);color:#fff;font-size:clamp(18px,4.9vw,24px);font-weight:900;
+    backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+    transition:transform .06s ease,background .06s ease,border-color .06s ease,box-shadow .06s ease}
+  .controls button:active,.controls button.pressed{
+    transform:scale(.92);
+    background:rgba(255,255,255,.42);
+    border-color:rgba(255,255,255,.72);
+    box-shadow:0 0 0 4px rgba(255,255,255,.10),0 0 22px rgba(255,255,255,.22)
+  }
+  #boost,#brake{width:var(--ctrlWide);font-size:clamp(14px,3.6vw,17px);letter-spacing:.02em}
+  #boost{background:rgba(73,183,255,.24)}
+  #boost.ready{background:rgba(73,183,255,.44)}
+  #boost:active,#boost.pressed{background:rgba(73,183,255,.68);border-color:rgba(143,222,255,.95);box-shadow:0 0 24px rgba(73,183,255,.55)}
+  #brake:active,#brake.pressed{background:rgba(255,112,112,.52);border-color:rgba(255,190,190,.92);box-shadow:0 0 22px rgba(255,92,92,.34)}
+  @media (max-width:390px){
+    :root{ --ctrl: clamp(74px, 21vw, 92px); --ctrlWide: clamp(88px, 24vw, 106px); }
+    .controls{padding:0 8px calc(env(safe-area-inset-bottom) + 10px)}
+    .controls .side{gap:8px}
+  }
+
+  #loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+    color:#9fb0bd;font-size:13px;letter-spacing:.14em;background:#161a1e;z-index:20}
+  #loading.hide{display:none}
+
+  .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+    pointer-events:none;z-index:15;color:#fff;font-weight:800;text-align:center}
+  .overlay[hidden]{display:none}
+
+  #vsCard{background:rgba(10,13,17,.82);border:1px solid rgba(255,255,255,.14);
+    border-radius:20px;padding:26px 34px;backdrop-filter:blur(6px)}
+  #vsCard .stage{font-size:13px;opacity:.7;letter-spacing:.14em;margin-bottom:6px}
+  #vsCard .vs{font-size:15px;color:#ff6a6a;letter-spacing:.2em;margin:10px 0}
+  #vsCard .rival{font-size:26px}
+
+  #startSignal .lampRow{display:flex;gap:14px;justify-content:center;margin-top:10px}
+  #startSignal .lamp{width:26px;height:26px;border-radius:50%;background:#2a1414;
+    border:2px solid rgba(255,255,255,.25)}
+  #startSignal .lamp.on{background:#ff3b30;box-shadow:0 0 18px #ff3b30}
+  #startSignal .lamp.go{background:#3ddc5a;box-shadow:0 0 22px #3ddc5a}
+  #startSignal .label{font-size:13px;letter-spacing:.14em;opacity:.75}
+
+  #finishCard{background:rgba(10,13,17,.9);border:1px solid rgba(255,255,255,.15);
+    border-radius:22px;padding:26px 30px;min-width:240px}
+  #finishCard h2{margin:0 0 10px;font-size:22px;letter-spacing:.06em}
+  #finishCard .place{font-size:52px;font-weight:900;margin:6px 0}
+  #finishCard .rt{opacity:.85;margin-bottom:16px;font-weight:600}
+  #finishCard button{pointer-events:auto;width:100%;height:50px;border-radius:14px;
+    border:none;background:#3a6fe0;color:#fff;font-size:15px;font-weight:800}
+
+  #lapPopup{position:fixed;left:50%;top:26%;transform:translate(-50%,-50%) scale(.82);
+    z-index:16;pointer-events:none;opacity:0;text-align:center;color:#fff;font-weight:900;
+    text-shadow:0 3px 0 rgba(0,0,0,.7),0 0 14px rgba(255,255,255,.35);
+    transition:opacity .18s ease, transform .18s ease}
+  #lapPopup.show{opacity:1;transform:translate(-50%,-50%) scale(1)}
+  #lapPopup .main{font-size:40px;line-height:1}
+  #lapPopup .sub{margin-top:6px;font-size:13px;opacity:.9;letter-spacing:.2em}
+
+  #zoomBtn{
+    position:fixed;left:14px;top:124px;z-index:15;
+    width:auto;min-width:82px;height:38px;padding:0 12px;
+    border:1px solid rgba(255,255,255,.34);border-radius:12px;
+    background:rgba(8,10,16,.58);backdrop-filter:blur(6px);
+    color:#fff;font-size:12px;font-weight:900;letter-spacing:.05em;
+    touch-action:manipulation;-webkit-tap-highlight-color:transparent;
+  }
+  #zoomBtn:active{transform:scale(.96);background:rgba(255,255,255,.18)}
+
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<div class="hud">
+  <div class="top">
+    <div><div id="lap">LAP 1/3</div><div id="pos">POS 2/2</div></div>
+    <div id="time">00:00.000</div>
+  </div>
+  <div class="note" id="note">v2.0 · PIXI RENDER CORE</div>
+  <div class="speed"><span id="speed">0</span><small>km/h</small></div>
+  <div class="boostWrap">
+    <div class="boostBar"><div class="boostFill" id="boostFill"></div></div>
+    <div class="boostLabel">BOOST</div>
+  </div>
+</div>
+
+<div class="controls">
+  <div class="side"><button id="left">◀</button><button id="right">▶</button></div>
+  <div class="side"><button id="brake">BRAKE</button><button id="boost">BOOST</button></div>
+</div>
+<button id="zoomBtn" aria-label="camera zoom">VIEW 1/3</button>
+
+<div id="loading">LOADING…</div>
+
+<div class="overlay" id="vsOverlay" hidden>
+  <div id="vsCard">
+    <div class="stage" id="vsStage">STAGE 1</div>
+    <div class="rival" id="vsRival">悪魔のアイツ</div>
+    <div class="vs">VS</div>
+  </div>
+</div>
+
+<div class="overlay" id="signalOverlay" hidden>
+  <div id="startSignal">
+    <div class="label">GET READY</div>
+    <div class="lampRow">
+      <div class="lamp" id="sig1"></div>
+      <div class="lamp" id="sig2"></div>
+      <div class="lamp" id="sig3"></div>
+    </div>
+  </div>
+</div>
+
+<div id="lapPopup">
+  <div id="lapPopupMain" class="main">LAP 2/3</div>
+  <div id="lapPopupSub" class="sub">CHECKPOINT</div>
+</div>
+
+<div class="overlay" id="finishOverlay" hidden>
+  <div id="finishCard">
+    <h2 id="finishStage">STAGE 1 CLEAR</h2>
+    <div class="place" id="finishPlace">1st</div>
+    <div class="rt" id="finishTime">00:00.000</div>
+    <button id="retryBtn">NEXT STAGE</button>
+  </div>
+</div>
+
+<script type="module">
+(async()=>{
+  const loading=document.getElementById('loading');
+  try {
+    const {boot}=await import('./src/main.js');
+    const el=(id)=>document.getElementById(id);
+    const {game,app}=await boot({stageId:4});
+    loading.classList.add('hide');
+    const zoomBtn=el('zoomBtn');
+    const zoomNames=['VIEW 1/3','VIEW 2/3','VIEW 3/3'];
+    zoomBtn.textContent=zoomNames[game.zoomLevel||0];
+    zoomBtn.addEventListener('pointerdown',e=>{
+      e.preventDefault();
+      const level=game.cycleZoom();
+      zoomBtn.textContent=zoomNames[level];
+    });
+    const bind=(id,key)=>{const b=el(id);const on=e=>{e.preventDefault();game.input[key]=true;b.classList.add('pressed');try{b.setPointerCapture(e.pointerId)}catch{}};const off=e=>{e.preventDefault();game.input[key]=false;b.classList.remove('pressed')};b.addEventListener('pointerdown',on);b.addEventListener('pointerup',off);b.addEventListener('pointercancel',off);b.addEventListener('lostpointercapture',off)};
+    bind('left','left');bind('right','right');bind('brake','brake');
+    const boostControl=el('boost');
+    boostControl.addEventListener('pointerdown',e=>{e.preventDefault();boostControl.classList.add('pressed');game.player.tryBoost();try{boostControl.setPointerCapture(e.pointerId)}catch{}});
+    const releaseBoost=e=>{boostControl.classList.remove('pressed')};
+    boostControl.addEventListener('pointerup',releaseBoost);boostControl.addEventListener('pointercancel',releaseBoost);boostControl.addEventListener('lostpointercapture',releaseBoost);
+    addEventListener('keydown',e=>{if(e.key==='ArrowLeft'||e.key==='a')game.input.left=true;if(e.key==='ArrowRight'||e.key==='d')game.input.right=true;if(e.key==='ArrowDown'||e.key==='s')game.input.brake=true;if(e.key===' ')game.player.tryBoost()});
+    addEventListener('keyup',e=>{if(e.key==='ArrowLeft'||e.key==='a')game.input.left=false;if(e.key==='ArrowRight'||e.key==='d')game.input.right=false;if(e.key==='ArrowDown'||e.key==='s')game.input.brake=false});
+    const speedEl=el('speed'),fillEl=el('boostFill'),boostBtn=el('boost'),lapEl=el('lap'),posEl=el('pos'),timeEl=el('time');
+    const vsOverlay=el('vsOverlay'),vsStage=el('vsStage'),vsRival=el('vsRival'),signalOverlay=el('signalOverlay'),sig1=el('sig1'),sig2=el('sig2'),sig3=el('sig3');
+    const finishOverlay=el('finishOverlay'),finishStage=el('finishStage'),finishPlace=el('finishPlace'),finishTime=el('finishTime'),lapPopup=el('lapPopup'),lapPopupMain=el('lapPopupMain'),lapPopupSub=el('lapPopupSub'),stageBtn=el('retryBtn');
+    const syncStageUI=()=>{
+      vsStage.textContent=game.cfg.name;
+      vsRival.textContent=game.cfg.rivalName;
+      finishStage.textContent=`${game.cfg.name} CLEAR`;
+      stageBtn.textContent=game.stageId<3?'NEXT STAGE':'RETRY STAGE 3';
+      lapEl.textContent=`LAP 1/${game.race?.totalLaps??3}`;
+      posEl.textContent='POS 2/2';
+      timeEl.textContent='00:00.000';
+    };
+    syncStageUI();
+    const fmtTime=s=>{const ms=Math.max(0,Math.floor(s*1000)),m=Math.floor(ms/60000),sec=Math.floor((ms%60000)/1000),cs=ms%1000;return `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}.${String(cs).padStart(3,'0')}`};
+    let shownFinish=false,finishDelay=0,lapPopupTimer=0;
+    const showLapPopup=(lap,total)=>{lapPopupMain.textContent=`LAP ${lap}/${total}`;lapPopupSub.textContent=lap===total?'FINAL LAP':'CHECKPOINT';lapPopup.classList.remove('show');void lapPopup.offsetWidth;lapPopup.classList.add('show');lapPopupTimer=1.45};
+    app.ticker.add(ticker=>{const dt=Math.min(.033,ticker.deltaMS/1000),p=game.player;speedEl.textContent=Math.max(0,Math.round(p.displaySpeed));const gauge=p.boosting?Math.max(0,p.boostTimer/2.45):p.boostEnergy/100;fillEl.style.transform=`scaleX(${gauge})`;boostBtn.classList.toggle('ready',!p.boosting&&p.boostEnergy>=99.5);if(lapPopupTimer>0){lapPopupTimer-=dt;if(lapPopupTimer<=0)lapPopup.classList.remove('show')}const race=game.race;if(!race)return;if(race.lapAnnounce!=null){showLapPopup(race.lapAnnounce,race.totalLaps);race.lapAnnounce=null}const lap=Math.min(game.playerEntry.progress.lap,race.totalLaps);lapEl.textContent=`LAP ${lap}/${race.totalLaps}`;posEl.textContent=`POS ${race.positionOf(game.playerEntry)}/2`;timeEl.textContent=fmtTime(race.time);vsOverlay.hidden=race.state!=='vs';signalOverlay.hidden=race.state!=='countdown';if(race.state==='countdown'){const t=race.countdown;sig1.className='lamp'+(t<2.4?' on':'');sig2.className='lamp'+(t<1.6?' on':'');sig3.className='lamp'+(t<.8?' go':(t<1.6?' on':''))}if(race.state==='finished'&&!shownFinish){finishDelay+=dt;if(finishDelay>=1.9){shownFinish=true;const place=race.positionOf(game.playerEntry);finishPlace.textContent=place===1?'1st':'2nd';finishTime.textContent=fmtTime(game.playerEntry.progress.finishTime??race.time);stageBtn.textContent=(place===1&&game.stageId<3)?'NEXT STAGE':(place===1?'RETRY STAGE 3':'RETRY');finishOverlay.hidden=false}}});
+    stageBtn.addEventListener('pointerdown',e=>{
+      e.preventDefault();
+      shownFinish=false;
+      finishDelay=0;
+      lapPopupTimer=0;
+      lapPopup.classList.remove('show');
+      finishOverlay.hidden=true;
+      const place=game.race?.positionOf(game.playerEntry)??2;
+      const nextStage=(place===1&&game.stageId<3)?game.stageId+1:game.stageId;
+      game.loadStage(nextStage);
+      syncStageUI();
+    });
+    window.__game=game;window.__app=app;
+  } catch(err) {
+    loading.textContent='ERROR: '+(err?.message||err);console.error(err);
+  }
+})();
+</script>
+</body>
+</html>
