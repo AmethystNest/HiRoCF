@@ -404,6 +404,11 @@ export function buildProps(path, sheet, shadowTex, {
       holder.zIndex = 1;
     }
 
+    // Radius used by the per-frame off-screen cull in main.js. Generous on
+    // purpose (the glow circle reaches ~0.95*w past the sprite, and a
+    // rotated prop's corner reaches further than either half-extent), so a
+    // prop pops in well before its edge could enter the view.
+    holder.cullRadius = Math.max(w, h) * 1.2;
     layer.addChild(holder);
     placed.push({ x: p.x, y: p.y, pad });
     return true;

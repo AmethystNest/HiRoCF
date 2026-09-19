@@ -10,7 +10,14 @@ export const PHYSICS = {
   turnLow: 2.95,
   turnHigh: 0.68,
   grassMax: 280,
-  moveScale: 1.48,
+  // World units travelled per unit of `speed`. This is the actual pace of
+  // the game; `hudSpeedFactor` below is only the number on the dial, so the
+  // two are tuned separately (the HUD still reads ~350 at full speed).
+  // Applies to the rival as well -- rival.js reads the same PHYSICS object.
+  // Stage 3 used to override this to 1.70 while every other stage ran 1.48,
+  // which meant the same car covered ground 15% faster on one stage than
+  // the others. One value for every stage now.
+  moveScale: 1.66,
   driftTurnBoost: 1.42,
   driftSlip: 0.50,
   driftMinSpeed: 360,
@@ -73,7 +80,9 @@ export const STAGES = {
     rivalName: '峠の走り屋',
     roadHalf: 190, wallHalf: 260,
     playerPhysics: {
-      moveScale: 1.70,
+      // moveScale is deliberately NOT overridden here any more -- pace is
+      // one value for every stage (see PHYSICS.moveScale). What stays below
+      // is touge-specific handling, not speed.
       driftMinSpeed: 435,
       launchBoostBelow: 300,
       launchBoostMul: 1.28,

@@ -188,6 +188,16 @@ export class Game {
     });
     this.world.addChild(props.layer);
 
+    // Off-screen props are the cheapest draw load to remove: Stage 4 places
+    // 269 of them (two sprites plus, for lights, a glow Graphics each) over
+    // an 89,825-unit lap, and only a handful are ever in shot. Pixi has no
+    // culling on by default, so every one of them was being transformed and
+    // submitted every frame. Flattened to a plain array here because the
+    // check runs per prop per frame.
+    this._propCull = props.layer.children.map((c) => ({
+      node: c, x: c.position.x, y: c.position.y, r: c.cullRadius || 0,
+    }));
+
     // actors sit above the surface
     this.actors = new Container();
     this.actors.label = 'actors';
@@ -436,11 +446,36 @@ export class Game {
     this.world.rotation = -(p.angle + Math.PI / 2);
     this.world.scale.set(this.zoom);
 
+    this.cullProps(p.x, p.y, W, H);
     this.miniMap.update(W, p, this.rival);
     this.updateDriftFX();
     this.boostFlame.update(p, this.worldScale);
     this.rivalBoostFlame.update(this.rival, this.worldScale);
     this.finishFX.update(dt, W, H);
+  }
+
+  /**
+   * Hide props that cannot be on screen this frame.
+   *
+   * The camera rotates with the car, so a screen rectangle is not an
+   * axis-aligned box in world space. Rather than transform each prop, the
+   * test is a radius about the pivot (the player), which is exactly
+   * rotation-invariant: the furthest the view can reach from the pivot is
+   * the distance to the most distant screen corner, converted to world
+   * units. Cheap (one squared distance per prop) and never wrong, at the
+   * cost of keeping a few props alive just outside the corners.
+   */
+  cullProps(px, py, W, H) {
+    if (!this._propCull) return;
+    // pivot sits at (W/2, H*0.62) on screen -- the long reach is upward
+    const reach = Math.hypot(W / 2, H * 0.62) / this.zoom;
+    for (let i = 0; i < this._propCull.length; i++) {
+      const c = this._propCull[i];
+      const lim = reach + c.r;
+      const ox = c.x - px, oy = c.y - py;
+      const vis = ox * ox + oy * oy <= lim * lim;
+      if (c.node.visible !== vis) c.node.visible = vis;
+    }
   }
 
   /**

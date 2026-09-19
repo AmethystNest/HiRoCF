@@ -105,7 +105,8 @@ export const SURFACE_PRESETS = {
     highwayLanes: true,
     elevatedDeck: true,
     concreteWalls: true,
-    paintStart: false,
+    paintStart: false,   // a chequer would read as a racetrack, not a highway
+    startMarker: 'gate', // ...so the lap line is a lit gate instead
     bands: [
       { texture: null, width: 26, tint: 0x5d6267, alpha: 1.0 },
       { texture: null, width: 78, tint: 0x73777a, alpha: 1.0 },
@@ -254,6 +255,58 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
         p1x + nx * half, p1y + ny * half,
         p1x - nx * half, p1y - ny * half,
       ]).fill({ color: 0xffffff, alpha: 0.88 });
+    }
+    layer.addChild(g);
+  }
+
+  // --- start/finish gate (expressway stages) ---
+  // The highway preset paints neither a racing chequer nor a crosswalk, so
+  // until now its start/finish line was completely unmarked -- on a 90k-unit
+  // lap there was nothing at all to tell you where the lap ended. A chequer
+  // would look wrong on an expressway, so this is a gate instead: a bright
+  // band across the carriageway with a lit pylon standing at each shoulder,
+  // which reads at speed and from a distance without pretending to be a
+  // racetrack. Geometry comes straight off the path's own normal/tangent at
+  // distance 0, the same approach as the crosswalk above.
+  if (P.startMarker === 'gate' && wallHalf != null) {
+    const nx = path.normals[0], ny = path.normals[1];
+    const tx = -ny, ty = nx;
+    const cx0 = path.points[0][0], cy0 = path.points[0][1];
+    const g = new Graphics();
+
+    // the line itself: a wide band, plus a thin bright leading edge so it
+    // still registers when crossed at full speed
+    const band = (from, to, color, alpha) => {
+      g.poly([
+        cx0 + tx * from - nx * roadHalf, cy0 + ty * from - ny * roadHalf,
+        cx0 + tx * to - nx * roadHalf, cy0 + ty * to - ny * roadHalf,
+        cx0 + tx * to + nx * roadHalf, cy0 + ty * to + ny * roadHalf,
+        cx0 + tx * from + nx * roadHalf, cy0 + ty * from + ny * roadHalf,
+      ]).fill({ color, alpha });
+    };
+    band(-70, 70, 0xf2f4f5, 0.96);
+    band(-92, -70, 0xffd34d, 0.9);
+    band(70, 92, 0xffd34d, 0.9);
+
+    // lit pylons just outside the barrier on both shoulders
+    for (const side of [1, -1]) {
+      const px = cx0 + nx * side * (wallHalf + 55);
+      const py = cy0 + ny * side * (wallHalf + 55);
+      g.circle(px, py, 150).fill({ color: 0xffd34d, alpha: 0.12 });
+      g.circle(px, py, 78).fill({ color: 0xffd34d, alpha: 0.2 });
+      const hw = 34, hl = 78;
+      g.poly([
+        px - tx * hw - nx * side * hl, py - ty * hw - ny * side * hl,
+        px + tx * hw - nx * side * hl, py + ty * hw - ny * side * hl,
+        px + tx * hw + nx * side * hl, py + ty * hw + ny * side * hl,
+        px - tx * hw + nx * side * hl, py - ty * hw + ny * side * hl,
+      ]).fill({ color: 0x2b2f33, alpha: 1 });
+      g.poly([
+        px - tx * (hw - 10) - nx * side * (hl - 18), py - ty * (hw - 10) - ny * side * (hl - 18),
+        px + tx * (hw - 10) - nx * side * (hl - 18), py + ty * (hw - 10) - ny * side * (hl - 18),
+        px + tx * (hw - 10) + nx * side * (hl - 18), py + ty * (hw - 10) + ny * side * (hl - 18),
+        px - tx * (hw - 10) + nx * side * (hl - 18), py - ty * (hw - 10) + ny * side * (hl - 18),
+      ]).fill({ color: 0xffd34d, alpha: 0.95 });
     }
     layer.addChild(g);
   }
@@ -517,13 +570,18 @@ export function buildRampStructure(path, { wallHalf = 355 } = {}) {
   const shadowFar = 78;   // extra outward slide of the shadow at full height
   const shadowWidth = 60; // shadow band width (scales with height like the rest)
 
-  for (const side of [1, -1]) {
+  // Only the stretches that actually have height; elsewhere these ribbons
+  // were zero-width but still cost a vertex pair per point of the lap.
+  const runs = activeRuns(path, (i) => height[i] > 0.001) ?? [[0, path.count]];
+
+  for (const side of [1, -1]) for (const [from, span] of runs) {
+    const range = { fromIndex: from, spanIndices: span };
     // cast shadow: slides outward and widens as the deck climbs, reading as
     // the structure lifting away from the ground plane underneath it.
     layer.addChild(ribbonMesh(path, Texture.WHITE, {
       innerOffset: (k) => side * (wallHalf + shadowNear + height[k] * shadowFar),
       outerOffset: (k) => side * (wallHalf + shadowNear + height[k] * (shadowFar + shadowWidth)),
-      tint: 0x020304, alpha: 0.78,
+      tint: 0x020304, alpha: 0.78, ...range,
     }));
 
     // retaining wall: dark base then a bright concrete cap, both widening
@@ -538,12 +596,12 @@ export function buildRampStructure(path, { wallHalf = 355 } = {}) {
     layer.addChild(ribbonMesh(path, Texture.WHITE, {
       innerOffset: side * (wallHalf + 8),
       outerOffset: (k) => side * (wallHalf + 8 + height[k] * wallReach),
-      tint: 0x767d84, alpha: 1,
+      tint: 0x767d84, alpha: 1, ...range,
     }));
     layer.addChild(ribbonMesh(path, Texture.WHITE, {
       innerOffset: side * (wallHalf + 8),
       outerOffset: (k) => side * (wallHalf + 8 + height[k] * wallReach * 0.42),
-      tint: 0xf0f2f2, alpha: 1,
+      tint: 0xf0f2f2, alpha: 1, ...range,
     }));
 
     // girder fascia: a second, darker band just outside the wall, only
@@ -555,7 +613,7 @@ export function buildRampStructure(path, { wallHalf = 355 } = {}) {
     layer.addChild(ribbonMesh(path, Texture.WHITE, {
       innerOffset: (k) => side * (wallHalf + 8 + height[k] * (wallReach + girderGap)),
       outerOffset: (k) => side * (wallHalf + 8 + height[k] * (wallReach + girderGap + girderReach)),
-      tint: 0x0e1012, alpha: 1,
+      tint: 0x0e1012, alpha: 1, ...range,
     }));
   }
 
@@ -630,16 +688,51 @@ export function buildRampStructure(path, { wallHalf = 355 } = {}) {
  * should blend into the ground surface it is rising out of, otherwise its
  * start reads as a step rather than a slope.
  */
-export function elevatedRuns(path) {
-  const runs = [];
+/**
+ * Contiguous [from, span] runs where `active(i)` holds, padded by `pad`
+ * points at each end and merged if the padding makes them touch.
+ *
+ * Structures that only exist along part of the route (ramp walls, tunnel
+ * walls, the raised deck) used to be drawn as full-loop ribbons whose width
+ * collapsed to zero everywhere they were absent. That renders correctly but
+ * pays for a vertex pair at every point of the entire lap for a structure
+ * covering a fraction of it -- on the 3455-point course, the tunnel's four
+ * wall ribbons alone carried ~27k vertices to show 5% of a lap. Restricting
+ * each ribbon to the span it actually occupies is the same picture for a
+ * fraction of the geometry.
+ *
+ * The padding matters: a run's ribbon still has to start and end at zero
+ * width, or the structure begins with a visible step instead of growing out
+ * of the shoulder.
+ */
+function activeRuns(path, active, pad = 2) {
+  const n = path.count;
+  const raw = [];
   let start = -1;
-  for (let i = 0; i < path.count; i++) {
-    const up = path.zLevels[i] >= 2;
-    if (up && start < 0) start = i;
-    else if (!up && start >= 0) { runs.push([start, i - start]); start = -1; }
+  for (let i = 0; i < n; i++) {
+    const on = active(i);
+    if (on && start < 0) start = i;
+    else if (!on && start >= 0) { raw.push([start, i - 1]); start = -1; }
   }
-  if (start >= 0) runs.push([start, path.count - start]);
-  return runs;
+  if (start >= 0) raw.push([start, n - 1]);
+  if (!raw.length) return [];
+
+  // pad, clamp to the loop, then merge anything that now overlaps
+  const padded = raw.map(([a, b]) => [Math.max(0, a - pad), Math.min(n - 1, b + pad)]);
+  const merged = [padded[0]];
+  for (let i = 1; i < padded.length; i++) {
+    const last = merged[merged.length - 1];
+    if (padded[i][0] <= last[1] + 1) last[1] = Math.max(last[1], padded[i][1]);
+    else merged.push(padded[i]);
+  }
+  // a run covering effectively the whole loop is better drawn as a full loop
+  if (merged.length === 1 && merged[0][0] === 0 && merged[0][1] >= n - 2) return null;
+  return merged.map(([a, b]) => [a, b - a + 1]);
+}
+
+export function elevatedRuns(path) {
+  const runs = activeRuns(path, (i) => path.zLevels[i] >= 2, 0);
+  return runs === null ? [[0, path.count]] : runs;
 }
 
 /**
@@ -774,24 +867,28 @@ export function buildTunnelStructure(path, { roadHalf = 300, wallHalf = 355 } = 
   const layer = new Container();
   layer.label = 'tunnel';
   const depth = computeTunnelDepth(path);
-  let any = false;
-  for (let i = 0; i < depth.length; i++) { if (depth[i] > 0.001) { any = true; break; } }
-  if (!any) return layer;
+  const runs = activeRuns(path, (i) => depth[i] > 0.001);
+  // no tunnel on this stage at all, or (null) one covering the whole loop
+  if (runs !== null && runs.length === 0) return layer;
+  const spans = runs ?? [[0, path.count]];
 
   const wallReach = 30;
 
   // side walls: solid, well-lit concrete, widening from zero with depth --
-  // same zero-width-when-absent trick as buildRampStructure.
-  for (const side of [1, -1]) {
+  // same zero-width-when-absent trick as buildRampStructure. Drawn only
+  // over the spans the tunnel actually occupies; a full-loop ribbon here
+  // spent ~6900 vertices per side to show a few per cent of a lap.
+  for (const side of [1, -1]) for (const [from, span] of spans) {
+    const range = { fromIndex: from, spanIndices: span };
     layer.addChild(ribbonMesh(path, Texture.WHITE, {
       innerOffset: side * (roadHalf + 6),
       outerOffset: (k) => side * (roadHalf + 6 + depth[k] * wallReach),
-      tint: 0x54585c, alpha: 1,
+      tint: 0x54585c, alpha: 1, ...range,
     }));
     layer.addChild(ribbonMesh(path, Texture.WHITE, {
       innerOffset: side * (roadHalf + 6),
       outerOffset: (k) => side * (roadHalf + 6 + depth[k] * wallReach * 0.3),
-      tint: 0x2b2e31, alpha: 1,
+      tint: 0x2b2e31, alpha: 1, ...range,
     }));
   }
 
@@ -801,7 +898,7 @@ export function buildTunnelStructure(path, { roadHalf = 300, wallHalf = 355 } = 
   const overlay = new Graphics();
   const overlayStep = Math.max(1, Math.round(40 / path.spacing));
   const overlayHalf = wallHalf + wallReach + 20;
-  for (let i = 0; i < path.count; i += overlayStep) {
+  for (const [from, span] of spans) for (let i = from; i < from + span; i += overlayStep) {
     if (depth[i] < 0.02) continue;
     const j = Math.min(path.count - 1, i + overlayStep);
     const a = path.points[i], b = path.points[j];
@@ -821,7 +918,7 @@ export function buildTunnelStructure(path, { roadHalf = 300, wallHalf = 355 } = 
   // float at the mouth before the walls/overlay have caught up.
   const lights = new Graphics();
   const lightStep = Math.max(1, Math.round(140 / path.spacing));
-  for (let i = 0; i < path.count; i += lightStep) {
+  for (const [from, span] of spans) for (let i = from; i < from + span; i += lightStep) {
     if (depth[i] < 0.6) continue;
     const p = path.points[i];
     const a = Math.min(1, (depth[i] - 0.6) / 0.4);
