@@ -25,8 +25,15 @@ const SPACING = 26;
  * -90 = -y (north). `turn(r, deg)` with a negative angle turns left.
  */
 class Turtle {
-  constructor(x, y, headingDeg) {
-    this.b = new PathBuilder();
+  /**
+   * `dry` walks the same ops for their end position and heading alone,
+   * emitting no points. That is what lets a layout with unknown lengths in
+   * it be SOLVED for closure at build time (see buildStage3Path) instead of
+   * carrying hand-fitted constants that silently stop closing the moment a
+   * leg length is edited.
+   */
+  constructor(x, y, headingDeg, dry = false) {
+    this.b = dry ? null : new PathBuilder();
     this.x = x;
     this.y = y;
     this.h = (headingDeg * Math.PI) / 180;
@@ -36,7 +43,7 @@ class Turtle {
   fwd(dist) {
     const nx = this.x + Math.cos(this.h) * dist;
     const ny = this.y + Math.sin(this.h) * dist;
-    this.b.line(this.x, this.y, nx, ny, Math.max(4, Math.round(dist / 67)));
+    if (this.b) this.b.line(this.x, this.y, nx, ny, Math.max(4, Math.round(dist / 67)));
     this.x = nx;
     this.y = ny;
     return this;
@@ -50,7 +57,7 @@ class Turtle {
   waveFwd(dist, amplitude, waves = 1) {
     const nx = this.x + Math.cos(this.h) * dist;
     const ny = this.y + Math.sin(this.h) * dist;
-    this.b.wave(this.x, this.y, nx, ny, Math.max(20, Math.round(dist / 67)), amplitude, waves);
+    if (this.b) this.b.wave(this.x, this.y, nx, ny, Math.max(20, Math.round(dist / 67)), amplitude, waves);
     this.x = nx;
     this.y = ny;
     return this;
@@ -66,7 +73,7 @@ class Turtle {
     const a0 = Math.atan2(this.y - cy, this.x - cx);
     const a1 = a0 + rad;
     const arcLen = Math.abs(rad) * radius;
-    this.b.arc(cx, cy, radius, a0, a1, Math.max(12, Math.round(arcLen / 56)));
+    if (this.b) this.b.arc(cx, cy, radius, a0, a1, Math.max(12, Math.round(arcLen / 56)));
     this.x = cx + Math.cos(a1) * radius;
     this.y = cy + Math.sin(a1) * radius;
     this.h += rad;
@@ -153,127 +160,154 @@ export function buildStage2Path() {
 }
 
 /**
- * Touge pass: a serpentine backbone, not a peripheral ring around an empty
- * middle (that was the first version of this course -- it read fine on
- * the minimap but left the whole interior of the loop unused). Four
- * S-curved "shelves" run alternately east and west, each one flipped into
- * the next by a single 180deg hairpin turn (not the self-contained
- * detour-and-restore hairpin stage 2 uses -- here every connector must
- * flip the heading, since that's what makes consecutive shelves run
- * opposite directions and climb together instead of doubling back over
- * themselves), so the road itself occupies the area a ring course would
- * have left empty in the middle. A return spine -- two big sweeping
- * corners around a short straight -- brings it back to the start along
- * one edge, well clear of the shelf stack's own footprint.
+ * Stage 3 -- a genuine mountain pass: a switchback climb, a ridge, a
+ * hairpin descent and the valley road home.
  *
- * Each shelf's S-curve is a TRUE symmetric weave: forward legs alternate
- * equally between +bend and -bend heading, so the lateral push cancels
- * exactly. An earlier version only ever drove at heading 0 or +bend
- * (never -bend) -- net heading still came back to 0, but every forward
- * leg's perpendicular component pushed the same direction, so each shelf
- * silently drifted ~1400 units off its nominal line, which is what caused
- * a self-intersection no amount of corner-radius or buffer tuning could
- * fix, because the drift itself was the actual bug.
+ * The layout this replaces was a boustrophedon of gentle S-waves joined by
+ * 1000-radius U-turns. Nothing in it was tighter than ~520 radius, and at
+ * this car's steering rates a 1000-radius corner is taken flat at ~590
+ * speed -- so the "touge" had no corner the player ever had to brake for,
+ * and the rival's drift, which only arms on a sustained corner, had almost
+ * nothing to arm on. It read as a wide serpentine test track.
  *
- * Generated and validated offline the same way as the rest of this
- * session's courses -- every corner/hairpin radius checked against
- * roadHalf + the mountain preset's band width, and no two non-adjacent
- * stretches of the loop allowed closer than the road's full visual swath
- * -- EXCEPT the very first pass at this validator had a real bug: its
- * spatial grid used a 300-unit cell with a 3x3 neighbour search, which
- * only reliably finds conflicts up to a few hundred units apart, nowhere
- * near the ~898-unit MIN_SEP it was supposed to be checking against. It
- * reported this course clear when it measurably wasn't, which is exactly
- * what let the guardrail ribbon visibly cross itself at more than one
- * hairpin. Fixed by sizing the grid cell to MIN_SEP itself (provably
- * sufficient for a 3x3 search to catch every pair within that distance),
- * which is what should have been done from the start rather than a
- * plausible-looking magic number. Re-run against the corrected check,
- * this course's shelf pitch (2x HP) had to grow again, from 1560 all the
- * way to 2000, and the return spine's radius from 1500 to 1800, before
- * every stretch actually cleared -- both were swept automatically over a
- * range of candidates rather than hand-tuned, picking the smallest-area
- * option that came back fully clear.
+ * What makes this one a pass instead:
  *
- * The start/finish point is exactly where shelf 1 begins, not padded
- * further out with its own straight first: the return spine's two same-
- * sign 90deg turns cancel their own X contribution exactly regardless of
- * radius, so they always land back at shelf 1's own start point, not
- * anywhere further away -- padding the nominal start out past that left a
- * gap only closeable by reversing back through it, which showed up as a
- * sharp cusp in the road right before the finish line. The closing
- * segment is a plain few-unit straight because of that, not a mistake.
+ * - Eight switchback hairpins (six climbing, two on the descent) with
+ *   apexes of 330-450 radius. Those numbers come from the car, not from
+ *   taste: the player's turn rate gives a grip radius of ~394 at speed 400
+ *   and ~647 at 500, and a drift (driftMinSpeed 435 on this stage) tightens
+ *   it to ~330 at 435. So a 330-390 apex is exactly the corner you have to
+ *   brake to ~400 for, and can drift through if you commit -- which is the
+ *   whole point of the stage.
+ *
+ * - Each hairpin is a COMPOUND corner (see `hairpin` below), not a single
+ *   180 arc between two parallel straights. Two reasons, both structural.
+ *   The angled entry and exit add their own perpendicular travel, so a 330
+ *   apex still leaves ~1050 units between the two legs -- a plain 180 arc
+ *   would need a 525 radius for the same spacing, which is no longer a
+ *   hairpin. And every piece of it turns the same way with no straight in
+ *   between, so the rival's long-curve detector (getLongCurveRamp in
+ *   rival.js groups runs of same-signed turning and drops runs shorter than
+ *   longCurveMinLen) reads one ~2000-unit corner rather than three short
+ *   runs that each fail the test -- with straight legs the AI neither leans
+ *   onto its line nor drifts at the hairpins at all.
+ *
+ * - One long valley straight home (~5300 units, kinked once so it reads as
+ *   a road rather than a runway) so there is somewhere to spend the boost
+ *   and somewhere to overtake.
+ *
+ * Closure is SOLVED at build time, not fitted by hand. Two of the lengths
+ * (`A`, a due-south straight in the descent, and `B`, the due-west valley
+ * road) are left free; every other op is fixed. The end position is affine
+ * in both and the two are perpendicular, so walking the layout dry three
+ * times gives a 2x2 system whose solution closes the loop exactly. Edit any
+ * other leg and the two free lengths re-solve themselves -- the version of
+ * this stage that this replaces carried hand-fitted constants, plus a
+ * comment recording how many times they had to be re-swept by hand after
+ * each change.
+ *
+ * Geometry is verified in stages.test.js rather than trusted: the loop
+ * closes, no two stretches of road further apart along the route than one
+ * corner complex come closer than the road's full visual swath
+ * (2 * (roadHalf 190 + mountain bands 184) = 748), and the tightest radius
+ * anywhere on the built path stays inside what the car can drive.
  */
-export function buildStage3Path() {
-  const CR = 520;  // safe margin over roadHalf(190) + mountain bands(184) = 374
-  const HP = 1000;  // shelf-to-shelf hairpin radius (lane pitch = 2*HP = 2000)
-  const BIG = 1800; // return-spine sweepers -- see comment above
 
-  return new PathBuilder()
-    .arc(-700, 3520, CR, -1.571, -0.908, 7)
-    .line(-380, 3110, -65, 3356, 7)
-    .arc(255, 2947, CR, 2.234, 0.908, 14)
-    .line(576, 3356, 891, 3110, 7)
-    .arc(1211, 3520, CR, -2.234, -0.908, 14)
-    .line(1531, 3110, 1846, 3356, 7)
-    .arc(2166, 2947, CR, 2.234, 0.908, 14)
-    .line(2487, 3356, 2802, 3110, 7)
-    .arc(3122, 3520, CR, -2.234, -0.908, 14)
-    .line(3442, 3110, 3757, 3356, 7)
-    .arc(4077, 2947, CR, 2.234, 0.908, 14)
-    .line(4398, 3356, 4713, 3110, 7)
-    .arc(5033, 3520, CR, -2.234, -1.571, 7)
-    .line(5033, 3000, 5333, 3000, 5)
-    .arc(5333, 4000, HP, -1.571, 1.571, 63)
-    .arc(5333, 4480, CR, 1.571, 2.269, 7)
-    .line(4999, 4878, 4692, 4621, 7)
-    .arc(4358, 5020, CR, -0.873, -2.269, 15)
-    .line(4024, 4621, 3717, 4878, 7)
-    .arc(3383, 4480, CR, 0.873, 2.269, 15)
-    .line(3049, 4878, 2742, 4621, 7)
-    .arc(2408, 5020, CR, -0.873, -2.269, 15)
-    .line(2074, 4621, 1768, 4878, 7)
-    .arc(1433, 4480, CR, 0.873, 2.269, 15)
-    .line(1099, 4878, 793, 4621, 7)
-    .arc(458, 5020, CR, -0.873, -2.269, 15)
-    .line(124, 4621, -182, 4878, 7)
-    .arc(-517, 4480, CR, 0.873, 1.571, 7)
-    .line(-517, 5000, -817, 5000, 5)
-    .arc(-817, 6000, HP, -1.571, -4.712, 63)
-    .arc(-817, 7520, CR, -1.571, -0.908, 7)
-    .line(-496, 7110, -181, 7356, 7)
-    .arc(139, 6947, CR, 2.234, 0.908, 14)
-    .line(459, 7356, 774, 7110, 7)
-    .arc(1094, 7520, CR, -2.234, -0.908, 14)
-    .line(1415, 7110, 1730, 7356, 7)
-    .arc(2050, 6947, CR, 2.234, 0.908, 14)
-    .line(2370, 7356, 2685, 7110, 7)
-    .arc(3005, 7520, CR, -2.234, -0.908, 14)
-    .line(3326, 7110, 3641, 7356, 7)
-    .arc(3961, 6947, CR, 2.234, 0.908, 14)
-    .line(4281, 7356, 4596, 7110, 7)
-    .arc(4916, 7520, CR, -2.234, -1.571, 7)
-    .line(4916, 7000, 5216, 7000, 5)
-    .arc(5216, 8000, HP, -1.571, 1.571, 63)
-    .arc(5216, 8480, CR, 1.571, 2.304, 8)
-    .line(4868, 8866, 4571, 8599, 7)
-    .arc(4223, 8985, CR, -0.838, -2.304, 15)
-    .line(3875, 8599, 3578, 8866, 7)
-    .arc(3230, 8480, CR, 0.838, 2.304, 15)
-    .line(2882, 8866, 2585, 8599, 7)
-    .arc(2237, 8985, CR, -0.838, -2.304, 15)
-    .line(1889, 8599, 1592, 8866, 7)
-    .arc(1244, 8480, CR, 0.838, 2.304, 15)
-    .line(896, 8866, 599, 8599, 7)
-    .arc(251, 8985, CR, -0.838, -2.304, 15)
-    .line(-97, 8599, -395, 8866, 7)
-    .arc(-743, 8480, CR, 0.838, 1.571, 8)
-    .line(-743, 9000, -1043, 9000, 5)
-    .arc(-1043, 7200, BIG, 1.571, 3.142, 57)
-    .line(-2843, 7200, -2843, 4800, 40)
-    .arc(-1043, 4800, BIG, 3.142, 4.712, 57)
-    .line(-1043, 3000, -700, 3000, 6)
-    .build(SPACING);
+/**
+ * One switchback: a tight apex reached through a curved entry and exit
+ * rather than off a straight. `entryDeg` and `approachDeg` are each applied
+ * twice (in and out), so the apex itself turns 180 - 2*entryDeg -
+ * 2*approachDeg and the whole compound still reverses the heading exactly.
+ *
+ * The `approach` arc is deliberately huge (3000 radius) and shallow: it is
+ * the "straight" part of the corner, but drawn as a bend so the run of
+ * same-signed turning is never broken -- see the note above about the
+ * rival's corner detection.
+ */
+function hairpin(t, sign, { apex, entry = 600, entryDeg = 20, approach = 3000, approachDeg = 8 }) {
+  const apexDeg = 180 - 2 * entryDeg - 2 * approachDeg;
+  t.turn(entry, sign * entryDeg);
+  t.turn(approach, sign * approachDeg);
+  t.turn(apex, sign * apexDeg);
+  t.turn(approach, sign * approachDeg);
+  t.turn(entry, sign * entryDeg);
+  return t;
+}
+
+// How far south of the start straight the valley road runs home. The
+// closing hairpin's radius is exactly half of it, so that hairpin lands the
+// route back on y = 0 and the run-in to the start line is dead straight.
+const S3_VALLEY_DROP = 1250;
+// Straight still behind index 0 when the grid is laid out, so the start is
+// never on a corner.
+const S3_RUN_IN = 900;
+
+function stage3Layout(A, B, dry) {
+  const t = new Turtle(0, 0, 0, dry);
+  const L = -1, R = 1;
+
+  // valley: the start/finish straight along the foot of the pass
+  t.fwd(2500);
+
+  // the climb: six switchbacks, alternating. An even count matters -- each
+  // hairpin reverses the heading, so an odd number would leave the summit
+  // pointing back down the mountain.
+  hairpin(t, L, { apex: 360 });               t.fwd(1250);
+  hairpin(t, R, { apex: 330, entryDeg: 24 }); t.fwd(900);
+  hairpin(t, L, { apex: 390, entryDeg: 17 }); t.waveFwd(1750, 90);
+  hairpin(t, R, { apex: 345 });               t.fwd(1000);
+  hairpin(t, L, { apex: 370, entryDeg: 22 }); t.fwd(1450);
+  hairpin(t, R, { apex: 335 });               t.fwd(1300);
+
+  // summit ridge: over the crest and round onto the east face
+  t.turn(820, -32); t.fwd(1250);
+  t.turn(760, 32);  t.fwd(1100);
+  t.turn(900, 90);                            // now heading south
+
+  // descent: faster and flowing, with two switchbacks of its own.
+  // Wave amplitudes are held down deliberately: a sine bend's own radius is
+  // roughly (length / 2pi)^2 / amplitude, so 240 over 1500 units would be a
+  // 240-radius flick -- tighter than any hairpin on the stage -- hiding
+  // inside what reads on the map as a fast sweep. At 60 over 1500 it is a
+  // ~950-radius bend, comfortably wider than the 800-1050 corners it sits
+  // between. stages.test.js counts the sub-470 corners for exactly this
+  // reason: a wave that goes tight shows up as a ninth hairpin.
+  t.waveFwd(1500, 60);
+  hairpin(t, L, { apex: 420, entryDeg: 16, entry: 700 });
+  t.fwd(1150);
+  hairpin(t, R, { apex: 450, entryDeg: 14, entry: 750 });
+  t.fwd(A);                                   // FREE #1 -- due south
+  t.turn(950, -48); t.fwd(1100);
+  t.turn(1050, 48);
+  t.waveFwd(1300, 45);
+  t.turn(800, 90);                            // now heading west
+
+  // the valley road home: the one long straight, kinked once near its east
+  // end so it reads as a valley road, and so the rest of it clears the
+  // start straight it runs parallel to
+  t.fwd(B * 0.26);                            // FREE #2 -- due west
+  t.turn(1500, -20); t.fwd(700); t.turn(1500, 20);
+  t.fwd(B * 0.74);
+
+  if (dry) return t;
+  t.turn(S3_VALLEY_DROP / 2, 180);            // closing hairpin onto the start
+  t.fwd(S3_RUN_IN);                           // run-in to the start line
+  return t;
+}
+
+export function buildStage3Path() {
+  // Solve the two free lengths so the pre-closing point lands exactly where
+  // the closing hairpin needs it: S3_VALLEY_DROP south of the start line and
+  // S3_RUN_IN west of it, heading west.
+  const at = (a, b) => stage3Layout(a, b, true);
+  const p00 = at(0, 0), p10 = at(1000, 0), p01 = at(0, 1000);
+  const ax = (p10.x - p00.x) / 1000, ay = (p10.y - p00.y) / 1000;
+  const bx = (p01.x - p00.x) / 1000, by = (p01.y - p00.y) / 1000;
+  const det = ax * by - ay * bx;
+  const tx = -S3_RUN_IN - p00.x, ty = S3_VALLEY_DROP - p00.y;
+  const A = (tx * by - ty * bx) / det;
+  const B = (ax * ty - ay * tx) / det;
+  return stage3Layout(A, B, false).build(SPACING);
 }
 
 

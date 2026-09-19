@@ -144,10 +144,10 @@ export const LAYOUTS = {
 
   3: {
     // Touge pass -- see buildStage3Path in track/stages.js for the shape
-    // (four -90deg corners, two of them a big sweeping radius, with three
-    // hairpins and two dense S-curve sections along the straights). One
-    // theme ('touge': guardrail hugging the shoulder, pine forest and
-    // rockface behind it) for the whole lap is enough here -- unlike
+    // (a switchback climb of six hairpins, a ridge, two more hairpins down
+    // the east face, and the valley road home). One theme ('touge':
+    // guardrail hugging the shoulder, pine forest and rockface behind it)
+    // for the whole lap is enough here -- unlike
     // stage 2's city grid, a mountain road doesn't need hand-placed
     // landmarks to read as a real place, and buildProps()'s own
     // reachability guard already keeps every scattered prop clear of the

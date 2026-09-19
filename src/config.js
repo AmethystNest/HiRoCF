@@ -75,15 +75,22 @@ export const STAGES = {
   },
   3: {
     id: 3, name: 'STAGE 3', shortDesc: 'MOUNTAIN PASS',
-    courseName: 'COURSE · TOUGE PASS',
-    courseDesc: 'HAIRPINS / GUARDRAILS / ELEVATION CHANGE',
+    courseName: 'COURSE · IROHA SWITCHBACKS',
+    courseDesc: '8 HAIRPINS / SWITCHBACK CLIMB / VALLEY STRAIGHT',
     rivalName: '峠の走り屋',
     roadHalf: 190, wallHalf: 260,
     playerPhysics: {
       // moveScale is deliberately NOT overridden here any more -- pace is
       // one value for every stage (see PHYSICS.moveScale). What stays below
       // is touge-specific handling, not speed.
-      driftMinSpeed: 435,
+      // Lowered from 435 with the switchback course. A drift latches while
+      // BRAKE and steering are held above this speed and drops the moment
+      // speed falls back under it -- and the new hairpins are taken at
+      // ~400-450, so at 435 the slide broke exactly at the apex of every
+      // one of them. The stage is built around drifting those corners, so
+      // the threshold has to sit under the speed they are actually taken
+      // at. 400 still leaves a drift impossible to hold at walking pace.
+      driftMinSpeed: 400,
       launchBoostBelow: 300,
       launchBoostMul: 1.28,
       accelScaleMin: 0.18,
@@ -92,7 +99,31 @@ export const STAGES = {
       wallSpeedMul: 0.78,
       wallInset: 4,
     },
-    rival: { maxSpeed: 715, accel: 210, turn: 3.35, sprite: 'ae86', drift: 0.88, driftVisualBoost: 0.45, block: false, cornerSlow: 0.07, raceLine: true, driftDelay: 4.0, bigCurveEdgeAttack: true, noBigCurveSlow: true },
+    // Retuned for the switchback course (see buildStage3Path). The previous
+    // values were built around a layout whose tightest corner was ~520
+    // radius, where nothing the AI did was ever tested: cornerSlow 0.07
+    // meant it barely lifted, and noBigCurveSlow made it carry FULL speed
+    // through anything its long-curve detector called a big corner -- which
+    // also switched off the speed penalty in rival.js's off-road
+    // containment, so a corner it could not physically hold just dragged it
+    // round at 715 with no consequence. On 330-radius hairpins that reads
+    // as a car being slid sideways by an invisible hand, not as a driver.
+    // Now it actually brakes for the hairpin and drifts through it at a
+    // speed its own steering rate can hold.
+    rival: {
+      maxSpeed: 715, accel: 210, turn: 3.35, sprite: 'ae86',
+      drift: 0.62, driftVisualBoost: 0.5,
+      block: false, cornerSlow: 0.52, raceLine: true, driftDelay: 4.0,
+      cornerLookAhead: 46,   // ~1200 units: a hairpin here needs a real braking zone
+      // The per-lap "big curve boost" is off on this stage. It fires on the
+      // leading edge of a long corner and, while it runs, bypasses corner
+      // braking entirely (speed goes to maxSpeed * 1.18) -- which on the old
+      // wide sweepers was the AE86's showpiece and on a 356-radius hairpin
+      // means arriving at 844 and being dragged round. The boost is saved
+      // for the valley straight instead, where it is already guarded on
+      // curveAhead and bigCurve both being near zero.
+      finalLapBoostOnly: true,
+    },
     bestKey: 'topdownRacer_stage3_best_ms',
   },
   4: {

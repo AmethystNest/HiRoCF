@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { STAGE_PATHS, buildStage4Path } from './stages.js';
+import { STAGE_PATHS, buildStage3Path, buildStage4Path } from './stages.js';
 
 // Stage 4 road geometry, from config.js + the highway surface preset:
 // roadHalf 360 plus bands (26 + 78) = 464 per side.
@@ -137,6 +137,134 @@ describe('stage 4 course', () => {
       expect(path.zLevels[i]).toBe(0);
     }
     expect(tunnelPoints).toBeGreaterThan(0);
+  });
+});
+
+// Stage 3 road geometry: roadHalf 190 plus the mountain preset's bands
+// (34 + 150) = 374 per side.
+const S3_ROAD_HALF = 190;
+const S3_SWATH = S3_ROAD_HALF + 184;
+
+/** Local radius of the built centreline, over an 8-point window. */
+function radiusAt(path, i) {
+  const n = path.count;
+  let d = path.tangents[(i + 4) % n] - path.tangents[(i - 4 + n) % n];
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return Math.abs(d) > 1e-6 ? (8 * path.spacing) / Math.abs(d) : Infinity;
+}
+
+describe('stage 3 course', () => {
+  const path = buildStage3Path();
+  const n = path.count;
+
+  it('closes exactly on its start point', () => {
+    const a = path.points[0];
+    const b = path.points[n - 1];
+    expect(Math.hypot(b[0] - a[0], b[1] - a[1])).toBeLessThan(path.spacing * 1.6);
+  });
+
+  it('has straight road behind the start line for the grid', () => {
+    // Cars are placed 360 units back from index 0, so the run-in has to be
+    // straight or the starting grid is laid out across a corner.
+    for (let k = 1; k <= Math.ceil(600 / path.spacing); k++) {
+      expect(path.curvature[path.wrap(-k)]).toBeLessThan(0.05);
+    }
+  });
+
+  it('is built from real hairpins, not wide sweepers', () => {
+    // Eight switchbacks, each tight enough that the player has to brake for
+    // it: the car's grip radius at speed 500 is ~647, so anything at or
+    // above that is a corner you take flat.
+    const corners = [];
+    let run = null;
+    for (let i = 0; i < n * 2; i++) {
+      const r = radiusAt(path, i % n);
+      if (r <= 470) {
+        if (!run) run = { start: i, tightest: r };
+        else run.tightest = Math.min(run.tightest, r);
+      } else if (run) {
+        if (run.start < n) corners.push(run.tightest);
+        run = null;
+      }
+      if (i >= n && !run) break;
+    }
+    expect(corners.length).toBe(8);
+    // the six climbing switchbacks are the tight ones; the two on the
+    // descent are deliberately a little wider, since the car arrives there
+    // carrying more speed
+    expect(corners.filter((r) => r < 400).length).toBe(6);
+  });
+
+  it('has no corner tighter than the car can drive', () => {
+    // A drift on this stage holds ~330 radius; below about 300 the corner
+    // stops being drivable at any speed the stage runs at.
+    let tightest = Infinity;
+    for (let i = 0; i < n; i++) tightest = Math.min(tightest, radiusAt(path, i));
+    expect(tightest).toBeGreaterThan(300);
+  });
+
+  it('gives the rival one continuous turning run per hairpin', () => {
+    // rival.js groups runs of same-signed turning and discards any shorter
+    // than longCurveMinLen (1200) -- that run is what arms both the racing
+    // line and the drift. A hairpin built as arc/straight/arc splits into
+    // three runs that each fail the test, and the AI then drives straight
+    // through the corner it was supposed to be drifting.
+    const EPS = 0.02;
+    const signed = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      let d = path.tangents[(i + 2) % n] - path.tangents[(i - 2 + n) % n];
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      signed[i] = d;
+    }
+    let start = 0;
+    for (let k = 0; k < n; k++) if (Math.abs(signed[k]) < EPS) { start = k; break; }
+    const runs = [];
+    let idx = 0;
+    while (idx < n) {
+      const k = (start + idx) % n;
+      if (Math.abs(signed[k]) < EPS) { idx++; continue; }
+      const sign = Math.sign(signed[k]);
+      let len = 0, tightestInRun = Infinity;
+      while (idx < n) {
+        const kk = (start + idx) % n;
+        if (Math.abs(signed[kk]) < EPS || Math.sign(signed[kk]) !== sign) break;
+        tightestInRun = Math.min(tightestInRun, radiusAt(path, kk));
+        len++; idx++;
+      }
+      runs.push({ len: len * path.spacing, tightest: tightestInRun });
+    }
+    // every hairpin-tight run must be long enough to register as a corner
+    const hairpinRuns = runs.filter((r) => r.tightest < 470);
+    expect(hairpinRuns.length).toBe(8);
+    for (const r of hairpinRuns) expect(r.len).toBeGreaterThan(1200);
+  });
+
+  it('keeps every pair of stretches clear of the road swath', () => {
+    // "Non-adjacent" has to mean further apart along the route than one
+    // whole corner complex: two points inside a single hairpin sit ~1050
+    // apart in space while being most of a 2000-unit arc apart along the
+    // route, and that is the corner working as designed.
+    const adj = Math.ceil(2600 / path.spacing);
+    let worst = Infinity;
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        if (routeGap(i, j, n) < adj) continue;
+        const a = path.points[i], b = path.points[j];
+        const d = Math.hypot(a[0] - b[0], a[1] - b[1]);
+        if (d < worst) worst = d;
+      }
+    }
+    expect(worst).toBeGreaterThan(S3_SWATH * 2);
+  });
+
+  it('still has somewhere to use the boost', () => {
+    let run = 0, best = 0;
+    for (let i = 0; i < n * 2; i++) {
+      if (path.curvature[i % n] < 0.06) { run++; best = Math.max(best, run); } else run = 0;
+    }
+    expect(Math.min(best, n) * path.spacing).toBeGreaterThan(3000);
   });
 });
 

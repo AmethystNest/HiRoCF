@@ -169,6 +169,14 @@ export class RivalCar {
     // stage 3's AE86 wants to carry speed through instead, so this is
     // per-stage tunable rather than a fixed constant.
     this.cornerSlow = tuning.cornerSlow ?? 0.45;
+    // How far ahead (in route points) the corner-braking scan reaches. The
+    // default 22 is ~570 world units, which at cruising speed is about half
+    // a second of warning -- enough for the wide corners every other stage
+    // is made of. A stage whose corners need the car to shed 200+ of speed
+    // (stage 3's switchbacks) has to see them coming from further out, or
+    // it arrives still at full speed and gets dragged round by the
+    // containment below instead of driving the corner.
+    this.cornerLookAhead = tuning.cornerLookAhead ?? 22;
     // Stage 3 special: on long/big corners only, attack almost to the
     // inside course-out limit and carry speed without corner braking.
     this.bigCurveEdgeAttack = tuning.bigCurveEdgeAttack ?? false;
@@ -436,7 +444,8 @@ export class RivalCar {
 
     // --- read the corner that is coming, not just the current error ---
     let curveAhead = 0;
-    for (let i = 4; i <= 22; i += 3) {
+    const scanStep = Math.max(3, Math.round(this.cornerLookAhead / 7));
+    for (let i = 4; i <= this.cornerLookAhead; i += scanStep) {
       curveAhead = Math.max(curveAhead, path.curvature[path.wrap(here + i)]);
     }
     // Speed control reacts to the road's own geometry (curveAhead) only --
