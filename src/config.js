@@ -209,20 +209,22 @@ export const STAGES = {
     courseDesc: 'CITY + TUNNEL + PASS + VIADUCT / EVERYTHING',
     rivalName: 'ラスボス',
     roadHalf: 240, wallHalf: 320,
-    // Tuned for the composite course, which asks for everything the other
-    // rivals only have to do one of: 520-radius city junctions, a
-    // 410-radius switchback, and an expressway. cornerSlow sits between
-    // stage 4's 0.10 (a rival that barely lifts) and stage 3's 0.52 (one
-    // that has to brake hard for a hairpin), with the longer lookahead
-    // stage 3 needed so it sees a switchback coming in time. maxSpeed
-    // stays at or under the player's 760: only stage 4's truck is
-    // specified as outright faster in a straight line. What makes this one
-    // the boss is that it gives up less speed than anything else in the
-    // game for every kind of corner in it, and blocks while it leads.
+    // The last rival is deliberately NOT faster or dirtier than the player.
+    // It has the player's own engine -- same accel, same top speed, no
+    // launch ramp -- it never drifts, and it never blocks or weaves. The
+    // only thing it does better is drive: `perfectLine` puts it on a
+    // precomputed out-in-out through every corner on the lap (see
+    // getRacingLine in rival.js), which is worth more over a lap of this
+    // course than any of the tricks the earlier rivals use. Beating it
+    // means driving a better line, not out-dragging it.
+    //
+    // No tint: the others are tinted to recolour a shared car sprite, and
+    // this one has its own, which is white.
     rival: {
-      maxSpeed: 755, accel: 320, turn: 2.85, sprite: 'devilz', tint: 0x7a3ae0,
-      cornerSlow: 0.30, cornerLookAhead: 40, raceLine: true, block: true,
-      drift: 0.35, driftVisualBoost: 0.3, finalLapBoostOnly: true,
+      maxSpeed: PHYSICS.maxSpeed, accel: PHYSICS.accel, turn: 2.85, sprite: 'r8',
+      cornerSlow: 0.30, cornerLookAhead: 40,
+      raceLine: true, perfectLine: true,
+      block: false, weave: false, drift: 0, finalLapBoostOnly: true,
     },
     bestKey: 'topdownRacer_stage5_best_ms',
   },
@@ -255,6 +257,7 @@ export const CAR_SIZE = {
   // at least as wide as the player while still holding the aspect would
   // need a length of 237 (2.67 car lengths).
   truck0164: { w: 222.5 * (210 / 742), h: 222.5 },
+  r8: { w: 74, h: 98 },
 };
 
 /**
@@ -275,6 +278,13 @@ export const CAR_SIZE = {
  */
 export const CAR_VISUAL_SCALE = {
   prius: { w: 0.57, h: 0.91 },
+  // Stage 5's boss. Its photo is cropped to the car, so unlike the others
+  // almost none of the box is padding and an uncorrected 74x98 would draw
+  // it half again the size of everything else. Solved from the measured
+  // bodies rather than by eye: every car's drawn body lands between 34x82
+  // and 41x88, so this one is put at 40x88 -- the wide end, which is what
+  // a mid-engined car should read as next to the saloons.
+  r8: { w: 0.55, h: 0.91 },
 };
 
 /** How long a drift tyre-mark point stays visible before fading out. */

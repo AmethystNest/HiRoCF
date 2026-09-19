@@ -57,6 +57,99 @@ const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
  * whole run (ramps included) agrees on which way is inside for as long as
  * `amount` says the car is still committed to it.
  */
+/**
+ * Per-point lateral offset for a full out-in-out lap, solved once for the
+ * whole path and cached on it.
+ *
+ * The existing racing line (see raceLineEnabled in update) only ever leans
+ * INTO a corner. That is an apex line, not a racing line: a driver arrives
+ * from the outside, touches the inside at the apex and runs back out, and
+ * it is the two "out" halves that straighten the corner and let the car
+ * carry speed. Reacting to curvature frame by frame cannot produce them,
+ * because at the moment the car should already be wide the corner has not
+ * started yet.
+ *
+ * Solved rather than reacted to, with one trick. Build the apex profile
+ * first -- at every point, how far inside the car would sit if it only
+ * hugged. Then subtract a WIDE blur of that same profile. Where the corner
+ * is, the blur is smaller than the apex, so the result is more inside than
+ * the apex was; on the approach and the exit, where the apex profile is
+ * zero but the blur is not, the result goes NEGATIVE -- the outside. One
+ * subtraction, and entry, apex and exit all fall out of it, smooth by
+ * construction and with no state to get wrong.
+ *
+ * It also handles a chicane correctly for free: two opposite corners close
+ * together blur into each other and largely cancel, which is exactly the
+ * straight-lining a driver does through one.
+ *
+ * Sign convention matches getLongCurveRamp: positive lateral is the side
+ * the track is turning toward, i.e. the inside.
+ */
+function getRacingLine(path, limit) {
+  const key = `line|${Math.round(limit)}`;
+  if (!path._racingLineCache) path._racingLineCache = {};
+  const cached = path._racingLineCache[key];
+  if (cached) return cached;
+
+  const n = path.count;
+  const wrap = (i) => ((i % n) + n) % n;
+
+  // Signed turn per point, over the same +/-2 window as the long-curve
+  // scan so the two agree about which way a corner goes.
+  const turn = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let d = path.tangents[wrap(i + 2)] - path.tangents[wrap(i - 2)];
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    turn[i] = d;
+  }
+
+  // Box blur over a circular array, `radius` points each side. Run twice
+  // for a smooth (near-gaussian) kernel -- a single box leaves corners in
+  // the line that the car then has to steer at.
+  const blur = (src, radius) => {
+    if (radius < 1) return src;
+    let cur = src;
+    for (let pass = 0; pass < 2; pass++) {
+      const out = new Float32Array(n);
+      let sum = 0;
+      for (let k = -radius; k <= radius; k++) sum += cur[wrap(k)];
+      const inv = 1 / (radius * 2 + 1);
+      for (let i = 0; i < n; i++) {
+        out[i] = sum * inv;
+        sum += cur[wrap(i + radius + 1)] - cur[wrap(i - radius)];
+      }
+      cur = out;
+    }
+    return cur;
+  };
+
+  const pts = (dist) => Math.max(1, Math.round(dist / path.spacing));
+  // ~0.16 rad over the 4-spacing window is about a 650-radius corner: at
+  // that point and tighter the car is fully committed to the inside.
+  const FULL_TURN = 0.16;
+  const smoothTurn = blur(turn, pts(160));
+  const apex = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const t = Math.min(1, Math.abs(smoothTurn[i]) / FULL_TURN);
+    apex[i] = Math.sign(smoothTurn[i]) * limit * t;
+  }
+
+  // How far ahead of the corner the car should already be wide. A braking
+  // zone's worth: much shorter and the entry reads as a flick, much longer
+  // and the car spends the straights wandering to one side.
+  const wide = blur(apex, pts(1100));
+  const OUT = 0.85;
+  const line = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const v = apex[i] * (1 + OUT) - wide[i] * OUT;
+    line[i] = v > limit ? limit : v < -limit ? -limit : v;
+  }
+  const result = blur(line, pts(220));
+  path._racingLineCache[key] = result;
+  return result;
+}
+
 function getLongCurveRamp(path, minLength, trimLength, rampLength) {
   const key = `${minLength}|${trimLength}|${rampLength}`;
   if (!path._longCurveRampCache) path._longCurveRampCache = {};
@@ -228,6 +321,19 @@ export class RivalCar {
     // every rival -- off by default (a rival just holds `line` like before),
     // on for stage 3's AE86 specifically, which is the one built to show it.
     this.raceLineEnabled = tuning.raceLine ?? false;
+    // Stage 5's boss drives a solved out-in-out instead of the reactive
+    // apex lean above -- see getRacingLine. Built against the same inside
+    // limit the lean would have used, so the two stay comparable.
+    // Built at a nominal amplitude and rescaled at read time to whatever
+    // the car can actually use, because how far it may sit from the
+    // centreline depends on its own width, and that is not known until
+    // the world scale is (see bodyHalf). Rescaling preserves the shape;
+    // clamping it instead would flatten both the apex and the two "out"
+    // halves, which is the whole of the line.
+    this._perfectLineLimit = cfg.roadHalf - 40;
+    this._perfectLine = tuning.perfectLine
+      ? getRacingLine(path, this._perfectLineLimit)
+      : null;
     this._driftAmt = 0; // smoothed 0..1 "currently committed to a big-curve drift"
     this.boostUsed = false;
     this.boostTimer = 0;
@@ -412,7 +518,17 @@ export class RivalCar {
     // inside the original corner. Eased toward with a time-based blend (not
     // snapped every frame) so the target doesn't jitter with per-point
     // noise. Per-stage (raceLineEnabled) -- see constructor.
-    if (this.raceLineEnabled) {
+    if (this._perfectLine) {
+      // Read straight off the solved line at the car's own position. It is
+      // already smooth along the lap, so the only easing needed is enough
+      // to stop a route-hint jump from stepping the target sideways.
+      const usable = this.roadHalf - (this.bodyHalf ?? 45) - 8;
+      const targetLine = warmingUp
+        ? 0
+        : this._perfectLine[here] * (usable / this._perfectLineLimit);
+      const raceSmooth = 1 - Math.exp(-dt * 6.0);
+      this._raceLine += (targetLine - this._raceLine) * raceSmooth;
+    } else if (this.raceLineEnabled) {
       // Normal rivals leave margin. Stage 3's special big-corner attack
       // deliberately uses almost all available inside road width.
       const insideLimit = this.bigCurveEdgeAttack ? (this.roadHalf - 1.5) : (this.roadHalf - 40);

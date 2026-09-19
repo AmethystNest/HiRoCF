@@ -136,8 +136,7 @@
   /* --- start ---------------------------------------------------------
      A start-gantry light bar rather than three dots: five lamps fill
      left to right through the countdown, the numeral punches over them
-     on every change, and the whole frame is pinched to a letterbox that
-     pulls back the instant the lights go green. */
+     on every change, and the screen blinks once as they go green. */
   /* lifted off centre so the numeral never lands on top of the grid --
      the cars sit at the middle of the screen and the rig is the same size
      as they are */
@@ -180,12 +179,6 @@
   /* reserved even when empty, so clearing the text on GO does not shunt
      the numeral up the screen at the moment it should be holding still */
   #startSignal .cue{min-height:2.1em;display:flex;align-items:center}
-  .letterbox{position:absolute;left:0;right:0;height:11vh;background:#05070a;
-    transition:transform .5s cubic-bezier(.16,1,.3,1)}
-  .letterbox.top{top:0}
-  .letterbox.bottom{bottom:0}
-  #signalOverlay.go .letterbox.top{transform:translateY(-100%)}
-  #signalOverlay.go .letterbox.bottom{transform:translateY(100%)}
   /* one full-screen blink on the green */
   #signalOverlay.go::after{content:'';position:absolute;inset:0;background:#eaf7ff;
     animation:goFlash .34s ease-out forwards;pointer-events:none}
@@ -210,10 +203,9 @@
     padding:5px 12px;border-radius:999px;color:#05070a;background:var(--accent);
     font-weight:900;margin-bottom:12px}
   #finishCard h2{margin:0 0 4px;font-size:15px;letter-spacing:.14em;opacity:.62;font-weight:800}
-  #finishCard .place{font-size:78px;font-weight:900;line-height:1;margin:2px 0 4px;
-    color:var(--accent);text-shadow:0 0 30px rgba(154,164,174,.22)}
+  #finishCard .place{font-size:66px;font-weight:900;line-height:1;margin:6px 0 2px;
+    letter-spacing:.06em;color:var(--accent);text-shadow:0 0 30px rgba(154,164,174,.22)}
   #finishCard.win .place{text-shadow:0 0 40px rgba(255,214,74,.5)}
-  #finishCard .place i{font-style:normal;font-size:30px;margin-left:2px;vertical-align:.5em}
   #finishCard .rtWrap{display:flex;flex-direction:column;gap:3px;margin:12px 0 20px}
   #finishCard .rtLabel{font-size:9px;letter-spacing:.34em;text-indent:.34em;opacity:.5;font-weight:800}
   #finishCard .rt{font-size:26px;font-weight:900;font-variant-numeric:tabular-nums;letter-spacing:.02em}
@@ -227,8 +219,8 @@
 
   /* --- lap banner ------------------------------------------------------
      A checkpoint is a quiet white flash. The final lap is not: it sweeps
-     in as a red bar with its own rule, and the HUD stays flagged for the
-     whole lap (see #finalEdge and .hud.final below) so it is impossible
+     in as a red bar with its own rule, and the lap counter stays lit for
+     the rest of the race (see body.final-lap below) so it is impossible
      to lose track of which lap you are on. */
   #lapPopup{position:fixed;left:50%;top:25%;transform:translate(-50%,-50%);
     z-index:16;pointer-events:none;opacity:0;text-align:center;color:#fff;font-weight:900;
@@ -252,13 +244,11 @@
   #lapPopup.final .main{color:#fff;text-shadow:0 3px 0 rgba(0,0,0,.7),0 0 26px rgba(255,65,51,.8)}
   #lapPopup.final .sub{color:#ff8b80;opacity:1}
 
-  /* held for the whole final lap */
-  #finalEdge{position:fixed;inset:0;z-index:14;pointer-events:none;opacity:0;
-    transition:opacity .35s ease;
-    box-shadow:inset 0 0 0 3px rgba(255,49,38,.55),inset 0 0 64px rgba(255,49,38,.30)}
-  body.final-lap #finalEdge{opacity:1;animation:finalPulse 1.5s ease-in-out infinite}
-  @keyframes finalPulse{0%,100%{opacity:.55}50%{opacity:1}}
-  body.final-lap .hud #lap{color:#ff5a4d;text-shadow:0 2px 5px rgba(0,0,0,.8),0 0 18px rgba(255,65,51,.9)}
+  /* Held for the whole final lap, on the lap counter alone. A red frame
+     around the screen was tried here and read as damage -- as though the
+     race was going badly -- rather than as "last lap". */
+  body.final-lap .hud #lap{color:#ffc24a;
+    text-shadow:0 2px 5px rgba(0,0,0,.85),0 0 16px rgba(255,194,74,.85)}
 
   #zoomBtn{
     position:fixed;left:14px;top:124px;z-index:15;
@@ -353,8 +343,6 @@
 </div>
 
 <div class="overlay" id="signalOverlay" hidden>
-  <div class="letterbox top"></div>
-  <div class="letterbox bottom"></div>
   <div id="startSignal">
     <div class="gantry">
       <div class="lamp" id="sig1"></div>
@@ -374,13 +362,11 @@
   <div id="lapPopupSub" class="sub">CHECKPOINT</div>
 </div>
 
-<div id="finalEdge" aria-hidden="true"></div>
-
 <div class="overlay" id="finishOverlay" hidden>
   <div id="finishCard">
     <div class="ribbon" id="finishRibbon">FINISHED</div>
     <h2 id="finishStage">STAGE 1 CLEAR</h2>
-    <div class="place" id="finishPlace"><b>1</b><i>st</i></div>
+    <div class="place" id="finishPlace">WIN</div>
     <div class="rtWrap"><span class="rtLabel">RACE TIME</span><span class="rt" id="finishTime">00:00.000</span></div>
     <button id="retryBtn">NEXT STAGE</button>
   </div>
@@ -448,7 +434,7 @@
     // --- start lights ---
     // The five lamps fill evenly across the countdown and all turn green
     // together on zero, which is the moment the numeral becomes GO and the
-    // letterbox pulls back. `shownCount` exists so the numeral's punch
+    // screen blinks. `shownCount` exists so the numeral's punch
     // animation is retriggered once per change rather than every frame.
     const COUNTDOWN=3.2, GO_AT=0.55;
     let shownCount=null;
@@ -475,7 +461,6 @@
       signalOverlay.classList.remove('go');
       startCount.classList.remove('go','punch');
     };
-    const finishPlaceNum=finishPlace.querySelector('b'),finishPlaceSuffix=finishPlace.querySelector('i');
     const syncStageUI=()=>{
       vsStage.textContent=game.cfg.name;
       vsRival.textContent=game.cfg.rivalName;
@@ -538,8 +523,7 @@
           finishCard.classList.toggle('win',won);
           finishRibbon.textContent=won?'WINNER':'FINISHED';
           finishStage.textContent=won?`${game.cfg.name} CLEAR`:`${game.cfg.name} RESULT`;
-          finishPlaceNum.textContent=String(place);
-          finishPlaceSuffix.textContent=place===1?'st':'nd';
+          finishPlace.textContent=won?'WIN':'LOSE';
           finishTime.textContent=fmtTime(game.playerEntry.progress.finishTime??race.time);
           stageBtn.textContent=(won&&game.stageId<LAST_STAGE)?'NEXT STAGE':(won?'RETRY FINAL STAGE':'RETRY');
           finishOverlay.hidden=false;
