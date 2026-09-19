@@ -190,14 +190,19 @@ export const CAR_SIZE = {
   prius:  { w: 74, h: 98 },
   // Stage 4's rival is a box truck, so this one is NOT set equal to the
   // player's box -- the whole point of it is that it is a much larger
-  // vehicle. Two things fix the numbers rather than taste. The height
-  // follows the sprite's own aspect (its cutout is 210 x 742, so 0.283):
-  // picking h freely would stretch a photographed truck, which reads worse
-  // than any size error. And the width is set against the player's ACTUAL
-  // drawn body, not its box -- the player's art fills 96% of its canvas
-  // width, so its 70 draws as ~67, and 90 here is a little over 1.3x that.
-  // The truck's own art is cropped to its silhouette, so 90 draws as 90.
-  truck0164: { w: 90, h: 318 },
+  // vehicle. Sized by request at three player-car lengths and 1.3 player
+  // widths, measured against the player's ACTUAL drawn body rather than
+  // its box: the player's art fills 96% of its canvas width and 91% of its
+  // height, so its 70 x 98 draws as 67.2 x 89.0, and 1.3x / 3x of that is
+  // 87 x 267. The truck's own art is cropped to its silhouette, so 87 x
+  // 267 is exactly what draws.
+  //
+  // That asks for an aspect of 0.326 where the cutout's own is 0.283, so
+  // the sprite is drawn about 15% wider than the photograph. Holding the
+  // aspect instead would mean either 3.5 lengths at the requested width or
+  // 1.13 widths at the requested length -- neither is what was asked for,
+  // and a box truck a little wide reads as a box truck.
+  truck0164: { w: 87, h: 267 },
 };
 
 /**
