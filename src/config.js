@@ -190,19 +190,18 @@ export const CAR_SIZE = {
   prius:  { w: 74, h: 98 },
   // Stage 4's rival is a box truck, so this one is NOT set equal to the
   // player's box -- the whole point of it is that it is a much larger
-  // vehicle. Sized by request at three player-car lengths and 1.3 player
-  // widths, measured against the player's ACTUAL drawn body rather than
-  // its box: the player's art fills 96% of its canvas width and 91% of its
-  // height, so its 70 x 98 draws as 67.2 x 89.0, and 1.3x / 3x of that is
-  // 87 x 267. The truck's own art is cropped to its silhouette, so 87 x
-  // 267 is exactly what draws.
+  // vehicle. Length is set by request at three player-car lengths,
+  // measured against the player's ACTUAL drawn body rather than its box:
+  // the player's art fills 91% of its canvas height, so its 98 draws as
+  // 89.0, and three of those is 267. The truck's own art is cropped to its
+  // silhouette, so 267 is exactly what draws.
   //
-  // That asks for an aspect of 0.326 where the cutout's own is 0.283, so
-  // the sprite is drawn about 15% wider than the photograph. Holding the
-  // aspect instead would mean either 3.5 lengths at the requested width or
-  // 1.13 widths at the requested length -- neither is what was asked for,
-  // and a box truck a little wide reads as a box truck.
-  truck0164: { w: 87, h: 267 },
+  // The width is then not a free number: it is derived from the cutout's
+  // own proportions (210 x 742) so the photograph is never stretched. That
+  // lands at ~75.6, which is 1.13 times the player's drawn width -- a real
+  // truck IS mostly longer rather than mostly wider, and forcing it to
+  // 1.3x as well would mean drawing it 15% fatter than it is.
+  truck0164: { w: 267 * (210 / 742), h: 267 },
 };
 
 /**
