@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { STAGE_PATHS, buildStage3Path, buildStage4Path } from './stages.js';
+import { STAGE_PATHS, buildStage2Path, buildStage3Path, buildStage4Path } from './stages.js';
+import { LAYOUTS } from './layouts.js';
 
 // Stage 4 road geometry, from config.js + the highway surface preset:
 // roadHalf 360 plus bands (26 + 78) = 464 per side.
@@ -153,6 +154,78 @@ function radiusAt(path, i) {
   while (d < -Math.PI) d += Math.PI * 2;
   return Math.abs(d) > 1e-6 ? (8 * path.spacing) / Math.abs(d) : Infinity;
 }
+
+describe('stage 2 course', () => {
+  const path = buildStage2Path();
+  const n = path.count;
+  // roadHalf 230 plus the city preset's gutter/kerb/pavement (248)
+  const S2_EDGE = 230 + 248;
+
+  it('closes exactly on its start point', () => {
+    const a = path.points[0], b = path.points[n - 1];
+    expect(Math.hypot(b[0] - a[0], b[1] - a[1])).toBeLessThan(path.spacing * 1.6);
+  });
+
+  it('is a street grid: eight square junctions and nothing tighter', () => {
+    const corners = [];
+    let run = null;
+    for (let i = 0; i < n * 2; i++) {
+      const c = path.curvature[i % n];
+      if (c >= 0.16) { if (!run) run = { start: i, len: 0 }; run.len++; }
+      else if (run) { if (run.start < n) corners.push(run); run = null; }
+      if (i >= n && !run) break;
+    }
+    expect(corners.length).toBe(8);
+    // each one turns a quarter circle, give or take the resampling
+    for (const c of corners) {
+      const arc = c.len * path.spacing;
+      expect(arc).toBeGreaterThan(700);
+      expect(arc).toBeLessThan(1000);
+    }
+    // the inside of a turn must clear the road's full built width or the
+    // pavement ribbon folds through itself at the apex
+    let tightest = Infinity;
+    for (let i = 0; i < n; i++) tightest = Math.min(tightest, radiusAt(path, i));
+    expect(tightest).toBeGreaterThan(S2_EDGE);
+  });
+
+  it('is mostly straight, the way city blocks are', () => {
+    let straight = 0;
+    for (let i = 0; i < n; i++) if (path.curvature[i] < 0.08) straight++;
+    expect(straight / n).toBeGreaterThan(0.7);
+  });
+
+  it('keeps every pair of stretches clear of the road swath', () => {
+    const adj = Math.ceil(2200 / path.spacing);
+    let worst = Infinity;
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        if (routeGap(i, j, n) < adj) continue;
+        const a = path.points[i], b = path.points[j];
+        worst = Math.min(worst, Math.hypot(a[0] - b[0], a[1] - b[1]));
+      }
+    }
+    expect(worst).toBeGreaterThan(S2_EDGE * 2);
+  });
+
+  it('places every hand-authored decoration on a straight, not in a junction', () => {
+    // This is the one that goes stale: layouts.js pins side streets, their
+    // barriers and the parked cars to lap fractions, and regenerating the
+    // course silently moves what those fractions point at. A stub or a
+    // parked car in the middle of a turn sits across the road at an angle
+    // that fights it.
+    const layout = LAYOUTS[2];
+    const spots = [
+      ...(layout.sideStreets || []).map((s) => s.at),
+      ...(layout.landmarks || []).map((l) => l.at),
+    ];
+    expect(spots.length).toBeGreaterThan(10);
+    for (const at of spots) {
+      const i = path.wrap(Math.round(at * n));
+      expect(path.curvature[i]).toBeLessThan(0.08);
+    }
+  });
+});
 
 describe('stage 3 course', () => {
   const path = buildStage3Path();

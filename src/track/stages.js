@@ -102,61 +102,58 @@ export function buildStage1Path() {
 }
 
 /**
- * City street loop, take 2: a plain 4-corner rectangle still reads as a
- * purpose-built circuit no matter how it's decorated, so three of the four
- * sides are routed through a "switchback" cluster -- a short lane, a tight
- * hairpin, another lane, another hairpin -- like a street that doubles back
- * on itself, before rejoining the main loop. This was generated and
- * validated offline (turtle-walked: forward/turn ops track exact position
- * and heading so the loop closes exactly, no hand-solved trig) rather than
- * hand-authored, specifically checking two things every corner and hairpin
- * must satisfy:
- *  - every turn radius stays well above roadHalf + the boundary bands'
- *    width (CR below), so the inside-of-turn edge of the pavement ribbon
- *    never pinches -- a tighter corner than that is what collapsed the
- *    kerb mesh in the very first version of this stage.
- *  - no two non-adjacent stretches of the loop pass closer than the road's
- *    full visual swath (both sides' bands, plus margin), so parallel
- *    switchback lanes never visually overlap each other or another part
- *    of the loop.
- * All three hairpin clusters use the same CR, so both rules reduce to one
- * constant.
+ * Stage 2 -- a loop of ordinary city streets.
+ *
+ * What this replaces was a jigsaw: three of its four sides were switchback
+ * clusters (short lane, hairpin, short lane, hairpin) strung together with
+ * 560-radius sweepers and no straight edges anywhere. It was legible on the
+ * minimap and it drove fine, but nothing about the shape said "street" --
+ * there was not a single square corner on it, and a lap of continuous
+ * curves with no junctions reads as a purpose-built circuit however it is
+ * decorated.
+ *
+ * This is a street grid instead: long blocks joined by square junctions,
+ * with two places where the route jogs one block over rather than running
+ * straight on. Eight corners, all of them 90 degrees, all of them the same
+ * radius -- and that radius is not a taste decision. The inside of a turn
+ * has to stay clear of the road's full built width (roadHalf 230 plus 248
+ * of gutter, kerb and pavement = 478) or the pavement ribbon folds through
+ * itself at the apex, which is what collapsed the kerb mesh in the first
+ * version of this stage. 560 is the tightest a junction can be and still
+ * clear it.
+ *
+ * Closure is solved at build time from two free lengths, the same way
+ * stage 3 does it -- see buildStage3Path for why that is worth doing.
  */
-export function buildStage2Path() {
-  const CR = 560; // safe margin over roadHalf(230) + city bands(168) = 398
 
-  return new PathBuilder()
-    .line(-1300, 1550, 1000, 1550, 38)
-    .arc(1000, 990, CR, 1.571, 0.000, 18)
-    .arc(2120, 990, CR, 3.142, 4.712, 18)
-    .line(2120, 430, 2430, 430, 5)
-    .arc(2430, -130, CR, 1.571, -1.571, 35)
-    .line(2430, -690, 1810, -690, 10)
-    .arc(1810, -1250, CR, 1.571, 4.712, 35)
-    .line(1810, -1810, 2120, -1810, 5)
-    .arc(2120, -2370, CR, 1.571, 0.000, 18)
-    .line(2680, -2370, 2680, -3270, 15)
-    .arc(2120, -3270, CR, 0.000, -1.571, 18)
-    .line(2120, -3830, 920, -3830, 20)
-    .arc(920, -3270, CR, -1.571, -3.142, 18)
-    .line(360, -3270, 360, -2960, 5)
-    .arc(-200, -2960, CR, 0.000, 3.142, 35)
-    .line(-760, -2960, -760, -3580, 10)
-    .arc(-1320, -3580, CR, 0.000, -3.142, 35)
-    .line(-1880, -3580, -1880, -3270, 5)
-    .arc(-2440, -3270, CR, 0.000, 1.571, 18)
-    .line(-2440, -2710, -3640, -2710, 20)
-    .arc(-3640, -2150, CR, -1.571, -3.142, 18)
-    .line(-4200, -2150, -4200, -1850, 5)
-    .arc(-3640, -1850, CR, 3.142, 1.571, 18)
-    .line(-3640, -1290, -3454, -1290, 3)
-    .arc(-3454, -730, CR, -1.571, 1.571, 35)
-    .line(-3454, -170, -3640, -170, 3)
-    .arc(-3640, 390, CR, -1.571, -3.142, 18)
-    .line(-4200, 390, -4200, 990, 10)
-    .arc(-3640, 990, CR, -3.142, -4.712, 18)
-    .line(-3640, 1550, -1300, 1550, 39)
-    .build(SPACING);
+// Tightest a 90-degree junction can be before the inside of the pavement
+// ribbon pinches. See above.
+const S2_CORNER = 560;
+
+function stage2Layout(A, B, dry) {
+  const t = new Turtle(0, 0, 0, dry);
+  const R = S2_CORNER;
+  t.fwd(3600); t.turn(R, 90);    // south
+  t.fwd(1900); t.turn(R, -90);   // east -- the route jogs a block over
+  t.fwd(1700); t.turn(R, 90);    // south
+  t.fwd(2700); t.turn(R, 90);    // west
+  t.fwd(4400); t.turn(R, 90);    // north
+  t.fwd(1700); t.turn(R, -90);   // west -- and jogs back
+  t.fwd(1800); t.turn(R, 90);    // north
+  t.fwd(A);    t.turn(R, 90);    // east   FREE #1 -- due north
+  t.fwd(B);                      //        FREE #2 -- due east, into the start
+  return t;
+}
+
+export function buildStage2Path() {
+  const at = (a, b) => stage2Layout(a, b, true);
+  const p00 = at(0, 0), p10 = at(1000, 0), p01 = at(0, 1000);
+  const ax = (p10.x - p00.x) / 1000, ay = (p10.y - p00.y) / 1000;
+  const bx = (p01.x - p00.x) / 1000, by = (p01.y - p00.y) / 1000;
+  const det = ax * by - ay * bx;
+  const A = (-p00.x * by + p00.y * bx) / det;
+  const B = (ax * -p00.y + ay * p00.x) / det;
+  return stage2Layout(A, B, false).build(SPACING);
 }
 
 /**

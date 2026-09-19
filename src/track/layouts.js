@@ -64,33 +64,34 @@ export const LAYOUTS = {
     // Ordinary city streets, not a circuit -- no marshal towers, no race-day
     // floodlights, no tow trucks/ambulances standing by, no painted kerb or
     // start chequer (surfaces.js: city preset has no kerb band and
-    // paintStart:false). Every section uses the same 'street' theme (street
-    // lights, fencing, planters, buildings); corners get no special
-    // "runoff" treatment because a street corner isn't a gravel trap. See
-    // buildStage2Path in track/stages.js for the shape -- three of the four
-    // sides are switchback clusters (short lane, hairpin, short lane,
-    // hairpin) rather than a plain rounded rectangle, so it reads as a
-    // winding street network instead of a circuit. side +1 is the outside
-    // of the loop, -1 the infield, same convention as stage 1.
+    // paintStart:false). Every section uses the same 'street' theme;
+    // corners get no special "runoff" treatment because a street corner
+    // isn't a gravel trap. See buildStage2Path in track/stages.js for the
+    // shape -- a grid of blocks joined by square junctions, with two places
+    // where the route jogs a block over. side +1 is the outside of the
+    // loop, -1 the infield, same convention as stage 1.
     //
-    // `at` fractions below were computed offline, not eyeballed: a hairpin
-    // eats a big share of the lap, so landmarks/side-streets only land on
-    // the actual straight stretches between corners -- otherwise a stub or
-    // a parked car would sit mid-curve, at an angle that fights the road.
+    // Every `at` below is the MIDPOINT of one of the course's straight
+    // blocks, read back off the built path rather than eyeballed, so
+    // nothing lands on a junction where a stub or a parked car would sit
+    // across the turn. The straights, by lap fraction, are
+    // 0.00-0.12, 0.16-0.22, 0.26-0.31, 0.35-0.44, 0.47-0.62,
+    // 0.66-0.71, 0.75-0.80, 0.84-0.94 and 0.97-1.00.
     sections: [
       { from: 0.00, to: 1.00, theme: 'street' },
     ],
     // Cross streets you can see but can't take -- a closed loop otherwise
     // has nothing beyond the kerb, which is what reads as a purpose-built
     // circuit no matter how it's decorated. Each stub is capped by a
-    // barrier landmark at the same at/side, right at the mouth.
+    // barrier landmark at the same at/side, part way down it.
     sideStreets: [
       { at: 0.045, side: 1 },
-      { at: 0.348, side: -1 },
-      { at: 0.415, side: 1 },
-      { at: 0.676, side: -1 },
-      { at: 0.880, side: 1 },
-      { at: 0.960, side: -1 },
+      { at: 0.190, side: -1 },
+      { at: 0.390, side: 1 },
+      { at: 0.520, side: -1 },
+      { at: 0.600, side: 1 },
+      { at: 0.775, side: -1 },
+      { at: 0.887, side: 1 },
     ],
     landmarks: [
       // Barriers blocking the side streets above -- placed well down each
@@ -100,17 +101,19 @@ export const LAYOUTS = {
       // sitting in the junction. A cone a little further back reads as an
       // advance warning.
       { name: 'fence_panel', at: 0.045, side: 1, lateral: 560 },
-      { name: 'concrete_barrier', at: 0.348, side: -1, lateral: 560 },
-      { name: 'fence_panel', at: 0.415, side: 1, lateral: 560 },
-      { name: 'concrete_barrier', at: 0.676, side: -1, lateral: 560 },
-      { name: 'fence_panel', at: 0.880, side: 1, lateral: 560 },
-      { name: 'concrete_barrier', at: 0.960, side: -1, lateral: 560 },
+      { name: 'concrete_barrier', at: 0.190, side: -1, lateral: 560 },
+      { name: 'fence_panel', at: 0.390, side: 1, lateral: 560 },
+      { name: 'concrete_barrier', at: 0.520, side: -1, lateral: 560 },
+      { name: 'fence_panel', at: 0.600, side: 1, lateral: 560 },
+      { name: 'concrete_barrier', at: 0.775, side: -1, lateral: 560 },
+      { name: 'fence_panel', at: 0.887, side: 1, lateral: 560 },
       { name: 'cone', at: 0.047, side: 1, lateral: 500 },
-      { name: 'cone', at: 0.350, side: -1, lateral: 500 },
-      { name: 'cone', at: 0.417, side: 1, lateral: 500 },
-      { name: 'cone', at: 0.678, side: -1, lateral: 500 },
-      { name: 'cone', at: 0.882, side: 1, lateral: 500 },
-      { name: 'cone', at: 0.962, side: -1, lateral: 500 },
+      { name: 'cone', at: 0.192, side: -1, lateral: 500 },
+      { name: 'cone', at: 0.392, side: 1, lateral: 500 },
+      { name: 'cone', at: 0.522, side: -1, lateral: 500 },
+      { name: 'cone', at: 0.602, side: 1, lateral: 500 },
+      { name: 'cone', at: 0.777, side: -1, lateral: 500 },
+      { name: 'cone', at: 0.889, side: 1, lateral: 500 },
 
       // Parked civilian traffic along the kerb -- plain generic cars, never
       // the rival roster, so the street doesn't look full of parked race
@@ -127,17 +130,16 @@ export const LAYOUTS = {
       // does put the car partly past the paved edge into the dirt-margin
       // texture, which is fine since the wall keeps the player from ever
       // reaching that spot anyway, and bushes/buildings already scatter
-      // into that same zone. Two of these sit on the short straight lane
-      // BETWEEN a cluster's own pair of hairpins, which reads fine
-      // ("parked mid switchback") without needing its own zone.
-      { name: 'car_civilian_white', at: 0.020, side: -1, lateral: 140 },
-      { name: 'car_civilian_silver', at: 0.221, side: 1, lateral: 140 },
-      { name: 'car_civilian_navy', at: 0.353, side: -1, lateral: 140 },
-      { name: 'car_civilian_maroon', at: 0.410, side: 1, lateral: 140 },
-      { name: 'car_civilian_white', at: 0.545, side: -1, lateral: 140 },
-      { name: 'car_civilian_silver', at: 0.680, side: 1, lateral: 140 },
-      { name: 'car_civilian_navy', at: 0.885, side: -1, lateral: 140 },
-      { name: 'car_civilian_maroon', at: 0.965, side: 1, lateral: 140 },
+      // into that same zone.
+      { name: 'car_civilian_white', at: 0.085, side: -1, lateral: 140 },
+      { name: 'car_civilian_silver', at: 0.283, side: 1, lateral: 140 },
+      { name: 'car_civilian_navy', at: 0.360, side: -1, lateral: 140 },
+      { name: 'car_civilian_maroon', at: 0.425, side: 1, lateral: 140 },
+      { name: 'car_civilian_white', at: 0.490, side: -1, lateral: 140 },
+      { name: 'car_civilian_silver', at: 0.565, side: 1, lateral: 140 },
+      { name: 'car_civilian_navy', at: 0.683, side: -1, lateral: 140 },
+      { name: 'car_civilian_maroon', at: 0.845, side: 1, lateral: 140 },
+      { name: 'car_civilian_white', at: 0.920, side: -1, lateral: 140 },
     ],
     patches: { count: 40, textures: ['patch_dirt', 'patch_dry', 'patch_dark'] },
   },

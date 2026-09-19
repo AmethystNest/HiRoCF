@@ -39,7 +39,11 @@ export const SURFACE_PRESETS = {
     asphalt: { texture: 'road_asphalt', uRepeat: 3, vPer: 1 / 520, tint: 0xa6abb2 },
     ruts: { offset: 82, width: 74, alpha: 0.4, vPer: 1 / 900 },
     edgeLine: { inset: 14, width: 11, tint: 0xffffff, alpha: 0.85 },
-    centreLine: { texture: 'dash_yellow', width: 11, vPer: 1 / 120 },
+    // White dashed, not yellow. On an ordinary Japanese street the centre
+    // line is a white broken line; yellow means no overtaking and belongs
+    // on the mountain pass, where stage 3 uses it.
+    centreLine: { texture: 'dash_white', width: 11, vPer: 1 / 120 },
+    junctionMarks: true,
     paintStart: false, // an ordinary street has no painted chequer
     startMarker: 'crosswalk', // ...it gets a crosswalk instead, see buildSurface
     // no racing kerb -- just a plain gutter strip into the sidewalk, the
@@ -54,14 +58,20 @@ export const SURFACE_PRESETS = {
     // as paving panels) rather than a fill: at this zoom a 230-unit band of
     // single-colour grey is the largest flat area anywhere in the game, and
     // it was what made the street read as a car park.
+    // Four solid strips, not one flat slab and not a texture. Every tiling
+    // texture in the set is mid-to-dark and a tint can only multiply, so
+    // there is no way to reach a light concrete through one: curb_concrete
+    // read as a chequerboard at this zoom, and gravel came out darker than
+    // the asphalt it borders. What a footpath actually needs from above is
+    // structure -- a shadowed gutter, a kerb face catching the light, the
+    // dirty strip traffic throws at the kerb, then clean paving -- and
+    // that is all readable in flat fills. Still 248 in total, the figure
+    // `edge` and every landmark lateral in layouts.js are measured against.
     bands: [
       { texture: null, width: 14, tint: 0x5c6167, alpha: 0.95 },     // gutter
-      { texture: null, width: 10, tint: 0xc8ccd0, alpha: 1.0 },      // kerb face, catching the light
-      // Fine aggregate, not a paving-slab pattern. curb_concrete was tried
-      // here first and its light/dark blocks read as a chequerboard at this
-      // zoom -- worse than the flat fill it replaced. What the band needed
-      // was grain, not pattern.
-      { texture: 'gravel', width: 224, vPer: 1 / 300, uRepeat: 5, tint: 0xf6f9fb, alpha: 1 },
+      { texture: null, width: 10, tint: 0xc8ccd0, alpha: 1.0 },      // kerb face
+      { texture: null, width: 34, tint: 0x7d848b, alpha: 0.98 },     // grime at the kerb
+      { texture: null, width: 190, tint: 0x969ea6, alpha: 0.98 },    // paving
     ],
     bandEdge: { width: 34, tint: 0x4b5157, alpha: 0.85 },  // shade at the building line
   },
@@ -311,24 +321,30 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
   // path's own normal/tangent at distance 0, the same vector approach used
   // for the side-street stubs in props.js.
   if (P.startMarker === 'crosswalk') {
-    const nx = path.normals[0], ny = path.normals[1];
-    const tx = -ny, ty = nx;
-    const cx0 = path.points[0][0], cy0 = path.points[0][1];
-    const half = roadHalf - (P.edgeLine?.inset ?? 14) - 4;
-    const barLen = 50, gap = 40, bars = 6;
-    const span = bars * barLen + (bars - 1) * gap;
     const g = new Graphics();
-    for (let i = 0; i < bars; i++) {
-      const d0 = -span / 2 + i * (barLen + gap);
-      const d1 = d0 + barLen;
-      const p0x = cx0 + tx * d0, p0y = cy0 + ty * d0;
-      const p1x = cx0 + tx * d1, p1y = cy0 + ty * d1;
-      g.poly([
-        p0x - nx * half, p0y - ny * half,
-        p0x + nx * half, p0y + ny * half,
-        p1x + nx * half, p1y + ny * half,
-        p1x - nx * half, p1y - ny * half,
-      ]).fill({ color: 0xffffff, alpha: 0.88 });
+    paintCrossing(g, path, 0, roadHalf - (P.edgeLine?.inset ?? 14) - 4, { stopLine: false });
+    layer.addChild(g);
+  }
+
+  // --- junction markings: a crossing on each arm of every corner ---
+  // A lap of nothing but road reads as a circuit no matter what stands
+  // beside it. Zebra bars and a stop line on the approach and the exit of
+  // each turn are what make a corner read as an intersection instead, and
+  // they cost no new art. Driven off the path's own curvature, so they
+  // follow the course rather than a list of lap fractions that goes stale
+  // the moment the course is regenerated.
+  if (P.junctionMarks) {
+    const g = new Graphics();
+    const half = roadHalf - (P.edgeLine?.inset ?? 14) - 4;
+    const setback = Math.round(210 / path.spacing);
+    // post at the back of the pavement, head reaching back in over the road
+    const signalOut = roadHalf + 250;
+    const signalReach = roadHalf - 120;
+    for (const [enter, exit] of cornerRuns(path, 0.16)) {
+      for (const k of [path.wrap(enter - setback), path.wrap(exit + setback)]) {
+        paintCrossing(g, path, k, half, { stopLine: true });
+        paintSignal(g, path, k, signalOut, signalReach);
+      }
     }
     layer.addChild(g);
   }
@@ -1109,4 +1125,97 @@ export function buildTunnelStructure(path, { roadHalf = 300, wallHalf = 355 } = 
   layer.addChild(lights);
 
   return layer;
+}
+
+
+/**
+ * Zebra bars painted across the road at one centreline index, optionally
+ * with a stop line just before them. Used for the start/finish marker on a
+ * street stage and for every junction arm (see `junctionMarks`).
+ */
+function paintCrossing(g, path, k, half, { bars = 6, barLen = 50, gap = 40, stopLine = false } = {}) {
+  const nx = path.normals[k * 2], ny = path.normals[k * 2 + 1];
+  const tx = -ny, ty = nx;
+  const cx = path.points[k][0], cy = path.points[k][1];
+  const span = bars * barLen + (bars - 1) * gap;
+  const bar = (d0, d1, alpha) => {
+    const p0x = cx + tx * d0, p0y = cy + ty * d0;
+    const p1x = cx + tx * d1, p1y = cy + ty * d1;
+    g.poly([
+      p0x - nx * half, p0y - ny * half,
+      p0x + nx * half, p0y + ny * half,
+      p1x + nx * half, p1y + ny * half,
+      p1x - nx * half, p1y - ny * half,
+    ]).fill({ color: 0xffffff, alpha });
+  };
+  for (let i = 0; i < bars; i++) {
+    const d0 = -span / 2 + i * (barLen + gap);
+    bar(d0, d0 + barLen, 0.88);
+  }
+  // the stop line sits on the approach side of the crossing, which is the
+  // side further back along the route
+  if (stopLine) bar(-span / 2 - 46, -span / 2 - 26, 0.9);
+}
+
+/**
+ * Start and end index of every sustained turn on the path, as [enter, exit]
+ * pairs. A "corner" is a run of points whose curvature stays above
+ * `threshold`; short flickers between two straights are ignored.
+ */
+export function cornerRuns(path, threshold = 0.16, minLength = 300) {
+  const n = path.count;
+  const runs = [];
+  let start = -1;
+  // begin the scan on a straight so one corner is never split at the seam
+  let from = 0;
+  for (let i = 0; i < n; i++) if (path.curvature[i] < threshold) { from = i; break; }
+  for (let o = 0; o < n; o++) {
+    const i = path.wrap(from + o);
+    const on = path.curvature[i] >= threshold;
+    if (on && start < 0) start = o;
+    else if (!on && start >= 0) {
+      if ((o - start) * path.spacing >= minLength) runs.push([path.wrap(from + start), path.wrap(from + o - 1)]);
+      start = -1;
+    }
+  }
+  if (start >= 0 && (n - start) * path.spacing >= minLength) runs.push([path.wrap(from + start), path.wrap(from + n - 1)]);
+  return runs;
+}
+
+/**
+ * A traffic signal on a cantilever arm over the carriageway, beside a
+ * crossing. Drawn rather than placed as a prop because it belongs to the
+ * junction, and the junctions are found from the path's own curvature --
+ * there is no lap fraction to hang a prop on that would survive the course
+ * being regenerated.
+ *
+ * On an arm, not on the shoulder. A post standing at the kerb has to sit
+ * past the player's reach (roadHalf + 270 on this stage) or it reads as
+ * something the car drives through -- and at that distance it falls outside
+ * the visible half-width at the player's own row, so the first version of
+ * this was invisible in play. Reaching the head out over the road is both
+ * what a real signal at a Japanese junction does and the only way it is
+ * actually in shot.
+ */
+function paintSignal(g, path, k, out, reach) {
+  const nx = path.normals[k * 2], ny = path.normals[k * 2 + 1];
+  const tx = -ny, ty = nx;
+  const cx = path.points[k][0], cy = path.points[k][1];
+  const at = (lat, along) => [cx + nx * lat + tx * along, cy + ny * lat + ty * along];
+  const quad = (lat0, lat1, a0, a1, colour, alpha) => {
+    const p0 = at(lat0, a0), p1 = at(lat1, a0), p2 = at(lat1, a1), p3 = at(lat0, a1);
+    g.poly([p0[0], p0[1], p1[0], p1[1], p2[0], p2[1], p3[0], p3[1]]).fill({ color: colour, alpha });
+  };
+  // post at the back of the pavement, then the arm reaching in over the road
+  quad(out - 16, out + 16, -16, 16, 0x33383d, 0.95);
+  quad(reach, out, -7, 7, 0x3a3f45, 0.92);
+  // head, across the arm's inner end, with three lamps down it
+  quad(reach - 16, reach + 16, -52, 52, 0x23262a, 0.96);
+  for (const [off, colour] of [[-32, 0xd9463c], [0, 0xe0a83a], [32, 0x35b45f]]) {
+    const c = at(reach, off);
+    g.circle(c[0], c[1], 11).fill({ color: colour, alpha: 0.92 });
+  }
+  // green lit, so the junction reads as live rather than as a model of one
+  const lit = at(reach, 32);
+  g.circle(lit[0], lit[1], 22).fill({ color: 0x35b45f, alpha: 0.2 });
 }
