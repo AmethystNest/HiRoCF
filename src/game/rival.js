@@ -149,6 +149,21 @@ export class RivalCar {
     this.finalLapBoostOnly = tuning.finalLapBoostOnly ?? false;
 
     this.accel = tuning.accel;
+    // Getaway. The player leaves the line HARDER than any rival: it gets
+    // `launchBoostMul` (1.16x, 1.28x on stage 3) on top of its own accel
+    // below `launchBoostBelow`, while a rival starts from `launchAccel`
+    // and only ramps up to its own figure by `launchAccelUntil`. So the
+    // player wins the drag off the grid and out of a spin, and the rival
+    // takes it back further up the road on top speed (every rival's
+    // maxSpeed now sits above the player's -- see config.js).
+    //
+    // The ramp ends at 300, below every stage's corner-exit speed (the
+    // lowest is stage 3's 343 at the hairpin apex), so this shapes the
+    // getaway only and leaves corner exits and cruising pace as they were.
+    // min() so a rival whose own accel is already under the launch figure
+    // is never sped up by it.
+    this.launchAccel = Math.min(tuning.launchAccel ?? 140, tuning.accel);
+    this.launchAccelUntil = tuning.launchAccelUntil ?? 300;
     this.turn = tuning.turn;
     // 0 for every rival except stage 3's AE86 -- a per-stage "drift spec"
     // toggle, not a universal behaviour, since it changes how the car
@@ -179,7 +194,7 @@ export class RivalCar {
     // (stage 3's switchbacks) has to see them coming from further out, or
     // it arrives still at full speed and gets dragged round by the
     // containment below instead of driving the corner.
-    this.cornerLookAhead = tuning.cornerLookAhead ?? 22;
+    this.cornerLookAhead = tuning.cornerLookAhead ?? 32;
     // Stage 3 special: on long/big corners only, attack almost to the
     // inside course-out limit and carry speed without corner braking.
     this.bigCurveEdgeAttack = tuning.bigCurveEdgeAttack ?? false;
@@ -197,6 +212,7 @@ export class RivalCar {
       : null;
     this._longCurveAmount = longCurve?.amount ?? null;
     this._longCurveSign = longCurve?.sign ?? null;
+    this._boostOnStraight = false;
     this.drifting = false;
     this.driftTrail = []; // same shape as PlayerCar's, for the same trail renderer
 
@@ -269,6 +285,22 @@ export class RivalCar {
    *  car exactly like it does the player, which uses its own boost input
    *  flag rather than a bare timer. */
   get boosting() { return this.boostTimer > 0; }
+
+  /**
+   * Acceleration available at a given speed: `launchAccel` from a
+   * standstill, the car's own `accel` from `launchAccelUntil` upward,
+   * linear between the two. See the constructor for why.
+   */
+  launchAccelAt(speed) {
+    if (this.launchAccelUntil <= 0) return this.accel;
+    // Squared, not linear: a rival with a big `accel` figure (stage 5's
+    // 320) would otherwise be back past the player's launch rate within
+    // the first tenth of the ramp and the getaway would read as unchanged.
+    // k*k keeps the whole first half of the ramp near `launchAccel` while
+    // still meeting the car's own accel exactly at the top of it.
+    const k = Math.min(1, Math.max(0, speed / this.launchAccelUntil));
+    return this.launchAccel + (this.accel - this.launchAccel) * k * k;
+  }
 
   /**
    * Nearest centreline point on this car's own stretch of route, tracked by
@@ -488,7 +520,7 @@ export class RivalCar {
       aimLine = currentLine + (aimLine - currentLine) * lineRecovery;
     }
 
-    const lookAhead = 10;
+    const lookAhead = 11;
     const target = path.offsetPoint(here + lookAhead, aimLine);
     const desired = Math.atan2(target.y - this.y, target.x - this.x);
     const diff = wrapAngle(desired - this.angle);
@@ -550,8 +582,26 @@ export class RivalCar {
     if (!this.boostUsed && race && race.lap >= race.totalLaps && curveAhead < 0.18 && bigCurve < 0.05) {
       this.boostUsed = true;
       this.boostTimer = 2.35;
+      this._boostOnStraight = true;
     }
     if (this.boostTimer > 0) this.boostTimer = Math.max(0, this.boostTimer - dt);
+    // ...and give it back the moment the road stops being straight. The
+    // firing guard only sees as far as the corner scan reaches, while the
+    // boost itself runs for 2.35s -- at this build's pace that is several
+    // thousand world units, so a corner can arrive well inside a boost
+    // that was legitimately fired on a clear road. Stage 5's 518-radius
+    // sweeper is exactly that: at 1.18 * 825 the car needs 569 of radius
+    // and has 518, so it ran wide on the final lap every time until the
+    // boost was released here rather than held to its timer.
+    //
+    // Only the straight-line boost above is released this way. The OTHER
+    // boost (the per-lap one below, on cars without finalLapBoostOnly) is
+    // deliberately fired INSIDE a big curve as that car's showpiece, so
+    // the same test would cancel it on the frame it starts.
+    if (this._boostOnStraight && this.boostTimer > 0 && (curveAhead >= 0.18 || bigCurve >= 0.05)) {
+      this.boostTimer = 0;
+      this._boostOnStraight = false;
+    }
 
     const fullBigCurveAttack = this.noBigCurveSlow && bigCurve >= 0.35;
     let targetSpeed = fullBigCurveAttack
@@ -565,8 +615,8 @@ export class RivalCar {
       this.speed += 430 * dt;
       this.speed = Math.min(this.maxSpeed * 1.18, this.speed);
     } else {
-      if (this.speed < targetSpeed) this.speed += this.accel * dt;
-      else if (!fullBigCurveAttack) this.speed -= 380 * speedFactor * dt;
+      if (this.speed < targetSpeed) this.speed += this.launchAccelAt(this.speed) * dt;
+      else if (!fullBigCurveAttack) this.speed -= 430 * speedFactor * dt;
       this.speed = Math.max(0, Math.min(this.maxSpeed, this.speed));
     }
 

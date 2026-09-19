@@ -17,10 +17,23 @@ export const PHYSICS = {
   // Stage 3 used to override this to 1.70 while every other stage ran 1.48,
   // which meant the same car covered ground 15% faster on one stage than
   // the others. One value for every stage now.
-  moveScale: 1.66,
+  //
+  // 1.48 -> 1.66 -> 1.82: each step is a request for more real pace, and
+  // each one has to be paid for elsewhere, because raising it alone makes
+  // every corner harder without making the cars any better at them. A car
+  // needs radius = speed * moveScale / turnRate, so a +9.6% moveScale is
+  // a +9.6% radius at the same speed. Everything tied to that got scaled
+  // by the same factor in this step: every rival's cornerSlow (so corner
+  // speed in WORLD units per second is unchanged), driftMinSpeed here and
+  // on stage 3 (or the player's drift would break at the apex of corners
+  // it used to hold, which is exactly the bug the stage 3 value below was
+  // set to fix), and the AI's aim/corner-scan lookaheads in rival.js (a
+  // lookahead is a distance, so at a higher moveScale the same number of
+  // route points buys less warning time).
+  moveScale: 1.82,
   driftTurnBoost: 1.42,
   driftSlip: 0.50,
-  driftMinSpeed: 360,
+  driftMinSpeed: 328,
   boostMoveScale: 1.38,
   boostDuration: 2.45,
   boostRecover: 9,
@@ -59,7 +72,13 @@ export const STAGES = {
     courseDesc: 'LONG STRAIGHTS / GENTLE CURVES / BIG CORNER',
     rivalName: '悪魔のアイツ',
     roadHalf: 300, wallHalf: 410,
-    rival: { maxSpeed: 710, accel: 250, turn: 2.25, sprite: 'devilz', block: false, weave: false, raceLine: true, cornerSlow: 0.22, holdOpeningStraight: true, finalLapBoostOnly: true },
+    // Top speed above the player's 760 and a soft getaway, per the spec
+    // that every rival out-runs the player flat out but loses the drag off
+    // the line (see rival.js launchAccel). cornerSlow is re-derived from
+    // the new maxSpeed so the speed it actually takes corners at is
+    // unchanged: it was 710 * (1 - 0.22) = 554, and 780 * (1 - 0.290) is
+    // the same 554. Only the straight-line pace moves.
+    rival: { maxSpeed: 780, accel: 250, turn: 2.25, sprite: 'devilz', block: false, weave: false, raceLine: true, cornerSlow: 0.352, holdOpeningStraight: true, finalLapBoostOnly: true },
     bestKey: 'topdownRacer_stage1_best_ms',
   },
   2: {
@@ -70,7 +89,9 @@ export const STAGES = {
     roadHalf: 230, wallHalf: 320,
     playerPhysics: { wallInset: 2 },
     wallTriggerExtra: 18,
-    rival: { maxSpeed: 650, accel: 280, turn: 3.05, sprite: 'prius' },
+    // Same re-derivation as stage 1, from the previous 650 and the
+    // default cornerSlow of 0.45: corner speed stays 357.
+    rival: { maxSpeed: 775, accel: 280, turn: 3.05, sprite: 'prius', cornerSlow: 0.580, cornerLookAhead: 42 },
     bestKey: 'topdownRacer_stage2_best_ms',
   },
   3: {
@@ -83,14 +104,17 @@ export const STAGES = {
       // moveScale is deliberately NOT overridden here any more -- pace is
       // one value for every stage (see PHYSICS.moveScale). What stays below
       // is touge-specific handling, not speed.
-      // Lowered from 435 with the switchback course. A drift latches while
-      // BRAKE and steering are held above this speed and drops the moment
-      // speed falls back under it -- and the new hairpins are taken at
-      // ~400-450, so at 435 the slide broke exactly at the apex of every
-      // one of them. The stage is built around drifting those corners, so
-      // the threshold has to sit under the speed they are actually taken
-      // at. 400 still leaves a drift impossible to hold at walking pace.
-      driftMinSpeed: 400,
+      // Lowered from 435 with the switchback course, then from 400 with
+      // the 1.66 -> 1.82 moveScale step. A drift latches while BRAKE and
+      // steering are held above this speed and drops the moment speed
+      // falls back under it -- and at 435 the slide broke exactly at the
+      // apex of every hairpin. The threshold has to sit under the speed
+      // the corners are actually taken at, and that speed is not a fixed
+      // number: a faster moveScale means the same hairpin is held at a
+      // proportionally LOWER `speed` value, so this has to come down with
+      // it (400 * 1.66 / 1.82) or the same bug comes straight back. 365
+      // still leaves a drift impossible to hold at walking pace.
+      driftMinSpeed: 365,
       launchBoostBelow: 300,
       launchBoostMul: 1.28,
       accelScaleMin: 0.18,
@@ -111,10 +135,13 @@ export const STAGES = {
     // Now it actually brakes for the hairpin and drifts through it at a
     // speed its own steering rate can hold.
     rival: {
-      maxSpeed: 715, accel: 210, turn: 3.35, sprite: 'ae86',
+      maxSpeed: 790, accel: 210, turn: 3.35, sprite: 'ae86',
       drift: 0.62, driftVisualBoost: 0.5,
-      block: false, cornerSlow: 0.52, raceLine: true, driftDelay: 4.0,
-      cornerLookAhead: 46,   // ~1200 units: a hairpin here needs a real braking zone
+      // 0.52 of the old 715 and 0.566 of the new 790 are the same 343 at
+      // the hairpin apex -- the switchback pace this stage was tuned
+      // around is untouched; what rises is only the valley straight.
+      block: false, cornerSlow: 0.604, raceLine: true, driftDelay: 4.0,
+      cornerLookAhead: 50,   // ~1300 units: a hairpin here needs a real braking zone
       // The per-lap "big curve boost" is off on this stage. It fires on the
       // leading edge of a long corner and, while it runs, bypasses corner
       // braking entirely (speed goes to maxSpeed * 1.18) -- which on the old
@@ -135,8 +162,14 @@ export const STAGES = {
     playerPhysics: { wallInset: 3, wallSpeedMul: 0.82 },
     wallTriggerExtra: 6,
     rival: {
-      maxSpeed: 790, accel: 260, turn: 1.95, sprite: 'truck0164',
-      cornerSlow: 0.10, block: false, weave: false,
+      maxSpeed: 815, accel: 260, turn: 1.95, sprite: 'truck0164',
+      // Corner speed held at the old 790 * (1 - 0.10) = 711. The truck is
+      // the heaviest thing on the grid, so it also gets the softest
+      // getaway of the five (120 against the default 140, and the
+      // player's 244) -- a loaded box truck should be the one car you can
+      // out-drag off the line, and the one you cannot out-run once it is
+      // rolling.
+      cornerSlow: 0.205, cornerLookAhead: 24, launchAccel: 120, block: false, weave: false,
       // Shuts the door on a car coming alongside, and only then -- `block`
       // stays off, because that one weaves about for as long as the rival
       // leads, which on a truck would read as a driver who cannot hold a
@@ -169,16 +202,23 @@ export const STAGES = {
     // Tuned for the composite course, which asks for everything the other
     // rivals only have to do one of: 520-radius city junctions, a
     // 410-radius switchback, and an expressway. cornerSlow sits between
-    // stage 4's 0.10 (a rival that barely lifts) and stage 3's 0.52 (one
-    // that has to brake hard for a hairpin), with the longer lookahead
-    // stage 3 needed so it sees a switchback coming in time. maxSpeed
-    // stays at or under the player's 760, per the spec that the rival is
-    // never outright faster in a straight line; what makes this one the
-    // boss is that it gives up less speed than anything else in the game
-    // for every kind of corner in it, and blocks while it leads.
+    // stage 4's (a rival that barely lifts) and stage 3's (one that has to
+    // brake hard for a hairpin), with the longer lookahead stage 3 needed
+    // so it sees a switchback coming in time. It carries the highest top
+    // speed of the five, 825 against the player's 760 -- the spec is now
+    // that every rival out-runs the player flat out and loses the getaway,
+    // and the boss is the extreme of it. Corner speed is unchanged from
+    // the old 755 / 0.30 pairing (528); what makes this one the boss is
+    // still that it gives up less speed than anything else in the game for
+    // every kind of corner in it, and blocks while it leads.
     rival: {
-      maxSpeed: 755, accel: 320, turn: 2.85, sprite: 'devilz', tint: 0x7a3ae0,
-      cornerSlow: 0.30, cornerLookAhead: 40, raceLine: true, block: true,
+      maxSpeed: 825, accel: 320, turn: 2.85, sprite: 'devilz', tint: 0x7a3ae0,
+      // Its own accel of 320 is the highest on the grid, which pulls the
+      // launch ramp back up almost immediately; 125 against the default
+      // 140 keeps the boss losing the getaway by about as much as the
+      // others do, without touching what it does once it is rolling.
+      launchAccel: 125,
+      cornerSlow: 0.415, cornerLookAhead: 44, raceLine: true, block: true,
       drift: 0.35, driftVisualBoost: 0.3, finalLapBoostOnly: true,
     },
     bestKey: 'topdownRacer_stage5_best_ms',

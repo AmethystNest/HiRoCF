@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { STAGES, CAR_SIZE } from '../config.js';
+import { STAGES, CAR_SIZE, PHYSICS } from '../config.js';
 import { STAGE_PATHS } from '../track/stages.js';
 import { RivalCar } from './rival.js';
 
@@ -81,6 +81,55 @@ describe('rival side block', () => {
     for (const lateral of [210, 300, -300]) {
       const r = runAlongside({ sideBlock: 0.26, lateral, seconds: 4 });
       expect(r.worstEdge).toBeLessThanOrEqual(cfg.roadHalf);
+    }
+  });
+});
+
+describe('rival pace spec: soft getaway, higher top end', () => {
+  const P_LAUNCH = (id) => {
+    const over = STAGES[id].playerPhysics || {};
+    const accel = over.accel ?? PHYSICS.accel;
+    return accel * (over.launchBoostMul ?? PHYSICS.launchBoostMul);
+  };
+
+  for (const id of [1, 2, 3, 4, 5]) {
+    it(`stage ${id}: rival out-runs the player flat out`, () => {
+      expect(STAGES[id].rival.maxSpeed).toBeGreaterThan(PHYSICS.maxSpeed);
+    });
+
+    it(`stage ${id}: rival loses the drag off the line`, () => {
+      const r = new RivalCar(STAGE_PATHS[id](), STAGES[id], STAGES[id].rival);
+      // from a standstill, and for the whole first half of the ramp
+      expect(r.launchAccelAt(0)).toBeLessThan(P_LAUNCH(id));
+      expect(r.launchAccelAt(r.launchAccelUntil * 0.5)).toBeLessThan(P_LAUNCH(id));
+    });
+  }
+
+  it('hands the car its own acceleration back by the top of the ramp', () => {
+    const r = new RivalCar(STAGE_PATHS[4](), STAGES[4], STAGES[4].rival);
+    expect(r.launchAccelAt(r.launchAccelUntil)).toBeCloseTo(r.accel, 6);
+    expect(r.launchAccelAt(9999)).toBeCloseTo(r.accel, 6);
+  });
+
+  it('never dips below the launch figure, and only ever rises with speed', () => {
+    const r = new RivalCar(STAGE_PATHS[4](), STAGES[4], STAGES[4].rival);
+    let prev = -Infinity;
+    for (let v = 0; v <= 900; v += 25) {
+      const a = r.launchAccelAt(v);
+      expect(a).toBeGreaterThanOrEqual(r.launchAccel - 1e-9);
+      expect(a).toBeGreaterThanOrEqual(prev - 1e-9);
+      prev = a;
+    }
+  });
+
+  it('shapes the getaway only -- corner exits keep the car own accel', () => {
+    // the ramp has to finish below the slowest speed any stage takes a
+    // corner at, or it would be quietly detuning corner exits too
+    for (const id of [1, 2, 3, 4, 5]) {
+      const cfgId = STAGES[id];
+      const r = new RivalCar(STAGE_PATHS[id](), cfgId, cfgId.rival);
+      const slowestCorner = cfgId.rival.maxSpeed * (1 - (cfgId.rival.cornerSlow ?? 0.45));
+      expect(r.launchAccelUntil).toBeLessThan(slowestCorner);
     }
   });
 });
