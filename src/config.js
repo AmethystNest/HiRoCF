@@ -188,20 +188,23 @@ export const CAR_SIZE = {
   devilz: { w: 74, h: 98 },
   ae86:   { w: 74, h: 98 },
   prius:  { w: 74, h: 98 },
-  // Stage 4's rival is a box truck, so this one is NOT set equal to the
-  // player's box -- the whole point of it is that it is a much larger
-  // vehicle. Length is set by request at three player-car lengths,
-  // measured against the player's ACTUAL drawn body rather than its box:
-  // the player's art fills 91% of its canvas height, so its 98 draws as
-  // 89.0, and three of those is 267. The truck's own art is cropped to its
-  // silhouette, so 267 is exactly what draws.
+  // Stage 4's rival is a box truck. Length is set by request at 2.5
+  // player-car lengths, measured against the player's ACTUAL drawn body
+  // rather than its box: the player's art fills 91% of its canvas height,
+  // so its 98 draws as 89.0, and 2.5 of those is 222.5. The truck's own
+  // art is cropped to its silhouette, so 222.5 is exactly what draws.
   //
   // The width is then not a free number: it is derived from the cutout's
-  // own proportions (210 x 742) so the photograph is never stretched. That
-  // lands at ~75.6, which is 1.13 times the player's drawn width -- a real
-  // truck IS mostly longer rather than mostly wider, and forcing it to
-  // 1.3x as well would mean drawing it 15% fatter than it is.
-  truck0164: { w: 267 * (210 / 742), h: 267 },
+  // own proportions (210 x 742) so the photograph is never stretched.
+  //
+  // Note what that costs at this length. The source render is a very
+  // elongated vehicle (aspect 0.283) while the car sprites are drawn
+  // deliberately chunky (the player's body is 0.755), so holding the
+  // truck's aspect at 2.5 lengths puts it at 63.0 wide against the
+  // player's 67.2 -- the truck ends up NARROWER than the car. Keeping it
+  // at least as wide as the player while still holding the aspect would
+  // need a length of 237 (2.67 car lengths).
+  truck0164: { w: 222.5 * (210 / 742), h: 222.5 },
 };
 
 /**

@@ -12,7 +12,7 @@ class RivalCar {
 }
 
 const CAR = { w: 194, h: 271 };     // the player, in world units
-const TRUCK = { w: 209, h: 740 };   // stage 4's box truck (75.6 x 267 at worldScale 2.77)
+const TRUCK = { w: 174, h: 616 };   // stage 4's box truck (63.0 x 222.5 at worldScale 2.77)
 
 describe('hullCircles', () => {
   it('uses the original three circles for a car', () => {
