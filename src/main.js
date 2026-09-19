@@ -1,7 +1,7 @@
 import { Application, Assets, Container, Graphics, Sprite, Texture, Rectangle } from './pixi.js';
 import { STAGES, PHYSICS, CAR_SIZE, CAR_VISUAL_SCALE, DRIFT_MARK_LIFE } from './config.js';
 import { STAGE_PATHS } from './track/stages.js';
-import { buildSurface, surfaceExtent, buildRampStructure, buildTunnelStructure, buildElevatedRoadOverlay, buildElevatedDeckShadow, elevatedRuns } from './render/surfaces.js';
+import { buildSurface, surfaceExtent, buildRampStructure, buildTunnelStructure, buildElevatedDeckShadow, elevatedRuns, deckRuns } from './render/surfaces.js';
 import { buildProps, buildGroundPatches, buildSideStreets } from './render/props.js';
 import { buildMiniMap } from './render/minimap.js';
 import { buildFinishFX } from './render/finishfx.js';
@@ -63,10 +63,20 @@ const SURFACE_SECTORS_BY_STAGE = {
   5: {
     main: 'gt_highway',
     sectors: [
-      { preset: 'gt_circuit', from: 0.000, to: 0.082 },
-      { preset: 'gt_city', from: 0.079, to: 0.245 },
+      // The circuit sector is the start/finish straight and nothing else.
+      // It used to run to 0.082, which on this lap is 7,300 units against
+      // a 3,000-unit straight, so racing kerbs and a gravel apron were
+      // being painted right through the city's first two junctions. The
+      // straight ends at 0.034; 0.024 stops short of the viaduct that
+      // crosses it. The second range is the run down to the line.
+      { preset: 'gt_circuit', from: 0.000, to: 0.024 },
+      { preset: 'gt_city', from: 0.021, to: 0.245 },
       { preset: 'gt_touge', from: 0.242, to: 0.522 },
-      { preset: 'gt_highway', from: 0.519, to: 1.000 },
+      { preset: 'gt_highway', from: 0.519, to: 0.994 },
+      // Last, so it draws over the highway sector it follows: the run out
+      // of the final corner is part of the pit straight and wants the
+      // circuit's surface, not the expressway's.
+      { preset: 'gt_circuit', from: 0.994, to: 1.000 },
     ],
   },
 };
@@ -103,6 +113,37 @@ export class Game {
     this._prevRaceState = null;
   }
 
+  /**
+   * Is (x, y) underneath the raised deck, given that it sits at `routeIndex`
+   * along the lap? False on a stage with no elevated road at all.
+   *
+   * `routeIndex` is what makes the answer mean "underneath" rather than
+   * "near": a car on the ramp is a few metres from the deck it is about to
+   * join, and a junction at the foot of one is closer still, but neither is
+   * under anything. Only elevated road from a different part of the lap
+   * counts. See _deckGrid in loadStage for the numbers.
+   */
+  underDeck(x, y, routeIndex) {
+    if (!this._deckGrid) return false;
+    const { grid, cell, reach, ownStretch } = this._deckGrid;
+    const n = this.path.count;
+    const gx = Math.floor(x / cell), gy = Math.floor(y / cell);
+    const r2 = reach * reach;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const bucket = grid.get(`${gx + dx},${gy + dy}`);
+        if (!bucket) continue;
+        for (const i of bucket) {
+          const raw = Math.abs(i - routeIndex);
+          if (Math.min(raw, n - raw) < ownStretch) continue;
+          const q = this.path.points[i];
+          if ((q[0] - x) ** 2 + (q[1] - y) ** 2 < r2) return true;
+        }
+      }
+    }
+    return false;
+  }
+
   cycleZoom() {
     this.zoomLevel = (this.zoomLevel + 1) % this.zoomLevels.length;
     this.zoom = this.baseZoom * this.zoomLevels[this.zoomLevel];
@@ -134,67 +175,13 @@ export class Game {
     // over, which from a top-down camera reads as a lamp lying in the road.
     const surfaceOverheads = [];
 
-    if (mixed) {
-      // Every sector's terrain goes into one container drawn under ALL of
-      // the sector roads. They are siblings otherwise, and on a course that
-      // crosses over itself the later sector's ground would sit on top of
-      // the earlier sector's road.
-      const terrainLayer = new Container();
-      terrainLayer.label = 'terrain';
-      this.world.addChild(terrainLayer);
-      mixed.sectors.forEach((sec, i) => {
-        const from = Math.floor(sec.from * path.count);
-        const to = Math.ceil(sec.to * path.count);
-        const surface = buildSurface(path, this.tex, {
-          roadHalf: cfg.roadHalf,
-          wallHalf: cfg.wallHalf,
-          preset: sec.preset,
-          range: { fromIndex: from, spanIndices: Math.max(1, to - from) },
-          ground: i === 0,
-          terrainLayer,
-        });
-        this.world.addChild(surface);
-        surfaceOverheads.push(surface.overhead);
-      });
-    } else {
-      const surface = buildSurface(path, this.tex, {
-        roadHalf: cfg.roadHalf,
-        wallHalf: cfg.wallHalf,
-        preset,
-      });
-      this.world.addChild(surface);
-      surfaceOverheads.push(surface.overhead);
-    }
-
-    // Tunnel: darkens/walls/lights whatever stretch of route the stage
-    // marks with setTunnelRange(). Drawn against the ground surface, before
-    // anything elevated, since a tunnel is cut into the level it sits on.
-    // No-ops on any stage that marks none.
-    this.world.addChild(buildTunnelStructure(path, { roadHalf: cfg.roadHalf, wallHalf: cfg.wallHalf }));
-
-    // --- grade separation, by layer order ---
-    // buildSurface() above laid the WHOLE route down in one set of full-loop
-    // ribbons, so where stage 4's course crosses over itself both passes are
-    // in the same meshes and neither is reliably on top. These two passes
-    // resolve it: the raised road is re-laid over the ground one, then the
-    // deck's own structure (walls, fascia, piers, cast shadow) frames it.
-    // Both no-op on a stage whose route never leaves zLevel 0.
-    this.elevatedShadow = buildElevatedDeckShadow(path, { roadHalf: cfg.roadHalf });
-    this.world.addChild(this.elevatedShadow);
-    this.elevatedDeck = buildElevatedRoadOverlay(path, this.tex, {
-      roadHalf: cfg.roadHalf,
-      preset,
-    });
-    this.world.addChild(this.elevatedDeck);
-    this.elevatedStructure = buildRampStructure(path, { wallHalf: cfg.wallHalf });
-    this.world.addChild(this.elevatedStructure);
-
-    // Grid of just the elevated points, so update() can ask "is the player
-    // underneath the deck right now" in O(1). A top-down camera has no way
-    // to show one road passing under another: the deck is opaque, so at the
+    // Grid of just the elevated points, so "is this spot underneath the
+    // deck" is an O(1) question -- asked once per junction while building,
+    // and once a frame for the player. A top-down camera has no way to
+    // show one road passing under another: the deck is opaque, so at the
     // crossing it would simply cover the car, and the player loses the car
     // they are steering. Fading everything overhead is what makes "I am
-    // under it" legible. See the fade in update().
+    // under it" legible. See underDeck() and the fade in update().
     this._deckGrid = null;
     if (elevatedRuns(path).length) {
       const cell = 400;
@@ -210,8 +197,93 @@ export class Game {
       // +210 rather than a hair past the deck edge: the fade needs to be
       // finished by the time the car is actually under the bridge, not
       // starting then, and at the current moveScale that edge arrives fast.
-      this._deckGrid = { grid, cell, reach: cfg.roadHalf + 210 };
+      //
+      // `ownStretch` is what keeps the ramp out of it. Nearby elevated road
+      // is only overhead if it is a DIFFERENT part of the lap: the deck a
+      // car is about to climb onto is a few metres in front of its bumper
+      // and well inside `reach`, so without this the road ahead fades out
+      // on every approach -- which, now that the deck is the only copy of
+      // that road, means driving at a hole in the world. Measured along the
+      // route, where a genuine crossing is hundreds of points away even
+      // though it is directly overhead.
+      this._deckGrid = {
+        grid, cell,
+        reach: cfg.roadHalf + 210,
+        ownStretch: Math.ceil(1500 / path.spacing),
+      };
     }
+
+    // Every sector's terrain goes into one container drawn under ALL of
+    // the sector roads. They are siblings otherwise, and on a course that
+    // crosses over itself the later sector's ground would sit on top of
+    // the earlier sector's road.
+    const terrainLayer = new Container();
+    terrainLayer.label = 'terrain';
+    this.world.addChild(terrainLayer);
+
+    // The raised road is built into its own container so it can fade as a
+    // whole -- see deckRuns() for why it cannot simply be re-laid over a
+    // full-route surface. Its painted markings are collected separately
+    // again so they can be taken all the way out rather than just down.
+    this.elevatedDeck = new Container();
+    this.elevatedDeck.label = 'elevated-deck';
+    this.elevatedMarkings = [];
+
+    const sectors = mixed
+      ? mixed.sectors.map((sec) => {
+        const from = Math.floor(sec.from * path.count);
+        return {
+          preset: sec.preset,
+          from,
+          span: Math.max(1, Math.ceil(sec.to * path.count) - from),
+        };
+      })
+      : [{ preset, from: 0, span: path.count }];
+
+    let groundPlaneDone = false;
+    for (const sec of sectors) {
+      for (const [from, span, up] of deckRuns(path, sec.from, sec.span)) {
+        const surface = buildSurface(path, this.tex, {
+          roadHalf: cfg.roadHalf,
+          wallHalf: cfg.wallHalf,
+          preset: sec.preset,
+          range: { fromIndex: from, spanIndices: span },
+          // The one world-spanning ground plane belongs to the first piece
+          // that is actually ON the ground -- built into the deck instead
+          // it would fade out along with it.
+          ground: !groundPlaneDone && !up,
+          // A bridge has no land under it of its own, and the band is
+          // wider than the deck, so building one with the viaduct laid a
+          // swathe of hillside over the city street it flies above.
+          terrainLayer,
+          noTerrain: up,
+          skipJunctionAt: up ? null : (k) => this.underDeck(
+            path.points[k][0], path.points[k][1], k,
+          ),
+        });
+        if (!up) groundPlaneDone = true;
+        (up ? this.elevatedDeck : this.world).addChild(surface);
+        if (up) this.elevatedMarkings.push(surface.markings);
+        surfaceOverheads.push(surface.overhead);
+      }
+    }
+
+    // Tunnel: darkens/walls/lights whatever stretch of route the stage
+    // marks with setTunnelRange(). Drawn against the ground surface, before
+    // anything elevated, since a tunnel is cut into the level it sits on.
+    // No-ops on any stage that marks none.
+    this.world.addChild(buildTunnelStructure(path, { roadHalf: cfg.roadHalf, wallHalf: cfg.wallHalf }));
+
+    // --- grade separation, by layer order ---
+    // The raised road is already built (into this.elevatedDeck, by the
+    // sector loop above); these frame it -- the cast shadow that lands on
+    // the ground below, and the deck's own walls, fascia and piers. Both
+    // no-op on a stage whose route never leaves zLevel 0. All three are
+    // parented further down, after the ground-level scenery, so a bridge
+    // passes over the buildings and grandstands beside the road below
+    // instead of under them.
+    this.elevatedShadow = buildElevatedDeckShadow(path, { roadHalf: cfg.roadHalf });
+    this.elevatedStructure = buildRampStructure(path, { wallHalf: cfg.wallHalf });
 
     // (The old stage-4 pass here painted a decorative overpass at a fixed
     // fraction of the route -- a bridge-shaped picture beside the road,
@@ -251,7 +323,16 @@ export class Game {
     const props = buildProps(path, this.propSheet, this.tex.shadow_blob, {
       edge, preset, seed: stageId, layout, worldScale: s, wallHalf: cfg.wallHalf,
     });
+    // Ground-level scenery goes UNDER the raised deck. Parented after the
+    // ground road and before the deck, so a viaduct crossing the city
+    // passes over the blocks and grandstands beside the street below --
+    // with the props on top of the deck, stage 5's start/finish stands
+    // were being painted across the viaduct's carriageway.
     this.world.addChild(props.layer);
+    this.world.addChild(this.elevatedShadow);
+    this.world.addChild(this.elevatedDeck);
+    this.world.addChild(this.elevatedStructure);
+    this.world.addChild(props.deckLayer);
 
     // Off-screen props are the cheapest draw load to remove: Stage 4 places
     // 269 of them (two sprites plus, for lights, a glow Graphics each) over
@@ -259,17 +340,36 @@ export class Game {
     // culling on by default, so every one of them was being transformed and
     // submitted every frame. Flattened to a plain array here because the
     // check runs per prop per frame.
-    this._propCull = props.layer.children.map((c) => ({
-      node: c, x: c.position.x, y: c.position.y, r: c.cullRadius || 0,
-    }));
+    this._propCull = [props.layer, props.deckLayer, props.overhead, props.deckOverhead]
+      .flatMap((c) => c.children)
+      .map((c) => ({ node: c, x: c.position.x, y: c.position.y, r: c.cullRadius || 0 }));
 
     // actors sit above the surface
     this.actors = new Container();
     this.actors.label = 'actors';
     this.world.addChild(this.actors);
 
-    // ...and the overhead road furniture sits above the actors.
+    // ...and everything that physically hangs over the carriageway --
+    // junction signal gantries, lighting columns -- sits above the actors.
     for (const oh of surfaceOverheads) this.world.addChild(oh);
+    this.world.addChild(props.overhead);
+    this.world.addChild(props.deckOverhead);
+
+    // What the under-deck fade drives, and how far each part goes. The
+    // road almost away and its markings completely (white paint at 0.10
+    // over dark ground still reads, and crossing the road being driven it
+    // reads as lines drawn across it); the structure to a ghost that still
+    // outlines the bridge; the shadow to a hint that something is above.
+    // Anything standing ON the deck goes with it, or a lamp post is left
+    // hanging in mid-air over the car.
+    this._deckFade = [
+      [this.elevatedDeck, 0.10],
+      [this.elevatedStructure, 0.30],
+      [this.elevatedShadow, 0.14],
+      [props.deckLayer, 0.10],
+      [props.deckOverhead, 0.10],
+      ...this.elevatedMarkings.map((m) => [m, 0]),
+    ];
 
     const rivalSize = CAR_SIZE[cfg.rival.sprite] || CAR_SIZE.devilz;
     this.rivalSize = rivalSize;
@@ -454,39 +554,15 @@ export class Game {
     this.race.update(dt);
 
     // Fade everything overhead while the player is underneath it, so the
-    // car stays visible where the course crosses over itself. Fading the
-    // deck road alone left the bridge reading as solid: its cast shadow is
-    // near-black over the very stretch of ground road being driven, and the
-    // walls/fascia/piers are a separate opaque layer, so between them the
-    // crossing stayed hard to read. All three fade together now, each to
-    // its own floor -- the road almost away, the structure to a ghost that
-    // still outlines the bridge, the shadow to a hint that it is overhead.
+    // car stays visible where the course crosses over itself. What fades,
+    // and how far, is set up in loadStage as this._deckFade.
     // Eased rather than switched, and faster going out than coming back:
     // arriving under a deck that is still fading is the case that loses the
     // car, while it re-appearing over a beat behind reads as natural.
-    if (this._deckGrid && this.elevatedDeck) {
-      const { grid, cell, reach } = this._deckGrid;
-      let under = false;
-      if ((p.zLevel ?? 0) < 2) {
-        const gx = Math.floor(p.x / cell), gy = Math.floor(p.y / cell);
-        const r2 = reach * reach;
-        for (let dy = -1; dy <= 1 && !under; dy++) {
-          for (let dx = -1; dx <= 1 && !under; dx++) {
-            const bucket = grid.get(`${gx + dx},${gy + dy}`);
-            if (!bucket) continue;
-            for (const i of bucket) {
-              const q = this.path.points[i];
-              if ((q[0] - p.x) ** 2 + (q[1] - p.y) ** 2 < r2) { under = true; break; }
-            }
-          }
-        }
-      }
+    if (this._deckGrid && this._deckFade) {
+      const under = (p.zLevel ?? 0) < 2 && this.underDeck(p.x, p.y, p._routeHint ?? 0);
       const k = 1 - Math.exp(-dt * (under ? 16 : 7));
-      for (const [layer, floor] of [
-        [this.elevatedDeck, 0.10],
-        [this.elevatedStructure, 0.30],
-        [this.elevatedShadow, 0.14],
-      ]) {
+      for (const [layer, floor] of this._deckFade) {
         if (!layer) continue;
         const target = under ? floor : 1;
         layer.alpha += (target - layer.alpha) * k;
@@ -628,6 +704,65 @@ export class Game {
   }
 }
 
+/**
+ * Headroom over a car's actual on-screen size. The conditioned texture is
+ * this much larger than the car is ever drawn, so the GPU is always
+ * minifying a little (no magnification blur) but never enough to need a
+ * mip level.
+ */
+const CAR_TEXTURE_MARGIN = 1.4;
+
+/**
+ * Resample one car photo down to roughly the size that car is drawn at,
+ * and restore the alpha the resampling costs it.
+ *
+ * Halved repeatedly rather than scaled in one go: a single large downscale
+ * step in canvas2d point-samples rather than averaging, which loses thin
+ * features outright. The alpha curve then runs once on the result:
+ * 1-(1-a)^2 leaves 0 and 1 alone and lifts the middle (0.5 -> 0.75), so a
+ * mostly-covered texel reads solid again while a genuine outline texel
+ * stays soft.
+ *
+ * Returns the texture unchanged when the photo is already at or under the
+ * target.
+ */
+function conditionCarTexture(texture, targetLong) {
+  const src = texture.source?.resource;
+  if (!src?.width || Math.max(src.width, src.height) <= targetLong) return texture;
+
+  let w = src.width, h = src.height;
+  let canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  let ctx = canvas.getContext('2d');
+  ctx.drawImage(src, 0, 0);
+
+  const step = (nw, nh) => {
+    const next = document.createElement('canvas');
+    next.width = nw; next.height = nh;
+    const nctx = next.getContext('2d');
+    nctx.imageSmoothingEnabled = true;
+    nctx.imageSmoothingQuality = 'high';
+    nctx.drawImage(canvas, 0, 0, nw, nh);
+    canvas = next; ctx = nctx; w = nw; h = nh;
+  };
+  while (Math.max(w, h) > targetLong * 2) {
+    step(Math.max(1, Math.round(w / 2)), Math.max(1, Math.round(h / 2)));
+  }
+  if (Math.max(w, h) > targetLong) {
+    const k = targetLong / Math.max(w, h);
+    step(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
+  }
+
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  for (let i = 3; i < d.length; i += 4) {
+    const a = d[i] / 255;
+    d[i] = Math.round((1 - (1 - a) * (1 - a)) * 255);
+  }
+  ctx.putImageData(img, 0, 0);
+  return Texture.from(canvas);
+}
+
 export async function boot({ stageId = 1, onReady } = {}) {
   const app = new Application();
   await app.init({
@@ -673,22 +808,35 @@ export async function boot({ stageId = 1, onReady } = {}) {
 
   for (const k of WRAPPED) tex[k].source.addressMode = 'repeat';
 
-  // Car art is drawn from large source photos (the rival roster is well
-  // over 700px on a side) down to a car's actual ~50-90px on-screen size --
-  // a >10x minification. Without mipmaps, GPU bilinear sampling at that
-  // ratio can blend a texel's opaque colour with a same-sample-footprint
-  // *transparent* neighbour (exactly what happens at a car's thin
-  // silhouette details -- tyres, mirrors) and come out partially see-
-  // through, which barely reads against dark asphalt but is obvious over
-  // a bright crosswalk or kerb line. Mipmapping fixes the sampling, not
-  // just antialiasing quality.
+  // Car art comes from source photos far larger than a car is ever drawn
+  // (up to 1189px on the long side against an on-screen 98px), and the
+  // sprite is drawn at a fixed CSS size, so the world scale cancels out and
+  // the minification is the same at every zoom level: roughly 6x to 12x.
+  //
+  // That used to be handled with mipmaps, which is the wrong tool here.
+  // Every mip level averages alpha along with colour, so an opaque feature
+  // a few source pixels across that is ISLANDED in transparency is averaged
+  // away to a partial alpha and renders see-through. That is exactly stage
+  // 2's rival: its wheels are drawn standing clear of the body with a
+  // 48px transparent gap either side, so there is nothing opaque nearby for
+  // the averaging to pull from, and they came out washed out over anything
+  // brighter than asphalt. The other cars' wheels touch the bodywork, so
+  // the same averaging keeps them solid -- which is why only one car showed
+  // it.
+  //
+  // Resampling to the size the car is actually drawn at removes the cause
+  // rather than filtering around it: one high-quality downscale we control,
+  // an alpha curve to put back what it costs, and then no mip chain at all
+  // because at CAR_TEXTURE_MARGIN there is no longer anything to minify.
+  const carTargetLong = (k) => {
+    const size = CAR_SIZE[k] || CAR_SIZE.player;
+    return Math.ceil(Math.max(size.w, size.h) * app.renderer.resolution * CAR_TEXTURE_MARGIN);
+  };
   for (const k of Object.keys(CARS)) {
+    cars[k] = conditionCarTexture(cars[k], carTargetLong(k));
     const src = cars[k].source;
-    src.mipmap = 'on';
-    // `mipmap` alone is just the policy flag -- PixiJS only actually
-    // generates the mip chain when this is also on, otherwise it's sampled
-    // as if mipmap were 'off' regardless of the setting above.
-    src.autoGenerateMipmaps = true;
+    src.mipmap = 'off';
+    src.autoGenerateMipmaps = false;
     src.update();
   }
 

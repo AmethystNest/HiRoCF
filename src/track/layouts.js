@@ -10,8 +10,34 @@
 /**
  * Stage 5's start/finish venue: stands and lighting down the outside of the
  * pit straight, the pit wall and garages down the inside, and the podium at
- * the line. Lap fractions, since the course is generated -- 0.000 to ~0.082
- * is the gt_circuit road sector.
+ * the line.
+ *
+ * Laid out in WORLD UNITS from the start line (`atDist`, negative before
+ * it), not lap fractions, because what the venue has to fit inside is a
+ * length of road, not a share of the lap. The straight it stands on runs
+ * from about -500 (out of the last corner) to +3040 (into the first city
+ * junction), and the viaduct comes down across it at +2160, so there are
+ * roughly 2600 usable units. The first version of this was spaced in lap
+ * fractions over 0.003-0.082, which on an 88,945-unit lap is 7,300 units
+ * -- nearly three times the straight. Everything past the end of it landed
+ * on the junctions and the corners beyond, which is what had grandstands
+ * standing in the middle of the road.
+ *
+ * Positions run past the end of the straight on purpose. Nothing here is
+ * exempt from buildProps' road test any more (see `force` there), so a
+ * candidate that would sit on any carriageway is simply dropped, and the
+ * row fills exactly as much of the straight as there is. That is also why
+ * each band passes its own `reachPad`: these are 'face' props, whose width
+ * runs ALONG the road once rotated, so the default max(w,h)/2 stands in
+ * for a depth toward the road they do not have, and would reject the whole
+ * venue.
+ *
+ * The laterals have very little room to move in. Below about 443 from the
+ * centreline the road test rejects the prop (the player can reach it);
+ * above about 540 it is outside the camera's own half-width at this
+ * stage's zoom, so it is placed, costs draw time, and is never seen. Only
+ * the tallest structures sit further out, because their art extends AWAY
+ * from the road from a base that stays inside that window.
  *
  * `fromCentre` throughout: these are positioned against the centreline, not
  * the surface edge, because the whole point is a fixed distance off a road
@@ -19,35 +45,29 @@
  */
 function gpVenue() {
   const out = [];
-  const at = (i, step, from) => from + i * step;
-  // outside: a continuous bank of stands behind a crowd fence
-  for (let i = 0; i < 8; i++) {
-    out.push({ name: 'grandstand', at: at(i, 0.0105, 0.004), side: 1, lateral: 560, fromCentre: true, force: true });
-  }
-  for (let i = 0; i < 12; i++) {
-    out.push({ name: 'crowd_fence', at: at(i, 0.0068, 0.003), side: 1, lateral: 424, fromCentre: true, force: true });
-  }
-  // inside: pit wall, then the garages behind it
-  for (let i = 0; i < 12; i++) {
-    out.push({ name: 'pitwall_barrier', at: at(i, 0.0068, 0.003), side: -1, lateral: 400, fromCentre: true, force: true });
-  }
-  for (let i = 0; i < 6; i++) {
-    out.push({
-      name: i % 2 ? 'pit_tent_red' : 'pit_tent_blue',
-      at: at(i, 0.0135, 0.008), side: -1, lateral: 530, fromCentre: true, force: true,
-    });
-  }
+  const row = (name, count, from, step, props) => {
+    for (let i = 0; i < count; i++) out.push({ ...props, name, atDist: from + i * step });
+  };
+  const band = (side, lateral, reachPad) => ({
+    side, lateral, reachPad, fromCentre: true, force: true,
+  });
+
+  // outside: a crowd fence at the trackside, a bank of stands behind it
+  row('crowd_fence', 7, -420, 560, band(1, 470, 30));
+  row('grandstand', 4, -300, 940, band(1, 560, 90));
+  // inside: pit wall at the trackside, garages behind it
+  row('pitwall_barrier', 7, -420, 560, band(-1, 460, 30));
+  row('pit_tent_blue', 3, -200, 960, band(-1, 590, 60));
+  row('pit_tent_red', 3, 280, 960, band(-1, 590, 60));
   // lighting rigs down both sides, offset from each other
-  for (let i = 0; i < 4; i++) {
-    out.push({ name: 'floodlight', at: at(i, 0.021, 0.006), side: 1, lateral: 670, fromCentre: true, force: true });
-    out.push({ name: 'floodlight', at: at(i, 0.021, 0.016), side: -1, lateral: 670, fromCentre: true, force: true });
-  }
+  row('floodlight', 3, -260, 1000, band(1, 660, 50));
+  row('floodlight', 3, 240, 1000, band(-1, 660, 50));
   // the line itself
-  out.push({ name: 'podium_stage', at: 0.020, side: -1, lateral: 650, fromCentre: true, force: true });
-  out.push({ name: 'marshal_tower', at: 0.002, side: -1, lateral: 640, fromCentre: true, force: true });
-  out.push({ name: 'broadcast_camera_tower', at: 0.036, side: 1, lateral: 640, fromCentre: true, force: true });
-  out.push({ name: 'racing_billboard', at: 0.055, side: 1, lateral: 470, fromCentre: true, force: true });
-  out.push({ name: 'racing_billboard', at: 0.068, side: -1, lateral: 470, fromCentre: true, force: true });
+  out.push({ name: 'marshal_tower', atDist: -330, ...band(-1, 640, 50) });
+  out.push({ name: 'podium_stage', atDist: 150, ...band(-1, 620, 60) });
+  out.push({ name: 'broadcast_camera_tower', atDist: 700, ...band(1, 650, 50) });
+  out.push({ name: 'racing_billboard', atDist: 1150, ...band(-1, 520, 60) });
+  out.push({ name: 'racing_billboard', atDist: 1900, ...band(1, 520, 60) });
   return out;
 }
 

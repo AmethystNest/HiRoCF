@@ -302,6 +302,7 @@ export const SURFACE_PRESETS = {
  */
 export function buildSurface(path, tex, {
   roadHalf, wallHalf, preset = 'circuit', range = null, ground = true, terrainLayer = null,
+  noTerrain = false, skipJunctionAt = null,
 }) {
   const P = SURFACE_PRESETS[preset] || SURFACE_PRESETS.circuit;
   const layer = new Container();
@@ -311,6 +312,16 @@ export function buildSurface(path, tex, {
   // passes under it instead of over it; see paintSignalOverhead.
   layer.overhead = new Container();
   layer.overhead.label = 'surface-overhead';
+  // Everything PAINTED on the carriageway -- lane lines, crossings, the
+  // start marker -- collected so a caller can hide it on its own. On the
+  // raised deck that matters: faded to the same 0.10 as the road, white
+  // lines over dark ground still read clearly, and since the deck crosses
+  // the road below at an angle they read as lines drawn ACROSS the road
+  // being driven. The deck's road surface can stay as a ghost; its
+  // markings have to go completely.
+  const markings = new Container();
+  markings.label = 'surface-markings';
+  layer.markings = markings;
 
   // A stage whose road changes character part-way round (stage 5 runs city
   // streets, then a pass, then an expressway) calls this once per sector
@@ -360,7 +371,12 @@ export function buildSurface(path, tex, {
   // road -- stage 5's viaduct flies over the city, and with the terrain in
   // the sector's own container it painted the city street out of existence
   // for a third of a block either side.
-  if (P.terrain) {
+  //
+  // A stretch carried on a bridge opts out with `noTerrain`: there is no
+  // land under a viaduct to lay, and the band is wider than the deck, so
+  // built with the deck it paints a swathe of hillside over whatever the
+  // bridge is flying above.
+  if (P.terrain && !noTerrain) {
     (terrainLayer ?? layer).addChild(ribbonMesh(path, tex[P.ground], {
       ...R,
       innerOffset: -P.terrain, outerOffset: P.terrain,
@@ -417,11 +433,15 @@ export function buildSurface(path, tex, {
     }));
   }
 
+  // Everything from here to the boundary bands is paint on the road, and
+  // goes into the markings container at exactly the z it would have had.
+  layer.addChild(markings);
+
   // --- painted edge lines ---
   if (P.edgeLine) {
     for (const side of [1, -1]) {
       const inner = side * (roadHalf - P.edgeLine.inset);
-      layer.addChild(ribbonMesh(path, Texture.WHITE, {
+      markings.addChild(ribbonMesh(path, Texture.WHITE, {
         ...R,
         innerOffset: inner, outerOffset: inner - side * P.edgeLine.width,
         tint: P.edgeLine.tint, alpha: P.edgeLine.alpha,
@@ -432,7 +452,7 @@ export function buildSurface(path, tex, {
   // --- dashed centre line (public-road stages) ---
   if (P.centreLine) {
     const cl = P.centreLine;
-    layer.addChild(ribbonMesh(path, cl.texture ? tex[cl.texture] : Texture.WHITE, {
+    markings.addChild(ribbonMesh(path, cl.texture ? tex[cl.texture] : Texture.WHITE, {
         ...R,
       innerOffset: -cl.width / 2, outerOffset: cl.width / 2,
       uInner: 0, uOuter: 1, vPerWorldUnit: cl.vPer ?? 1 / 1024,
@@ -445,7 +465,7 @@ export function buildSurface(path, tex, {
   // Three usable lanes: two dashed white separators at ±1/3 road width.
   if (P.highwayLanes) {
     for (const off of [-roadHalf / 3, roadHalf / 3]) {
-      layer.addChild(ribbonMesh(path, tex.dash_white, {
+      markings.addChild(ribbonMesh(path, tex.dash_white, {
         ...R,
         innerOffset: off - 6, outerOffset: off + 6,
         uInner: 0, uOuter: 1, vPerWorldUnit: 1 / 165, alpha: 0.94,
@@ -458,7 +478,7 @@ export function buildSurface(path, tex, {
   // since a public road has no painted start line ---
   if (P.paintStart !== false && inSpan(0)) {
     const startSpan = 3;
-    layer.addChild(ribbonMesh(path, tex.checker, {
+    markings.addChild(ribbonMesh(path, tex.checker, {
         ...R,
       innerOffset: -roadHalf, outerOffset: roadHalf,
       uInner: 0, uOuter: 1,
@@ -477,7 +497,7 @@ export function buildSurface(path, tex, {
   if (P.startMarker === 'crosswalk' && inSpan(0)) {
     const g = new Graphics();
     paintCrossing(g, path, 0, roadHalf - (P.edgeLine?.inset ?? 14) - 4, { stopLine: false });
-    layer.addChild(g);
+    markings.addChild(g);
   }
 
   // --- junction markings: a crossing on each arm of every corner ---
@@ -498,12 +518,17 @@ export function buildSurface(path, tex, {
     for (const [enter, exit] of cornerRuns(path, 0.16)) {
       for (const k of [path.wrap(enter - setback), path.wrap(exit + setback)]) {
         if (!inSpan(k)) continue;
+        // A junction the viaduct flies over gets no signals. The gantry is
+        // drawn above the cars, which necessarily puts it above the deck
+        // too, so a signal head left here shows through the bridge from
+        // the carriageway on top of it.
+        if (skipJunctionAt?.(k)) continue;
         paintCrossing(g, path, k, half, { stopLine: true });
         paintSignalShadow(g, path, k, signalOut, signalReach);
         paintSignalOverhead(gantry, path, k, signalOut, signalReach);
       }
     }
-    layer.addChild(g);
+    markings.addChild(g);
     layer.overhead.addChild(gantry);
   }
 
@@ -556,7 +581,7 @@ export function buildSurface(path, tex, {
         px - tx * (hw - 10) + nx * side * (hl - 18), py - ty * (hw - 10) + ny * side * (hl - 18),
       ]).fill({ color: 0xffd34d, alpha: 0.95 });
     }
-    layer.addChild(g);
+    markings.addChild(g);
   }
 
   // --- boundary bands last, outermost first.
@@ -1100,6 +1125,37 @@ export function elevatedRuns(path) {
 }
 
 /**
+ * Cut one index range into consecutive pieces that are each wholly on the
+ * raised deck or wholly on the ground, as `[fromIndex, spanIndices, up]`.
+ *
+ * This is what lets a grade separation actually read as one: the raised
+ * pieces are built into a container of their own that fades while the
+ * player drives underneath, and because the road there exists ONLY in that
+ * container there is nothing opaque left behind when it does. Building the
+ * whole route in one pass and re-laying the deck over it cannot work --
+ * the first pass's copy of the deck does not fade, so the bridge stays
+ * solid however far the overlay is taken down.
+ *
+ * Pieces meet on a shared index rather than an index apart, because a
+ * ribbon of span n spans point `from` to `from + n` inclusive; abutting
+ * them anywhere else leaves a one-quad hole along the join.
+ */
+export function deckRuns(path, fromIndex, spanIndices) {
+  const up = (o) => path.zLevels[path.wrap(fromIndex + o)] >= 2;
+  const out = [];
+  let start = 0;
+  let cur = up(0);
+  for (let o = 1; o < spanIndices; o++) {
+    if (up(o) === cur) continue;
+    out.push([path.wrap(fromIndex + start), o - start, cur]);
+    start = o;
+    cur = !cur;
+  }
+  out.push([path.wrap(fromIndex + start), spanIndices - start, cur]);
+  return out;
+}
+
+/**
  * The elevated deck's cast shadow, as its own layer so it can sit on the
  * ground surface while the deck road itself (which fades when the player
  * drives underneath -- see main.js) is drawn separately above it.
@@ -1121,62 +1177,6 @@ export function buildElevatedDeckShadow(path, { roadHalf = 360 } = {}) {
       tint: 0x04060a, alpha: 0.55, fromIndex: from, spanIndices: span,
     }));
   }
-  return layer;
-}
-
-export function buildElevatedRoadOverlay(path, tex, { roadHalf = 360, preset = 'highway' } = {}) {
-  const P = SURFACE_PRESETS[preset] || SURFACE_PRESETS.circuit;
-  const layer = new Container();
-  layer.label = 'elevated-road-overlay';
-
-  const runs = elevatedRuns(path);
-  if (!runs.length) return layer;
-
-  for (const [from, span] of runs) {
-    const range = { fromIndex: from, spanIndices: span };
-
-    layer.addChild(ribbonMesh(path, tex[P.asphalt.texture], {
-      innerOffset: -roadHalf, outerOffset: roadHalf,
-      uInner: 0, uOuter: P.asphalt.uRepeat, vPerWorldUnit: P.asphalt.vPer,
-      tint: P.asphalt.tint, ...range,
-    }));
-
-    if (P.ruts) {
-      for (const off of [-P.ruts.offset, P.ruts.offset]) {
-        layer.addChild(ribbonMesh(path, tex.rut_overlay, {
-          innerOffset: off - P.ruts.width / 2, outerOffset: off + P.ruts.width / 2,
-          uInner: 0, uOuter: 1, vPerWorldUnit: P.ruts.vPer, alpha: P.ruts.alpha, ...range,
-        }));
-      }
-    }
-
-    for (const side of [1, -1]) {
-      layer.addChild(ribbonMesh(path, tex.edge_shadow, {
-        innerOffset: side * roadHalf, outerOffset: side * (roadHalf - 110),
-        uInner: 0, uOuter: 1, vPerWorldUnit: 1 / 2048, alpha: 0.9, ...range,
-      }));
-    }
-
-    if (P.edgeLine) {
-      for (const side of [1, -1]) {
-        const inner = side * (roadHalf - P.edgeLine.inset);
-        layer.addChild(ribbonMesh(path, Texture.WHITE, {
-          innerOffset: inner, outerOffset: inner - side * P.edgeLine.width,
-          tint: P.edgeLine.tint, alpha: P.edgeLine.alpha, ...range,
-        }));
-      }
-    }
-
-    if (P.highwayLanes) {
-      for (const off of [-roadHalf / 3, roadHalf / 3]) {
-        layer.addChild(ribbonMesh(path, tex.dash_white, {
-          innerOffset: off - 6, outerOffset: off + 6,
-          uInner: 0, uOuter: 1, vPerWorldUnit: 1 / 165, alpha: 0.94, ...range,
-        }));
-      }
-    }
-  }
-
   return layer;
 }
 

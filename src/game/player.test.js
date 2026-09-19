@@ -31,10 +31,19 @@ describe('nitro: banked charges', () => {
 
   it('spends one charge and burns for one full duration', () => {
     const p = car();
+    p.nitroStock = 1;
     expect(p.tryNitro()).toBe(true);
-    expect(p.nitroStock).toBe(NITRO.startStock - 1);
+    expect(p.nitroStock).toBe(0);
     expect(p.boosting).toBe(true);
     expect(p.boostTimer).toBeCloseTo(DUR, 6);
+  });
+
+  it('has nothing to fire on the grid until the meter has banked one', () => {
+    const p = car();
+    expect(p.tryNitro()).toBe(false);
+    run(p, 100 / PHYSICS.boostRecover);
+    expect(p.nitroStock).toBe(1);
+    expect(p.tryNitro()).toBe(true);
   });
 
   it('refuses, and spends nothing, with no charge in hand', () => {

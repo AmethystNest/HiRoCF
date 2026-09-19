@@ -345,6 +345,26 @@ export function buildProps(path, sheet, shadowTex, {
   const rng = mulberry32(seed * 7919 + 13);
   const layer = new Container();
   layer.label = 'props';
+  // Props that stand on the raised deck rather than the ground, kept apart
+  // so the caller can draw them above the deck while everything on the
+  // ground below is drawn under it.
+  const deckLayer = new Container();
+  deckLayer.label = 'props-deck';
+  // Lighting columns lean their head back out over the carriageway, so
+  // like the junction signals they have to be drawn ABOVE the cars -- in
+  // the props layer proper the car passes over the lamp head, which from
+  // a top-down camera reads as a light lying in the road. Split by level
+  // for the same reason as deckLayer.
+  const overhead = new Container();
+  overhead.label = 'props-overhead';
+  const deckOverhead = new Container();
+  deckOverhead.label = 'props-deck-overhead';
+  // Masts: art drawn as a pole standing beside the road with its head --
+  // lamp, floodlight bank, camera boom, observation platform -- reaching
+  // back out over the carriageway from a base that does not.
+  const OVERHANGING = new Set([
+    'street_light', 'floodlight', 'marshal_tower', 'broadcast_camera_tower',
+  ]);
   const placed = [];
   // How far a car can actually reach from ANY point on the centreline --
   // used below to reject a placement that's clear of its own section's
@@ -404,22 +424,30 @@ export function buildProps(path, sheet, shadowTex, {
     // cars and buildings visually overlap even though fits() reported no
     // conflict.
     const pad = opts.pad ?? Math.max(w, h) / 2;
-    if (!opts.force) {
-      if (!fits(p.x, p.y, pad)) return false;
-      // Guard against the prop landing inside a *different* part of the
-      // course's reach than the one it was placed relative to -- see the
-      // playerReach comment above. Defaults to the same conservative
-      // max(w,h)/2 as `pad`, but callers that know their prop's actual
-      // depth toward the road (a 'face' prop's width runs ALONG the road
-      // once rotated, so its own half-width overstates how far it reaches
-      // toward traffic) can pass a tighter `reachPad` -- guardrail relies
-      // on this, since max(w,h)/2 was rejecting most placements near every
-      // hairpin and leaving the rail full of gaps for no visual reason.
-      if (playerReach != null) {
-        const nearestLane = path.nearest(p.x, p.y);
-        const reachPad = opts.reachPad ?? Math.max(w, h) / 2;
-        if (nearestLane.dist < playerReach + reachPad) return false;
-      }
+    // `force` waives the prop-vs-prop test only. A hand-placed row knows
+    // its own spacing, and fits() is a plain circular test that cannot
+    // tell that two bands at different distances from the road never
+    // actually overlap on screen.
+    if (!opts.force && !fits(p.x, p.y, pad)) return false;
+    // Nothing waives this one. Guard against the prop landing inside a
+    // *different* part of the course's reach than the one it was placed
+    // relative to -- see the playerReach comment above. Defaults to the
+    // same conservative max(w,h)/2 as `pad`, but callers that know their
+    // prop's actual depth toward the road (a 'face' prop's width runs
+    // ALONG the road once rotated, so its own half-width overstates how
+    // far it reaches toward traffic) can pass a tighter `reachPad` --
+    // guardrail relies on this, since max(w,h)/2 was rejecting most
+    // placements near every hairpin and leaving the rail full of gaps for
+    // no visual reason.
+    //
+    // Waiving it as well is what put stage 5's grandstands across the
+    // city junctions: a hand-placed row laid out for a pit straight runs
+    // straight off the end of it, and with no road test left there was
+    // nothing to stop the overrun landing on the carriageway.
+    if (playerReach != null) {
+      const nearestLane = path.nearest(p.x, p.y);
+      const reachPad = opts.reachPad ?? Math.max(w, h) / 2;
+      if (nearestLane.dist < playerReach + reachPad) return false;
     }
 
     const holder = new Container();
@@ -481,7 +509,9 @@ export function buildProps(path, sheet, shadowTex, {
     // rotated prop's corner reaches further than either half-extent), so a
     // prop pops in well before its edge could enter the view.
     holder.cullRadius = Math.max(w, h) * 1.2;
-    layer.addChild(holder);
+    const onDeck = path.zLevels[idx] >= 2;
+    const over = OVERHANGING.has(name);
+    (over ? (onDeck ? deckOverhead : overhead) : (onDeck ? deckLayer : layer)).addChild(holder);
     placed.push({ x: p.x, y: p.y, pad });
     return true;
   };
@@ -491,8 +521,17 @@ export function buildProps(path, sheet, shadowTex, {
     // `lateral` is normally measured out from the built surface edge; things
     // that span the road (gantries) need it measured from the centreline.
     const lateral = lm.fromCentre ? (lm.lateral ?? 0) : edge + (lm.lateral ?? 0);
-    add(lm.name, lm.at * path.length, lm.side, lateral, {
-      scale: lm.scale, shadowAlpha: lm.shadowAlpha, pad: lm.pad, force: lm.force,
+    // `at` is a lap fraction; `atDist` is world units from the start line,
+    // and may be negative to sit before it. A row of structures whose own
+    // size is in world units -- a pit straight's stands and pit wall -- is
+    // spaced in world units too, or its spacing silently changes with the
+    // lap length every time the course is regenerated.
+    const dist = lm.atDist != null
+      ? ((lm.atDist % path.length) + path.length) % path.length
+      : lm.at * path.length;
+    add(lm.name, dist, lm.side, lateral, {
+      scale: lm.scale, shadowAlpha: lm.shadowAlpha, pad: lm.pad,
+      force: lm.force, reachPad: lm.reachPad,
     });
   }
 
@@ -720,8 +759,8 @@ export function buildProps(path, sheet, shadowTex, {
     }
   }
 
-  layer.sortableChildren = true;
-  return { layer };
+  for (const c of [layer, deckLayer, overhead, deckOverhead]) c.sortableChildren = true;
+  return { layer, deckLayer, overhead, deckOverhead };
 }
 
 /**

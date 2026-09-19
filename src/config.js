@@ -78,9 +78,8 @@ export const RACE = {
  */
 export const NITRO = {
   maxStock: 3,
-  // One ready on the grid, as the single-boost build had. Starting on a
-  // full three would hand the opening straight a seven-second burst.
-  startStock: 1,
+  // Nothing on the grid: the first charge has to be earned off the line.
+  startStock: 0,
   chainWindow: 1.0,
 };
 
