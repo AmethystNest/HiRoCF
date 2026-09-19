@@ -14,8 +14,12 @@
  */
 import { Container, Graphics } from '../pixi.js';
 
-const PLAYER_EXHAUSTS = [-14, 14];
-const RIVAL_EXHAUSTS = [-15, 15];
+// Lateral exhaust spacing as a fraction of the vehicle's own width, so a
+// wider vehicle's pipes sit under its body rather than inside its centre
+// line. 14/70 and 15/74 are the player's and the car rivals' original
+// pixel offsets, unchanged.
+const PLAYER_EXHAUST_SPREAD = 14 / 70;
+const RIVAL_EXHAUST_SPREAD = 15 / 74;
 
 export function buildBoostFlame() {
   const view = new Container();
@@ -41,8 +45,14 @@ export function buildBoostFlame() {
    * @param s     worldScale (1/zoom) -- converts the effect's screen-pixel
    *              authoring sizes into world units, same convention used
    *              everywhere else cars/effects are sized in this file.
+   * @param size  the vehicle's drawn {w, h} in screen pixels. The flame was
+   *              pinned 45px behind centre, which is the rear of a 98-tall
+   *              car and the MIDDLE of stage 4's 318-tall box truck -- an
+   *              exhaust plume coming out of the side of a trailer. It is
+   *              measured off the vehicle now; 0.46 * 98 is the same 45 the
+   *              cars had, so nothing about them changes.
    */
-  function update(car, s) {
+  function update(car, s, size = { w: 70, h: 98 }) {
     view.position.set(car.x, car.y);
     // Follow the visible chassis angle, not only the travel/heading angle.
     // During a drift the body is yawed by driftVisualAngle, so the exhaust
@@ -53,10 +63,10 @@ export function buildBoostFlame() {
     if (!car.boosting) return;
 
     const flicker = 1 + Math.random() * 0.3;
-    const exhausts = car?.constructor?.name === 'PlayerCar' ? PLAYER_EXHAUSTS : RIVAL_EXHAUSTS;
-    for (const ex of exhausts) {
+    const spread = (car?.constructor?.name === 'PlayerCar' ? PLAYER_EXHAUST_SPREAD : RIVAL_EXHAUST_SPREAD) * size.w;
+    for (const ex of [-spread, spread]) {
       const x = ex * s;
-      const base = 45 * s;
+      const base = size.h * 0.46 * s;
 
       const outerTip = base + 36 * flicker * s;
       outerGfx.poly([x - 5.5 * s, base, x, outerTip, x + 5.5 * s, base])

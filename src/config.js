@@ -134,7 +134,18 @@ export const STAGES = {
     roadHalf: 360, wallHalf: 420,
     playerPhysics: { wallInset: 3, wallSpeedMul: 0.82 },
     wallTriggerExtra: 6,
-    rival: { maxSpeed: 790, accel: 260, turn: 1.95, sprite: 'ae86', tint: 0xe0b23a, cornerSlow: 0.10, block: false, weave: false },
+    rival: {
+      maxSpeed: 790, accel: 260, turn: 1.95, sprite: 'truck0164',
+      cornerSlow: 0.10, block: false, weave: false,
+      // A loaded box truck does not get shoved aside by a car. `mass` is
+      // how much of a contact the OTHER vehicle absorbs (see
+      // resolveContacts): at 9 against the player's 1 the truck takes about
+      // 6% of the separation and keeps essentially all of its speed, while
+      // the player is the one that bounces and scrubs off pace. No `tint`
+      // here -- the others are tinted to recolour a shared car sprite, and
+      // tinting this one would just stain a white truck.
+      mass: 9,
+    },
     bestKey: 'topdownRacer_stage4_best_ms',
   },
   5: {
@@ -177,6 +188,16 @@ export const CAR_SIZE = {
   devilz: { w: 74, h: 98 },
   ae86:   { w: 74, h: 98 },
   prius:  { w: 74, h: 98 },
+  // Stage 4's rival is a box truck, so this one is NOT set equal to the
+  // player's box -- the whole point of it is that it is a much larger
+  // vehicle. Two things fix the numbers rather than taste. The height
+  // follows the sprite's own aspect (its cutout is 210 x 742, so 0.283):
+  // picking h freely would stretch a photographed truck, which reads worse
+  // than any size error. And the width is set against the player's ACTUAL
+  // drawn body, not its box -- the player's art fills 96% of its canvas
+  // width, so its 70 draws as ~67, and 90 here is a little over 1.3x that.
+  // The truck's own art is cropped to its silhouette, so 90 draws as 90.
+  truck0164: { w: 90, h: 318 },
 };
 
 /**

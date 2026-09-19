@@ -168,6 +168,9 @@ export class RivalCar {
     // reads as a normal rival braking hard for a corner; a drift-spec car like
     // stage 3's AE86 wants to carry speed through instead, so this is
     // per-stage tunable rather than a fixed constant.
+    // How much of a body contact the OTHER vehicle absorbs (see
+    // resolveContacts in race.js). 1 is a car; stage 4's box truck is 9.
+    this.contactMass = tuning.mass ?? 1;
     this.cornerSlow = tuning.cornerSlow ?? 0.45;
     // How far ahead (in route points) the corner-braking scan reaches. The
     // default 22 is ~570 world units, which at cruising speed is about half

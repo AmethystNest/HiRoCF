@@ -126,14 +126,32 @@ export class Race {
  * Three circles down the length of each car approximate its body well enough
  * for arcade contact, and cost far less than a polygon test.
  */
-function hullCircles(car, size) {
+export function hullCircles(car, size) {
   const fx = Math.cos(car.angle), fy = Math.sin(car.angle);
   const w = size.w, h = size.h;
-  return [
-    { x: car.x + fx * h * 0.27, y: car.y + fy * h * 0.27, r: w * 0.285 },
-    { x: car.x, y: car.y, r: w * 0.355 },
-    { x: car.x - fx * h * 0.27, y: car.y - fy * h * 0.27, r: w * 0.305 },
-  ];
+
+  // Three circles cover a car, whose body is only about 1.4 times longer
+  // than it is wide. They do not cover a truck: at 3.5 times longer the
+  // outermost circles reach 0.27h + 0.285w from the centre, which leaves
+  // the front and rear of the vehicle with no collision at all -- a car
+  // would drive through the nose of it. Anything appreciably longer than
+  // it is wide gets a row of circles instead, spaced so they overlap.
+  if (h < w * 2) {
+    return [
+      { x: car.x + fx * h * 0.27, y: car.y + fy * h * 0.27, r: w * 0.285 },
+      { x: car.x, y: car.y, r: w * 0.355 },
+      { x: car.x - fx * h * 0.27, y: car.y - fy * h * 0.27, r: w * 0.305 },
+    ];
+  }
+  const r = w * 0.35;
+  const reach = h / 2 - r;                 // end caps sit exactly at the ends
+  const count = Math.max(3, Math.ceil((reach * 2) / (r * 1.25)) + 1);
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    const t = count === 1 ? 0 : (i / (count - 1)) * 2 - 1;   // -1 .. +1
+    out.push({ x: car.x + fx * reach * t, y: car.y + fy * reach * t, r });
+  }
+  return out;
 }
 
 /**
@@ -201,10 +219,20 @@ export function resolveContacts(cars, sizes, passes = 4) {
         const bIsRival = b?.constructor?.name === 'RivalCar';
         if (aIsRival && bIsPlayer) a.contactRecoveryTimer = Math.max(a.contactRecoveryTimer || 0, 0.40);
         if (bIsRival && aIsPlayer) b.contactRecoveryTimer = Math.max(b.contactRecoveryTimer || 0, 0.40);
-        let aPower = aIsPlayer ? 0.55 : 0.45;
-        let bPower = bIsPlayer ? 0.55 : 0.45;
-        if (aIsPlayer && a.boosting) aPower += 0.10;
-        if (bIsPlayer && b.boosting) bPower += 0.10;
+        // `contactMass` scales that push power, so a heavy vehicle both
+        // takes less of the separation and gives up less speed. A car
+        // leaves it at 1 and behaves exactly as before; stage 4's box
+        // truck sets 9, which is what makes it not get shoved aside.
+        const am = Math.max(0.2, a.contactMass ?? 1);
+        const bm = Math.max(0.2, b.contactMass ?? 1);
+        let aPower = (aIsPlayer ? 0.55 : 0.45) * am;
+        let bPower = (bIsPlayer ? 0.55 : 0.45) * bm;
+        if (aIsPlayer && a.boosting) aPower += 0.10 * am;
+        if (bIsPlayer && b.boosting) bPower += 0.10 * bm;
+        // how much harder a hit lands on each of them, capped so a very
+        // heavy rival still cannot delete the player's whole lap in one
+        const aHit = Math.min(3, bm / am);
+        const bHit = Math.min(3, am / bm);
 
         const totalPower = Math.max(0.001, aPower + bPower);
         const separate = best.overlap * 1.04;
@@ -228,18 +256,21 @@ export function resolveContacts(cars, sizes, passes = 4) {
 
           if (aTowardB > 0.45 && a.speed > b.speed + 12) {
             const closing = Math.min(180, a.speed - b.speed);
-            const shove = closing * 0.22 * (aPower / 0.55);
+            // the shove a rear-ending car delivers is shared out by mass:
+            // running into a truck pushes the truck barely at all and
+            // costs the car most of the closing speed
+            const shove = closing * 0.22 * (aPower / 0.55) * bHit;
             b.speed += shove;
-            b.x += ahx * closing * 0.010;
-            b.y += ahy * closing * 0.010;
-            a.speed -= closing * 0.035;
+            b.x += ahx * closing * 0.010 * bHit;
+            b.y += ahy * closing * 0.010 * bHit;
+            a.speed -= closing * 0.035 * aHit;
           } else if (bTowardA > 0.45 && b.speed > a.speed + 12) {
             const closing = Math.min(180, b.speed - a.speed);
-            const shove = closing * 0.22 * (bPower / 0.55);
+            const shove = closing * 0.22 * (bPower / 0.55) * aHit;
             a.speed += shove;
-            a.x += bhx * closing * 0.010;
-            a.y += bhy * closing * 0.010;
-            b.speed -= closing * 0.035;
+            a.x += bhx * closing * 0.010 * aHit;
+            a.y += bhy * closing * 0.010 * aHit;
+            b.speed -= closing * 0.035 * bHit;
           }
         }
 
@@ -248,10 +279,10 @@ export function resolveContacts(cars, sizes, passes = 4) {
         if (headingDot < 0.35) {
           const aLoss = aIsPlayer ? 0.955 : 0.94;
           const bLoss = bIsPlayer ? 0.955 : 0.94;
-          a.speed *= aLoss;
-          b.speed *= bLoss;
-          if (a.shake !== undefined) a.shake = Math.max(a.shake, 6);
-          if (b.shake !== undefined) b.shake = Math.max(b.shake, 6);
+          a.speed *= 1 - (1 - aLoss) * aHit;
+          b.speed *= 1 - (1 - bLoss) * bHit;
+          if (a.shake !== undefined) a.shake = Math.max(a.shake, 6 * aHit);
+          if (b.shake !== undefined) b.shake = Math.max(b.shake, 6 * bHit);
         }
       }
     }
