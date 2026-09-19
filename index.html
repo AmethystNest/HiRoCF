@@ -133,28 +133,132 @@
   #vsCard .vs{font-size:15px;color:#ff6a6a;letter-spacing:.2em;margin:10px 0}
   #vsCard .rival{font-size:26px}
 
-  #startSignal .lampRow{display:flex;gap:14px;justify-content:center;margin-top:10px}
-  #startSignal .lamp{width:26px;height:26px;border-radius:50%;background:#2a1414;
-    border:2px solid rgba(255,255,255,.25)}
-  #startSignal .lamp.on{background:#ff3b30;box-shadow:0 0 18px #ff3b30}
-  #startSignal .lamp.go{background:#3ddc5a;box-shadow:0 0 22px #3ddc5a}
-  #startSignal .label{font-size:13px;letter-spacing:.14em;opacity:.75}
+  /* --- start ---------------------------------------------------------
+     A start-gantry light bar rather than three dots: five lamps fill
+     left to right through the countdown, the numeral punches over them
+     on every change, and the whole frame is pinched to a letterbox that
+     pulls back the instant the lights go green. */
+  /* lifted off centre so the numeral never lands on top of the grid --
+     the cars sit at the middle of the screen and the rig is the same size
+     as they are */
+  #startSignal{display:flex;flex-direction:column;align-items:center;gap:14px;
+    transform:translateY(-16vh)}
+  #startSignal .gantry{display:flex;gap:min(3.4vw,18px);padding:min(2.6vw,14px) min(4vw,22px);
+    border-radius:999px;background:linear-gradient(180deg,rgba(26,31,37,.96),rgba(9,11,14,.96));
+    border:1px solid rgba(255,255,255,.16);
+    box-shadow:0 14px 40px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.18)}
+  #startSignal .lamp{width:min(7vw,34px);height:min(7vw,34px);border-radius:50%;
+    background:radial-gradient(circle at 38% 32%, #3a2020, #170c0c 70%);
+    box-shadow:inset 0 2px 5px rgba(0,0,0,.85),inset 0 0 0 1px rgba(255,255,255,.10);
+    transition:background .09s ease, box-shadow .09s ease}
+  #startSignal .lamp.on{
+    background:radial-gradient(circle at 38% 32%, #ff9a90, #e3231a 66%);
+    box-shadow:0 0 22px rgba(255,59,48,.85),0 0 46px rgba(255,59,48,.45),
+               inset 0 0 0 1px rgba(255,255,255,.28)}
+  #startSignal .lamp.go{
+    background:radial-gradient(circle at 38% 32%, #b6ffc6, #16c93f 66%);
+    box-shadow:0 0 26px rgba(61,220,90,.95),0 0 60px rgba(61,220,90,.5),
+               inset 0 0 0 1px rgba(255,255,255,.3)}
+  #startSignal .count{font-size:min(23vw,122px);line-height:1;font-weight:900;
+    letter-spacing:-.04em;font-variant-numeric:tabular-nums;
+    text-shadow:0 6px 0 rgba(0,0,0,.55),0 0 40px rgba(255,255,255,.28)}
+  #startSignal .count.go{color:#5cf07c;
+    text-shadow:0 6px 0 rgba(0,0,0,.55),0 0 46px rgba(92,240,124,.85)}
+  /* re-triggered per numeral by removing and re-adding the class */
+  #startSignal .count.punch span{display:inline-block;animation:countPunch .42s cubic-bezier(.16,1,.3,1)}
+  @keyframes countPunch{
+    0%{transform:scale(2.1);opacity:0;filter:blur(6px)}
+    55%{opacity:1;filter:blur(0)}
+    100%{transform:scale(1);opacity:1}
+  }
+  /* fixed height: the cue empties on GO, and without this the numeral
+     jumps up the screen at the exact moment it should be holding still */
+  #startSignal .cue:not(:empty){font-size:min(3.4vw,15px);letter-spacing:.42em;
+    text-indent:.42em;font-weight:800;padding:6px 16px;border-radius:999px;
+    background:rgba(6,9,12,.66);border:1px solid rgba(255,255,255,.12);
+    backdrop-filter:blur(4px)}
+  /* reserved even when empty, so clearing the text on GO does not shunt
+     the numeral up the screen at the moment it should be holding still */
+  #startSignal .cue{min-height:2.1em;display:flex;align-items:center}
+  .letterbox{position:absolute;left:0;right:0;height:11vh;background:#05070a;
+    transition:transform .5s cubic-bezier(.16,1,.3,1)}
+  .letterbox.top{top:0}
+  .letterbox.bottom{bottom:0}
+  #signalOverlay.go .letterbox.top{transform:translateY(-100%)}
+  #signalOverlay.go .letterbox.bottom{transform:translateY(100%)}
+  /* one full-screen blink on the green */
+  #signalOverlay.go::after{content:'';position:absolute;inset:0;background:#eaf7ff;
+    animation:goFlash .34s ease-out forwards;pointer-events:none}
+  @keyframes goFlash{from{opacity:.55}to{opacity:0}}
 
-  #finishCard{background:rgba(10,13,17,.9);border:1px solid rgba(255,255,255,.15);
-    border-radius:22px;padding:26px 30px;min-width:240px}
-  #finishCard h2{margin:0 0 10px;font-size:22px;letter-spacing:.06em}
-  #finishCard .place{font-size:52px;font-weight:900;margin:6px 0}
-  #finishCard .rt{opacity:.85;margin-bottom:16px;font-weight:600}
-  #finishCard button{pointer-events:auto;width:100%;height:50px;border-radius:14px;
-    border:none;background:#3a6fe0;color:#fff;font-size:15px;font-weight:800}
+  /* --- result --------------------------------------------------------- */
+  #finishCard{position:relative;border-radius:24px;padding:30px 30px 26px;min-width:min(78vw,300px);
+    background:linear-gradient(180deg,rgba(18,23,29,.96),rgba(7,9,12,.97));
+    border:1px solid rgba(255,255,255,.14);
+    box-shadow:0 26px 70px rgba(0,0,0,.66),inset 0 1px 0 rgba(255,255,255,.14);
+    animation:cardIn .5s cubic-bezier(.16,1,.3,1)}
+  @keyframes cardIn{from{opacity:0;transform:translateY(34px) scale(.94)}to{opacity:1;transform:none}}
+  /* the accent is the result: gold for a win, steel for anything else */
+  #finishCard{--accent:#9aa4ae;--accent2:#5d666f}
+  #finishCard.win{--accent:#ffd64a;--accent2:#c9932a}
+  #finishCard::before{content:'';position:absolute;inset:-1px;border-radius:inherit;padding:1px;
+    background:linear-gradient(160deg,var(--accent),transparent 42%,transparent 60%,var(--accent2));
+    -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+    -webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+    mask-composite:exclude;pointer-events:none}
+  #finishCard .ribbon{display:inline-block;font-size:10px;letter-spacing:.34em;text-indent:.34em;
+    padding:5px 12px;border-radius:999px;color:#05070a;background:var(--accent);
+    font-weight:900;margin-bottom:12px}
+  #finishCard h2{margin:0 0 4px;font-size:15px;letter-spacing:.14em;opacity:.62;font-weight:800}
+  #finishCard .place{font-size:78px;font-weight:900;line-height:1;margin:2px 0 4px;
+    color:var(--accent);text-shadow:0 0 30px rgba(154,164,174,.22)}
+  #finishCard.win .place{text-shadow:0 0 40px rgba(255,214,74,.5)}
+  #finishCard .place i{font-style:normal;font-size:30px;margin-left:2px;vertical-align:.5em}
+  #finishCard .rtWrap{display:flex;flex-direction:column;gap:3px;margin:12px 0 20px}
+  #finishCard .rtLabel{font-size:9px;letter-spacing:.34em;text-indent:.34em;opacity:.5;font-weight:800}
+  #finishCard .rt{font-size:26px;font-weight:900;font-variant-numeric:tabular-nums;letter-spacing:.02em}
+  #finishCard button{pointer-events:auto;width:100%;height:54px;border-radius:16px;
+    border:1px solid rgba(255,255,255,.2);color:#fff;font-size:15px;font-weight:900;
+    letter-spacing:.1em;
+    background:radial-gradient(130% 100% at 50% -20%,rgba(255,255,255,.24),rgba(255,255,255,.04) 64%),
+               rgba(24,30,38,.9);
+    box-shadow:0 10px 24px rgba(0,0,0,.44),inset 0 1px 0 rgba(255,255,255,.26)}
+  #finishCard button:active{transform:scale(.97);border-color:rgba(255,255,255,.7)}
 
-  #lapPopup{position:fixed;left:50%;top:26%;transform:translate(-50%,-50%) scale(.82);
+  /* --- lap banner ------------------------------------------------------
+     A checkpoint is a quiet white flash. The final lap is not: it sweeps
+     in as a red bar with its own rule, and the HUD stays flagged for the
+     whole lap (see #finalEdge and .hud.final below) so it is impossible
+     to lose track of which lap you are on. */
+  #lapPopup{position:fixed;left:50%;top:25%;transform:translate(-50%,-50%);
     z-index:16;pointer-events:none;opacity:0;text-align:center;color:#fff;font-weight:900;
-    text-shadow:0 3px 0 rgba(0,0,0,.7),0 0 14px rgba(255,255,255,.35);
-    transition:opacity .18s ease, transform .18s ease}
-  #lapPopup.show{opacity:1;transform:translate(-50%,-50%) scale(1)}
-  #lapPopup .main{font-size:40px;line-height:1}
-  #lapPopup .sub{margin-top:6px;font-size:13px;opacity:.9;letter-spacing:.2em}
+    padding:12px 30px;border-radius:14px;
+    background:linear-gradient(90deg,rgba(8,11,15,0),rgba(8,11,15,.72) 18%,rgba(8,11,15,.72) 82%,rgba(8,11,15,0));
+    text-shadow:0 3px 0 rgba(0,0,0,.7);
+    transition:opacity .2s ease, transform .2s ease}
+  #lapPopup.show{opacity:1}
+  #lapPopup .rule{height:2px;margin:0 auto 9px;width:0;background:#fff;
+    box-shadow:0 0 12px rgba(255,255,255,.8);transition:width .34s cubic-bezier(.16,1,.3,1)}
+  #lapPopup.show .rule{width:78%}
+  #lapPopup .main{font-size:min(11vw,46px);line-height:1;letter-spacing:.02em;white-space:nowrap}
+  #lapPopup .sub{margin-top:7px;font-size:min(3.2vw,13px);opacity:.9;letter-spacing:.3em;text-indent:.3em}
+  #lapPopup{transform:translate(-50%,-50%) scale(.9)}
+  #lapPopup.show{transform:translate(-50%,-50%) scale(1)}
+  /* final lap: red, wider, and it arrives from the side */
+  #lapPopup.final{transform:translate(-50%,-50%) translateX(-42px) scale(.96);
+    background:linear-gradient(90deg,rgba(60,6,6,0),rgba(74,7,7,.86) 16%,rgba(74,7,7,.86) 84%,rgba(60,6,6,0))}
+  #lapPopup.final.show{transform:translate(-50%,-50%) scale(1)}
+  #lapPopup.final .rule{background:#ff4133;box-shadow:0 0 16px rgba(255,65,51,.95)}
+  #lapPopup.final .main{color:#fff;text-shadow:0 3px 0 rgba(0,0,0,.7),0 0 26px rgba(255,65,51,.8)}
+  #lapPopup.final .sub{color:#ff8b80;opacity:1}
+
+  /* held for the whole final lap */
+  #finalEdge{position:fixed;inset:0;z-index:14;pointer-events:none;opacity:0;
+    transition:opacity .35s ease;
+    box-shadow:inset 0 0 0 3px rgba(255,49,38,.55),inset 0 0 64px rgba(255,49,38,.30)}
+  body.final-lap #finalEdge{opacity:1;animation:finalPulse 1.5s ease-in-out infinite}
+  @keyframes finalPulse{0%,100%{opacity:.55}50%{opacity:1}}
+  body.final-lap .hud #lap{color:#ff5a4d;text-shadow:0 2px 5px rgba(0,0,0,.8),0 0 18px rgba(255,65,51,.9)}
 
   #zoomBtn{
     position:fixed;left:14px;top:124px;z-index:15;
@@ -249,26 +353,35 @@
 </div>
 
 <div class="overlay" id="signalOverlay" hidden>
+  <div class="letterbox top"></div>
+  <div class="letterbox bottom"></div>
   <div id="startSignal">
-    <div class="label">GET READY</div>
-    <div class="lampRow">
+    <div class="gantry">
       <div class="lamp" id="sig1"></div>
       <div class="lamp" id="sig2"></div>
       <div class="lamp" id="sig3"></div>
+      <div class="lamp" id="sig4"></div>
+      <div class="lamp" id="sig5"></div>
     </div>
+    <div class="count" id="startCount"><span id="startCountText">3</span></div>
+    <div class="cue" id="startCue">GET READY</div>
   </div>
 </div>
 
 <div id="lapPopup">
+  <div class="rule"></div>
   <div id="lapPopupMain" class="main">LAP 2/3</div>
   <div id="lapPopupSub" class="sub">CHECKPOINT</div>
 </div>
 
+<div id="finalEdge" aria-hidden="true"></div>
+
 <div class="overlay" id="finishOverlay" hidden>
   <div id="finishCard">
+    <div class="ribbon" id="finishRibbon">FINISHED</div>
     <h2 id="finishStage">STAGE 1 CLEAR</h2>
-    <div class="place" id="finishPlace">1st</div>
-    <div class="rt" id="finishTime">00:00.000</div>
+    <div class="place" id="finishPlace"><b>1</b><i>st</i></div>
+    <div class="rtWrap"><span class="rtLabel">RACE TIME</span><span class="rt" id="finishTime">00:00.000</span></div>
     <button id="retryBtn">NEXT STAGE</button>
   </div>
 </div>
@@ -327,8 +440,42 @@
       nitroBtn.classList.toggle('ready',canFire);
       nitroLabel.textContent=p.boosting?(canFire?'NITRO · CHAIN READY':'NITRO · FIRING'):'NITRO';
     };
-    const vsOverlay=el('vsOverlay'),vsStage=el('vsStage'),vsRival=el('vsRival'),signalOverlay=el('signalOverlay'),sig1=el('sig1'),sig2=el('sig2'),sig3=el('sig3');
-    const finishOverlay=el('finishOverlay'),finishStage=el('finishStage'),finishPlace=el('finishPlace'),finishTime=el('finishTime'),lapPopup=el('lapPopup'),lapPopupMain=el('lapPopupMain'),lapPopupSub=el('lapPopupSub'),stageBtn=el('retryBtn');
+    const vsOverlay=el('vsOverlay'),vsStage=el('vsStage'),vsRival=el('vsRival'),signalOverlay=el('signalOverlay');
+    const startLamps=[el('sig1'),el('sig2'),el('sig3'),el('sig4'),el('sig5')];
+    const startCount=el('startCount'),startCountText=el('startCountText'),startCue=el('startCue');
+    const finishOverlay=el('finishOverlay'),finishStage=el('finishStage'),finishPlace=el('finishPlace'),finishTime=el('finishTime'),finishCard=el('finishCard'),finishRibbon=el('finishRibbon'),lapPopup=el('lapPopup'),lapPopupMain=el('lapPopupMain'),lapPopupSub=el('lapPopupSub'),stageBtn=el('retryBtn');
+
+    // --- start lights ---
+    // The five lamps fill evenly across the countdown and all turn green
+    // together on zero, which is the moment the numeral becomes GO and the
+    // letterbox pulls back. `shownCount` exists so the numeral's punch
+    // animation is retriggered once per change rather than every frame.
+    const COUNTDOWN=3.2, GO_AT=0.55;
+    let shownCount=null;
+    const paintStart=(t)=>{
+      const go=t<=GO_AT;
+      const lit=go?5:Math.min(5,Math.floor((COUNTDOWN-t)/((COUNTDOWN-GO_AT)/5))+1);
+      for(let i=0;i<startLamps.length;i++){
+        startLamps[i].className='lamp'+(go?' go':(i<lit?' on':''));
+      }
+      const label=go?'GO!':String(Math.min(3,Math.ceil((t-GO_AT)/((COUNTDOWN-GO_AT)/3))));
+      if(label!==shownCount){
+        shownCount=label;
+        startCountText.textContent=label;
+        startCount.classList.remove('punch');
+        void startCount.offsetWidth;
+        startCount.classList.add('punch');
+      }
+      startCount.classList.toggle('go',go);
+      signalOverlay.classList.toggle('go',go);
+      startCue.textContent=go?'':'GET READY';
+    };
+    const resetStart=()=>{
+      shownCount=null;
+      signalOverlay.classList.remove('go');
+      startCount.classList.remove('go','punch');
+    };
+    const finishPlaceNum=finishPlace.querySelector('b'),finishPlaceSuffix=finishPlace.querySelector('i');
     const syncStageUI=()=>{
       vsStage.textContent=game.cfg.name;
       vsRival.textContent=game.cfg.rivalName;
@@ -341,8 +488,64 @@
     syncStageUI();
     const fmtTime=s=>{const ms=Math.max(0,Math.floor(s*1000)),m=Math.floor(ms/60000),sec=Math.floor((ms%60000)/1000),cs=ms%1000;return `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}.${String(cs).padStart(3,'0')}`};
     let shownFinish=false,finishDelay=0,lapPopupTimer=0;
-    const showLapPopup=(lap,total)=>{lapPopupMain.textContent=`LAP ${lap}/${total}`;lapPopupSub.textContent=lap===total?'FINAL LAP':'CHECKPOINT';lapPopup.classList.remove('show');void lapPopup.offsetWidth;lapPopup.classList.add('show');lapPopupTimer=1.45};
-    app.ticker.add(ticker=>{const dt=Math.min(.033,ticker.deltaMS/1000),p=game.player;speedEl.textContent=Math.max(0,Math.round(p.displaySpeed));paintNitro(p);if(lapPopupTimer>0){lapPopupTimer-=dt;if(lapPopupTimer<=0)lapPopup.classList.remove('show')}const race=game.race;if(!race)return;if(race.lapAnnounce!=null){showLapPopup(race.lapAnnounce,race.totalLaps);race.lapAnnounce=null}const lap=Math.min(game.playerEntry.progress.lap,race.totalLaps);lapEl.textContent=`LAP ${lap}/${race.totalLaps}`;posEl.textContent=`POS ${race.positionOf(game.playerEntry)}/2`;timeEl.textContent=fmtTime(race.time);vsOverlay.hidden=race.state!=='vs';signalOverlay.hidden=race.state!=='countdown';if(race.state==='countdown'){const t=race.countdown;sig1.className='lamp'+(t<2.4?' on':'');sig2.className='lamp'+(t<1.6?' on':'');sig3.className='lamp'+(t<.8?' go':(t<1.6?' on':''))}if(race.state==='finished'&&!shownFinish){finishDelay+=dt;if(finishDelay>=1.9){shownFinish=true;const place=race.positionOf(game.playerEntry);finishPlace.textContent=place===1?'1st':'2nd';finishTime.textContent=fmtTime(game.playerEntry.progress.finishTime??race.time);stageBtn.textContent=(place===1&&game.stageId<LAST_STAGE)?'NEXT STAGE':(place===1?'RETRY FINAL STAGE':'RETRY');finishOverlay.hidden=false}}});
+    // The final lap gets its own banner AND leaves the HUD flagged until
+    // the race ends -- a banner that has already faded cannot answer "which
+    // lap am I on" three corners later, which is what makes the last lap
+    // easy to miss.
+    const showLapPopup=(lap,total)=>{
+      const final=lap===total;
+      lapPopupMain.textContent=final?'FINAL LAP':`LAP ${lap}/${total}`;
+      lapPopupSub.textContent=final?`LAP ${total} OF ${total}`:'CHECKPOINT';
+      lapPopup.classList.remove('show');
+      lapPopup.classList.toggle('final',final);
+      void lapPopup.offsetWidth;
+      lapPopup.classList.add('show');
+      lapPopupTimer=final?2.2:1.45;
+      if(final)document.body.classList.add('final-lap');
+    };
+    const clearBanners=()=>{
+      lapPopup.classList.remove('show','final');
+      document.body.classList.remove('final-lap');
+      resetStart();
+    };
+    app.ticker.add(ticker=>{
+      const dt=Math.min(.033,ticker.deltaMS/1000),p=game.player;
+      speedEl.textContent=Math.max(0,Math.round(p.displaySpeed));
+      paintNitro(p);
+      if(lapPopupTimer>0){lapPopupTimer-=dt;if(lapPopupTimer<=0)lapPopup.classList.remove('show')}
+      const race=game.race;
+      if(!race)return;
+      if(race.lapAnnounce!=null){showLapPopup(race.lapAnnounce,race.totalLaps);race.lapAnnounce=null}
+      const lap=Math.min(game.playerEntry.progress.lap,race.totalLaps);
+      lapEl.textContent=`LAP ${lap}/${race.totalLaps}`;
+      posEl.textContent=`POS ${race.positionOf(game.playerEntry)}/2`;
+      timeEl.textContent=fmtTime(race.time);
+      vsOverlay.hidden=race.state!=='vs';
+      signalOverlay.hidden=race.state!=='countdown';
+      if(race.state==='countdown')paintStart(race.countdown);
+      if(race.state==='finished'&&!shownFinish){
+        // The red frame is a "you are on the last lap" cue; once the line
+        // is crossed it is answering a question nobody is asking, and it
+        // fights the finish effect for the same edges.
+        document.body.classList.remove('final-lap');
+        finishDelay+=dt;
+        // Held back until the finish effect (render/finishfx.js) has run
+        // its banner and title and cleared out of the way.
+        if(finishDelay>=1.9){
+          shownFinish=true;
+          const place=race.positionOf(game.playerEntry);
+          const won=place===1;
+          finishCard.classList.toggle('win',won);
+          finishRibbon.textContent=won?'WINNER':'FINISHED';
+          finishStage.textContent=won?`${game.cfg.name} CLEAR`:`${game.cfg.name} RESULT`;
+          finishPlaceNum.textContent=String(place);
+          finishPlaceSuffix.textContent=place===1?'st':'nd';
+          finishTime.textContent=fmtTime(game.playerEntry.progress.finishTime??race.time);
+          stageBtn.textContent=(won&&game.stageId<LAST_STAGE)?'NEXT STAGE':(won?'RETRY FINAL STAGE':'RETRY');
+          finishOverlay.hidden=false;
+        }
+      }
+    });
     // --- stage picker ---
     const stagePick=el('stagePick'),stageOverlay=el('stageOverlay'),stageRows=el('stageRows'),stageClose=el('stageClose');
     const syncPickLabel=()=>{stagePick.textContent=`STAGE ${game.stageId}/${LAST_STAGE}`};
@@ -359,7 +562,7 @@
           ev.preventDefault();
           stageOverlay.hidden=true;
           shownFinish=false;finishDelay=0;lapPopupTimer=0;
-          lapPopup.classList.remove('show');
+          clearBanners();
           finishOverlay.hidden=true;
           game.loadStage(id);
           syncStageUI();
@@ -377,7 +580,7 @@
       shownFinish=false;
       finishDelay=0;
       lapPopupTimer=0;
-      lapPopup.classList.remove('show');
+      clearBanners();
       finishOverlay.hidden=true;
       const place=game.race?.positionOf(game.playerEntry)??2;
       const nextStage=(place===1&&game.stageId<LAST_STAGE)?game.stageId+1:game.stageId;
