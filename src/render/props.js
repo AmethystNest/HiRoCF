@@ -224,25 +224,35 @@ const THEMES = {
   // half-width + margin); only the backdrop buildings, already well clear,
   // are unchanged.
   street: {
-    step: 150,
+    // step 118 (was 150): at 150 the kerb furniture was sparse enough that
+    // long stretches of pavement had nothing on them at all, which is what
+    // made the widest surface in the game read as empty.
+    step: 118,
     entries: [
-      { name: 'street_light', weight: 3, near: 80, far: 110 },
-      { name: 'fence_panel', weight: 3, near: 90, far: 120 },
+      // street_light is not here: the city places its lighting columns on
+      // a fixed pitch in buildProps, before anything else
+      { name: 'fence_panel', weight: 4, near: 90, far: 120 },
       { name: 'concrete_barrier', weight: 2, near: 90, far: 115 },
       { name: 'bush_green', weight: 2, near: 85, far: 140 },
       { name: 'bush_pinkflowers', weight: 1, near: 85, far: 140 },
       { name: 'bush_whiteflowers', weight: 1, near: 85, far: 140 },
-      { name: 'building_office', weight: 2, near: 160, far: 420 },
-      { name: 'building_apartment', weight: 2, near: 160, far: 420 },
-      { name: 'building_shop', weight: 1, near: 160, far: 420 },
+      // street trees set back behind the footpath -- a city street without
+      // any is a service road
+      { name: 'tree_green', weight: 3, near: 150, far: 260 },
+      { name: 'tree_cherry', weight: 2, near: 150, far: 260 },
+      // a second row further back, behind the frontage pass above -- low
+      // weight, since most of these land on a block that is already there
+      { name: 'building_office', weight: 2, near: 820, far: 1350 },
+      { name: 'building_apartment', weight: 2, near: 840, far: 1400 },
+      { name: 'building_shop', weight: 1, near: 800, far: 1200 },
     ],
   },
 
   highway: {
     step: 125,
     entries: [
-      { name: 'street_light', weight: 5, near: 70, far: 105 },
-      { name: 'concrete_barrier', weight: 3, near: 62, far: 82 },
+      // street_light is placed on a fixed pitch in buildProps (LAMP_PITCH)
+      { name: 'concrete_barrier', weight: 4, near: 62, far: 82 },
       { name: 'fence_panel', weight: 2, near: 75, far: 100 },
       { name: 'building_office', weight: 4, near: 360, far: 760 },
       { name: 'building_apartment', weight: 3, near: 380, far: 820 },
@@ -250,6 +260,62 @@ const THEMES = {
     ],
   },
 
+  // Stage 5: the same expressway once it has left the city behind. Keeps
+  // the road furniture that belongs to a motorway (lighting columns, the
+  // fence line along the boundary) and replaces the wall of tower blocks
+  // with open country -- a warehouse or two on the horizon rather than a
+  // skyline, and trees reaching much deeper on the infield side to fill
+  // the very large middle this loop encloses.
+  expressway_country: {
+    step: 118,
+    entries: [
+      // street_light is placed on a fixed pitch in buildProps (LAMP_PITCH)
+      { name: 'fence_panel', weight: 4, near: 78, far: 104 },
+      { name: 'concrete_barrier', weight: 1, near: 62, far: 82 },
+      { name: 'tree_green', weight: 4, near: 240, far: 700, farInfield: 2400 },
+      { name: 'tree_pine', weight: 3, near: 240, far: 680, farInfield: 2300 },
+      { name: 'tree_autumn', weight: 2, near: 250, far: 660, farInfield: 2000 },
+      { name: 'bush_green', weight: 3, near: 200, far: 420, farInfield: 900 },
+      { name: 'rock_cluster_small', weight: 2, near: 210, far: 460, farInfield: 900 },
+      { name: 'building_shop', weight: 1, near: 620, far: 1200 },
+      { name: 'building_apartment', weight: 1, near: 700, far: 1400 },
+    ],
+  },
+
+};
+
+/**
+ * Lighting-column pitch, in world units, for the presets whose roads are
+ * actually lit. Alternating sides, so the real spacing on each side is
+ * twice this. A racing circuit and a mountain pass are not lit at all and
+ * are absent here on purpose.
+ */
+/**
+ * What goes in the middle of each kind of loop, for the interior-fill pass
+ * in buildProps. `clear` is how far past the road's built edge a prop must
+ * land, `attempts` how many random points to try (most are rejected --
+ * the interior is only a fraction of the bounding box).
+ */
+const INTERIOR_FILL = {
+  mountain: {
+    clear: 260, attempts: 480,
+    names: ['tree_pine', 'tree_pine', 'tree_green', 'tree_autumn', 'rock_cluster_large', 'rock_cluster_small', 'bush_green'],
+  },
+  circuit: {
+    clear: 300, attempts: 900,
+    names: ['tree_green', 'tree_green', 'tree_autumn', 'bush_green', 'racing_billboard',
+            'marshal_hut', 'tire_stack_black', 'tire_stack_redwhite', 'pit_tent_blue', 'pit_tent_red'],
+  },
+  grandtour: {
+    clear: 340, attempts: 900,
+    names: ['tree_green', 'tree_pine', 'tree_autumn', 'bush_green', 'rock_cluster_small', 'building_shop'],
+  },
+};
+
+const LAMP_PITCH = {
+  city: 430,
+  highway: 520,
+  grandtour: 560,
 };
 
 const SECTION_PLANS = {
@@ -430,6 +496,70 @@ export function buildProps(path, sheet, shadowTex, {
     });
   }
 
+  // --- lighting columns at a regular pitch (lit public roads) ---
+  //
+  // Street lights on a real street are spaced, not scattered. Leaving them
+  // to the themed pass put them wherever the dice fell and, worse, meant
+  // they lost most ties with the building frontage below -- the two passes
+  // want ground barely 100 units apart laterally, and fits() is a plain
+  // circular test that cannot tell that a lamp post and the block behind
+  // it never actually overlap on screen. Placing them first, at a fixed
+  // pitch on alternating sides, gets both: a street that is lit evenly,
+  // and a frontage that only has to work around a known, regular pattern.
+  const lampPitch = LAMP_PITCH[preset];
+  if (lampPitch) {
+    let side = 1;
+    for (let d = 0; d < path.length; d += lampPitch) {
+      add('street_light', d, side, edge + 85, { pad: 70, reachPad: 55 });
+      side = -side;
+    }
+  }
+
+  // --- city preset: a continuous building frontage along both kerbs ---
+  //
+  // Scattering buildings through the themed pass does not produce a city.
+  // They are the biggest props in the catalogue, so `fits()` has them
+  // fighting each other and every bush and lamp post for the same ground,
+  // and stage 2 ended up with 25 buildings spread over a 29,000-unit lap --
+  // one every 1,170 units, which is a road through a field with the odd
+  // office block on it. A block frontage has to be marched out deliberately.
+  //
+  // Three things make that work. The pad is set from the building's own
+  // width rather than max(w, h): these are 'face' props, rotated so their
+  // width runs ALONG the road, and the default pad uses whichever
+  // dimension is larger -- for a tall building that is its depth, which
+  // has nothing to do with how much frontage it occupies. Each side
+  // marches independently, so one side's gaps do not line up with the
+  // other's. And it runs after the lighting columns but before the themed
+  // scatter, so the only thing it has to work around is that regular,
+  // known pattern -- behind the scatter it lost half its positions to
+  // randomly placed bushes, and in front of the lamp posts it took two
+  // thirds of theirs.
+  if (preset === 'city') {
+    const names = ['building_office', 'building_apartment', 'building_shop'];
+    // Set back past the kerb furniture, not level with it. A first pass put
+    // the frontage right against the pavement edge, which is where the
+    // lamp posts, fencing and planters already are -- the blocks went in
+    // first and `fits()` then rejected two thirds of the kerbside props
+    // (26 lamp posts down to 11). The two bands have to be at different
+    // distances from the road, not the same one.
+    const frontage = Math.max(edge + 150, (playerReach ?? 0) + 170);
+    for (const side of [1, -1]) {
+      let d = rng() * 400;
+      while (d < path.length) {
+        const name = names[(rng() * names.length) | 0];
+        const scale = 0.9 + rng() * 0.4;
+        const w = CATALOG[name].w * scale;
+        // gaps read as side yards, car parks and junctions -- an unbroken
+        // wall of blocks for a whole lap looks stamped out
+        if (rng() > 0.17) {
+          add(name, d, side, frontage + rng() * 70, { scale, pad: w * 0.46, reachPad: 55 });
+        }
+        d += w * 0.96 + rng() * 60;
+      }
+    }
+  }
+
   // --- warning chevrons on the outside of the tightest corners ---
   //
   // Placed BEFORE the scenery passes, not after: these are signage on a
@@ -519,32 +649,51 @@ export function buildProps(path, sheet, shadowTex, {
       }
     }
 
-    // --- fill the loop's open interior, not just its verges ---
-    // `farInfield` above assumes the -1 side's local normal points toward
-    // the loop's interior, which only holds for a simple convex loop --
-    // this course's S-curves and hairpins make "inside" flip locally back
-    // and forth relative to the loop's actual middle, so that reach barely
-    // landed anything there in practice. Random points across the whole
-    // course bounding box, kept only where they land genuinely clear of
-    // EVERY stretch of road (near.dist, a global check, not a local
-    // one-sided guess), fill whatever open interior actually exists
-    // regardless of the path's shape.
+  }
+
+  // --- fill the loop's open interior, not just its verges ---
+  //
+  // `farInfield` on a theme entry assumes the -1 side's local normal points
+  // toward the loop's middle, which only holds for a simple convex loop. A
+  // course with S-curves and hairpins makes "inside" flip locally back and
+  // forth relative to the loop's actual centre, so that reach barely lands
+  // anything there. Random points across the course bounding box, kept only
+  // where they clear EVERY stretch of road (path.nearest is a global check,
+  // not a one-sided guess), fill whatever open interior actually exists
+  // regardless of the path's shape.
+  //
+  // Which props go in there is the whole point of doing it per preset: a
+  // mountain's interior is more mountain, but the middle of a race circuit
+  // is infield -- marshal posts, trackside advertising, tyre bundles and
+  // the odd stand of trees. Stage 1's loop encloses a very large rectangle
+  // that was completely empty, which is most of why it read as a diagram
+  // rather than a place.
+  const fill = INTERIOR_FILL[preset];
+  if (fill) {
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     for (const p of path.points) {
       if (p[0] < minX) minX = p[0]; if (p[0] > maxX) maxX = p[0];
       if (p[1] < minY) minY = p[1]; if (p[1] > maxY) maxY = p[1];
     }
-    const fillNames = ['tree_pine', 'tree_pine', 'tree_green', 'rock_cluster_large', 'rock_cluster_small', 'bush_green'];
-    const fillClear = edge + 260; // must sit clear of every stretch of road by this much
-    for (let i = 0; i < 480; i++) {
+    const fillClear = edge + fill.clear;
+    for (let i = 0; i < fill.attempts; i++) {
       const px = minX + rng() * (maxX - minX);
       const py = minY + rng() * (maxY - minY);
       const n = path.nearest(px, py);
       if (n.dist < fillClear) continue;
       const lat = path.lateralOf(px, py, n);
       const side = lat >= 0 ? 1 : -1;
-      const name = fillNames[(rng() * fillNames.length) | 0];
-      add(name, n.distance, side, Math.abs(lat) - edge, { scale: 0.85 + rng() * 0.5 });
+      const name = fill.names[(rng() * fill.names.length) | 0];
+      // `lateral` in add() is measured from the CENTRELINE, not from the
+      // built edge -- the themed pass passes `edge + near` for that reason.
+      // This pass was subtracting edge from an already-absolute offset, so
+      // every interior prop was placed `edge` units closer to the road than
+      // the point that had just been checked for clearance. On the mountain
+      // (edge 374) that still landed something; on the circuit (edge 646)
+      // it pulled almost every candidate inside the reach guard, and 420
+      // attempts at filling stage 1's very large empty infield were
+      // producing five props.
+      add(name, n.distance, side, Math.abs(lat), { scale: 0.85 + rng() * 0.5 });
     }
   }
 

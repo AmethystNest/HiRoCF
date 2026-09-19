@@ -65,7 +65,7 @@ export const STAGES = {
   2: {
     id: 2, name: 'STAGE 2', shortDesc: 'CITY STAGE',
     courseName: 'COURSE · CITY CIRCUIT',
-    courseDesc: 'TIGHT STREETS / 90° CORNERS / NIGHT LIGHTS',
+    courseDesc: 'TIGHT STREETS / SWITCHBACKS / CITY BLOCKS',
     rivalName: 'クルドカー',
     roadHalf: 230, wallHalf: 320,
     playerPhysics: { wallInset: 2 },
@@ -143,7 +143,19 @@ export const STAGES = {
     courseDesc: 'CITY + TOUGE + HIGHWAY / FULL MIX',
     rivalName: 'ラスボス',
     roadHalf: 260, wallHalf: 340,
-    rival: { maxSpeed: 760, accel: 320, turn: 2.55, sprite: 'devilz', tint: 0x7a3ae0 },
+    // Retuned when stage 5 stopped falling back to stage 1's beginner
+    // circuit and took over stage 4's expressway loop. cornerSlow was never
+    // set here, so it ran on the 0.45 default -- on a course whose tightest
+    // corner is 984 radius that had the last boss lifting for bends stage
+    // 4's rival takes flat, and it finished the lap slower than 高速の帝王
+    // does on the same road. maxSpeed stays at or under the player's 760,
+    // per the spec that the rival is never outright faster in a straight
+    // line; what makes this one the boss is that it barely slows for
+    // anything and out-accelerates everything else in the game.
+    rival: {
+      maxSpeed: 755, accel: 320, turn: 2.55, sprite: 'devilz', tint: 0x7a3ae0,
+      cornerSlow: 0.10, raceLine: true, block: true,
+    },
     bestKey: 'topdownRacer_stage5_best_ms',
   },
 };

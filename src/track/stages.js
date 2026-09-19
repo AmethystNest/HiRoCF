@@ -414,4 +414,14 @@ export const STAGE_PATHS = {
   2: buildStage2Path,
   3: buildStage3Path,
   4: buildStage4Path,
+  // Stage 5 has no course of its own and shares stage 4's expressway loop.
+  // It used to have no entry here at all, which meant main.js's
+  // `STAGE_PATHS[stageId] || STAGE_PATHS[1]` fallback quietly handed it
+  // stage 1's beginner circuit -- so the final stage was the first stage
+  // again, at a narrower road width, and nothing said so. Sharing a course
+  // is a decision; falling back to one is an accident. It gets its own
+  // surface preset (grandtour) and decoration layout so the two stages do
+  // not look alike, and a narrower roadHalf (260 vs 360) so the same
+  // corners ask more of the player.
+  5: buildStage4Path,
 };

@@ -36,8 +36,8 @@ export const SURFACE_PRESETS = {
     ground: 'dirt',
     groundScale: 2.2,
     groundTint: 0x767c84,
-    asphalt: { texture: 'road_asphalt', uRepeat: 3, vPer: 1 / 520, tint: 0xb2b6bc },
-    ruts: { offset: 82, width: 74, alpha: 0.32, vPer: 1 / 900 },
+    asphalt: { texture: 'road_asphalt', uRepeat: 3, vPer: 1 / 520, tint: 0xa6abb2 },
+    ruts: { offset: 82, width: 74, alpha: 0.4, vPer: 1 / 900 },
     edgeLine: { inset: 14, width: 11, tint: 0xffffff, alpha: 0.85 },
     centreLine: { texture: 'dash_yellow', width: 11, vPer: 1 / 120 },
     paintStart: false, // an ordinary street has no painted chequer
@@ -47,10 +47,23 @@ export const SURFACE_PRESETS = {
     // (230, up from a first pass at 150) so kerbside decoration -- cones,
     // parked cars, fences -- has room to sit clear of wallHalf without
     // spilling off the paved surface into the dirt.
+    // Still 18 + 230 = 248 in total -- the figure `edge` is derived from and
+    // that every landmark lateral in layouts.js stage 2 was solved against
+    // -- but cut into the four things a real footpath is made of instead of
+    // one flat slab. The pavement itself is textured (curb_concrete tiles
+    // as paving panels) rather than a fill: at this zoom a 230-unit band of
+    // single-colour grey is the largest flat area anywhere in the game, and
+    // it was what made the street read as a car park.
     bands: [
-      { texture: null, width: 18, tint: 0x6b7075, alpha: 0.9 },      // gutter
-      { texture: null, width: 230, tint: 0x8b9198, alpha: 0.95 },    // pavement / sidewalk
+      { texture: null, width: 14, tint: 0x5c6167, alpha: 0.95 },     // gutter
+      { texture: null, width: 10, tint: 0xc8ccd0, alpha: 1.0 },      // kerb face, catching the light
+      // Fine aggregate, not a paving-slab pattern. curb_concrete was tried
+      // here first and its light/dark blocks read as a chequerboard at this
+      // zoom -- worse than the flat fill it replaced. What the band needed
+      // was grain, not pattern.
+      { texture: 'gravel', width: 224, vPer: 1 / 300, uRepeat: 5, tint: 0xf6f9fb, alpha: 1 },
     ],
+    bandEdge: { width: 34, tint: 0x4b5157, alpha: 0.85 },  // shade at the building line
   },
   mountain: {
     ground: 'grass_dry',
@@ -98,7 +111,7 @@ export const SURFACE_PRESETS = {
     // A lit strip along the top of the rock band. Rock catches the light at
     // its crest and sits in shadow at its foot; having both ends of that
     // gradient is what turns a flat band into a slope.
-    cutSlope: { crest: 34, tint: 0xb5ab9c, alpha: 0.8 },
+    bandEdge: { width: 34, tint: 0xb5ab9c, alpha: 0.8 },
     // The land falls away on the OUTSIDE of a switchback -- the turn is
     // built out on fill, which is why a hairpin has a guardrail on that side
     // and a cut face on the other. Curvature-driven, so it only appears
@@ -138,6 +151,37 @@ export const SURFACE_PRESETS = {
     bands: [
       { texture: null, width: 26, tint: 0x5d6267, alpha: 1.0 },
       { texture: null, width: 78, tint: 0x73777a, alpha: 1.0 },
+    ],
+  },
+
+  /**
+   * Stage 5 runs the same expressway loop stage 4 does (see STAGE_PATHS),
+   * so the one thing it must not do is look like stage 4. Same road,
+   * different world: stage 4 is that expressway at night through the middle
+   * of a city; this is it in daylight, out where the city has run out --
+   * open ground, warm concrete, green verges, and a road surface that has
+   * been baked rather than lit by sodium.
+   *
+   * Everything structural (three lanes, elevated deck, crash walls, the lit
+   * gate at the start line) is kept, because those belong to the ROAD, not
+   * to the time of day.
+   */
+  grandtour: {
+    ground: 'grass_dry',
+    groundScale: 1.9,
+    groundTint: 0x9aa878,
+    asphalt: { texture: 'road_asphalt', uRepeat: 4.8, vPer: 1 / 600, tint: 0xbfc2c0 },
+    ruts: { offset: 96, width: 72, alpha: 0.26, vPer: 1 / 1000 },
+    edgeLine: { inset: 16, width: 12, tint: 0xfbfaf4, alpha: 0.95 },
+    centreLine: null,
+    highwayLanes: true,
+    elevatedDeck: true,
+    concreteWalls: true,
+    paintStart: false,
+    startMarker: 'gate',
+    bands: [
+      { texture: null, width: 24, tint: 0x8e8b80, alpha: 1.0 },
+      { texture: 'gravel', width: 74, vPer: 1 / 320, uRepeat: 1.4, tint: 0xb3ab97, alpha: 0.96 },
     ],
   },
 
@@ -371,14 +415,18 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
   }
 
 
-  // --- mountain cut slope: a lit crest along the top of the rock band ---
-  if (P.cutSlope) {
+  // --- a strip along the OUTER edge of the boundary bands ---
+  // The bands themselves each run from the road edge outward and paint over
+  // one another, so none of them can put anything at the far edge alone.
+  // Mountain uses this for the lit crest of the cut slope, city for the
+  // shade where the footpath meets the building line.
+  if (P.bandEdge) {
     const outer = roadHalf + (P.bands || []).reduce((a, b) => a + b.width, 0);
     for (const side of [1, -1]) {
       layer.addChild(ribbonMesh(path, Texture.WHITE, {
-        innerOffset: side * (outer - P.cutSlope.crest),
+        innerOffset: side * (outer - P.bandEdge.width),
         outerOffset: side * outer,
-        tint: P.cutSlope.tint, alpha: P.cutSlope.alpha,
+        tint: P.bandEdge.tint, alpha: P.bandEdge.alpha,
       }));
     }
   }
