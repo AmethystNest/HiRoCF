@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { PathBuilder } from '../track/path.js';
-import { computeElevationProfile, buildRampStructure, computeTunnelDepth, buildTunnelStructure } from './surfaces.js';
+import { computeElevationProfile, buildRampStructure, computeTunnelDepth, buildTunnelStructure, outsideDropAmount } from './surfaces.js';
 
 function buildLoop() {
   return new PathBuilder()
@@ -110,5 +110,53 @@ describe('buildTunnelStructure', () => {
     const layer = buildTunnelStructure(path, { roadHalf: 300, wallHalf: 355 });
     // 2 ribbon meshes per side (base, cap) = 4, plus overlay + lights Graphics.
     expect(layer.children.length).toBe(6);
+  });
+});
+
+describe('outsideDropAmount', () => {
+  // A single constant-radius loop: it turns the same way everywhere, so the
+  // outside is always the same side of the road and the sign must never
+  // flip. 500 radius is a real corner by this stage's standards (curvature
+  // 189/500 = 0.38, comfortably past the 0.20 the apron starts at).
+  function ring(r = 500) {
+    return new PathBuilder()
+      .arc(0, 0, r, 0, Math.PI * 2, Math.max(60, Math.round(r / 6)))
+      .build(26);
+  }
+
+  it('is zero where the road is straight', () => {
+    const path = new PathBuilder()
+      .line(0, 0, 6000, 0, 120)
+      .arc(6000, 900, 900, -Math.PI / 2, Math.PI / 2, 60)
+      .line(6000, 1800, 0, 1800, 120)
+      .arc(0, 900, 900, Math.PI / 2, Math.PI * 1.5, 60)
+      .build(26);
+    const drop = outsideDropAmount(path);
+    // the midpoint of each long straight is well clear of both corners
+    const mid = Math.round(path.count * 0.12);
+    expect(Math.abs(drop[mid])).toBeLessThan(0.05);
+  });
+
+  it('puts the drop on the outside of the bend, on one side only', () => {
+    const path = ring();
+    const drop = outsideDropAmount(path);
+    const signs = new Set();
+    for (let i = 0; i < path.count; i++) {
+      expect(Math.abs(drop[i])).toBeGreaterThan(0.3);
+      signs.add(Math.sign(drop[i]));
+    }
+    expect(signs.size).toBe(1);
+  });
+
+  it('is stronger on a tighter corner', () => {
+    const wide = outsideDropAmount(ring(1200));
+    const tight = outsideDropAmount(ring(400));
+    const avg = (a) => a.reduce((s, v) => s + Math.abs(v), 0) / a.length;
+    expect(avg(tight)).toBeGreaterThan(avg(wide));
+  });
+
+  it('never exceeds full strength', () => {
+    const drop = outsideDropAmount(ring());
+    for (let i = 0; i < drop.length; i++) expect(Math.abs(drop[i])).toBeLessThanOrEqual(1);
   });
 });

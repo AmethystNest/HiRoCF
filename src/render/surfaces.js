@@ -55,11 +55,20 @@ export const SURFACE_PRESETS = {
   mountain: {
     ground: 'grass_dry',
     groundScale: 1.5,
-    groundTint: 0x93a37c,
+    // Dry, olive hillside rather than lawn. The previous tint was bright
+    // enough that the verges read as mown grass beside a circuit, which
+    // fought the rock, the autumn stands and the guardrail all trying to
+    // say "mountain" at the same time.
+    groundTint: 0x87906b,
     asphalt: { texture: 'road_asphalt', uRepeat: 2.4, vPer: 1 / 520, tint: 0xc3bfb8 },
     ruts: { offset: 62, width: 62, alpha: 0.34, vPer: 1 / 900 },
     edgeLine: { inset: 11, width: 9, tint: 0xf0ead8, alpha: 0.8 },
-    centreLine: { texture: 'dash_white', width: 8, vPer: 1 / 140 },
+    // Solid yellow, not white dashes. On a Japanese mountain road the centre
+    // line is an unbroken yellow no-overtaking line for essentially the whole
+    // pass, and it is one of the strongest "this is a touge, not a circuit"
+    // cues available from directly overhead. `texture: null` paints it as a
+    // tinted solid rather than a dashed strip.
+    centreLine: { texture: null, width: 10, tint: 0xf0c542, alpha: 0.95 },
     // Total band width here (34 + 150 = 184) is load-bearing, not just a
     // look: it's added to roadHalf to get `edge`, which is exactly the
     // number stage 3's course generator used for its corner-radius and
@@ -74,11 +83,30 @@ export const SURFACE_PRESETS = {
     // If this ever needs to change again, stage3_v2's generator constants
     // (BAND_WIDTH, EDGE, MIN_SEP, CR_MIN_SAFE) have to change with it and
     // the whole course re-validated, not just this number.
+    // Total is still 34 + 150 = 184; only the split changed. See the note
+    // above -- that sum is what the course generator's clearances are
+    // measured against, so the bands may be re-cut but not widened.
     bands: [
-      { texture: null, width: 34, tint: 0x9d9384, alpha: 0.95 },         // gritty verge
+      { texture: null, width: 22, tint: 0x9d9384, alpha: 0.95 },         // gritty verge
+      // the foot of the cut slope, in its own shadow -- without this the
+      // rock band reads as a flat mat lying beside the road rather than a
+      // face rising off it
+      { texture: null, width: 30, tint: 0x61594e, alpha: 0.92 },
       // rock face, not a generic "dirt shoulder" -- darker, rockier tint
-      { texture: 'dirt', width: 150, vPer: 1 / 260, uRepeat: 1.3, tint: 0x8c8478, alpha: 0.94 },
+      { texture: 'dirt', width: 132, vPer: 1 / 260, uRepeat: 1.3, tint: 0x8c8478, alpha: 0.94 },
     ],
+    // A lit strip along the top of the rock band. Rock catches the light at
+    // its crest and sits in shadow at its foot; having both ends of that
+    // gradient is what turns a flat band into a slope.
+    cutSlope: { crest: 34, tint: 0xb5ab9c, alpha: 0.8 },
+    // The land falls away on the OUTSIDE of a switchback -- the turn is
+    // built out on fill, which is why a hairpin has a guardrail on that side
+    // and a cut face on the other. Curvature-driven, so it only appears
+    // where it is actually true, and fades in rather than starting abruptly.
+    valleyDrop: { reach: 280, tint: 0x0d1a0b, alpha: 0.9, from: 0.20, full: 0.48, lip: 26, lipTint: 0xb2ab97 },
+    // Roadside delineator posts (視線誘導標): white poles with a reflector,
+    // set just outside the rail at a wider spacing than the rail's own posts.
+    delineator: { every: 320, tint: 0xf4f7f8, reflector: 0xff9838, out: 34 },
     // Guardrail as a continuous painted ribbon (see buildSurface), not
     // individually placed sprites -- discrete rail segments left gaps
     // wherever a curve made two neighbours' collision checks conflict,
@@ -198,9 +226,11 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
 
   // --- dashed centre line (public-road stages) ---
   if (P.centreLine) {
-    layer.addChild(ribbonMesh(path, tex[P.centreLine.texture], {
-      innerOffset: -P.centreLine.width / 2, outerOffset: P.centreLine.width / 2,
-      uInner: 0, uOuter: 1, vPerWorldUnit: P.centreLine.vPer, alpha: 0.92,
+    const cl = P.centreLine;
+    layer.addChild(ribbonMesh(path, cl.texture ? tex[cl.texture] : Texture.WHITE, {
+      innerOffset: -cl.width / 2, outerOffset: cl.width / 2,
+      uInner: 0, uOuter: 1, vPerWorldUnit: cl.vPer ?? 1 / 1024,
+      tint: cl.tint, alpha: cl.alpha ?? 0.92,
     }));
   }
 
@@ -341,6 +371,49 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
   }
 
 
+  // --- mountain cut slope: a lit crest along the top of the rock band ---
+  if (P.cutSlope) {
+    const outer = roadHalf + (P.bands || []).reduce((a, b) => a + b.width, 0);
+    for (const side of [1, -1]) {
+      layer.addChild(ribbonMesh(path, Texture.WHITE, {
+        innerOffset: side * (outer - P.cutSlope.crest),
+        outerOffset: side * outer,
+        tint: P.cutSlope.tint, alpha: P.cutSlope.alpha,
+      }));
+    }
+  }
+
+  // --- the land falling away on the outside of a switchback ---
+  // Only on the outside, only where the road is actually turning hard, and
+  // faded in by how hard: a hairpin is built out on fill, so that is the
+  // side that drops. Drawn beyond the guardrail (which goes in below), so
+  // the rail reads as standing at the lip of it.
+  if (P.valleyDrop && wallHalf != null) {
+    const vd = P.valleyDrop;
+    const drop = outsideDropAmount(path, vd.from, vd.full);
+    const start = wallHalf + 66;
+    for (const side of [1, -1]) {
+      const width = (k) => Math.max(0, side * drop[k]) * vd.reach;
+      // A flat dark band just reads as a shadow. edge_shadow is a gradient
+      // ACROSS the strip, so used from the lip outward it goes from deep
+      // shade at the road's edge to nothing further out -- which is what
+      // ground falling away from under you looks like from above.
+      layer.addChild(ribbonMesh(path, tex.edge_shadow, {
+        innerOffset: (k) => side * (start + width(k) * 0.05),
+        outerOffset: (k) => side * (start + width(k)),
+        uInner: 0, uOuter: 1, vPerWorldUnit: 1 / 2048,
+        tint: vd.tint, alpha: vd.alpha,
+      }));
+      // the built-out lip itself, catching the light -- without it the
+      // shade starts from nothing and the edge has no edge
+      layer.addChild(ribbonMesh(path, Texture.WHITE, {
+        innerOffset: (k) => side * (start - vd.lip * Math.min(1, width(k) / vd.reach)),
+        outerOffset: (k) => side * (start + vd.lip * 0.35 * Math.min(1, width(k) / vd.reach)),
+        tint: vd.lipTint, alpha: 0.85,
+      }));
+    }
+  }
+
   // --- elevated highway concrete crash walls ---
   if (P.concreteWalls && wallHalf != null) {
     const wallGfx = new Graphics();
@@ -426,10 +499,70 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
         ]).fill({ color: rail.postTint, alpha: 0.9 });
       }
     }
+
+    // Delineator posts: white markers with a reflector on top, set a little
+    // outside the rail and spaced much wider than its own posts. On a real
+    // pass these are what your headlights pick out through a corner, and
+    // from overhead they break up what is otherwise an unvarying white line.
+    if (P.delineator) {
+      const del = P.delineator;
+      const delStep = Math.max(1, Math.round(del.every / path.spacing));
+      const dOff = offset + del.out;
+      for (let i = 0; i < path.count; i += delStep) {
+        const px = path.points[i][0], py = path.points[i][1];
+        const nx = path.normals[i * 2], ny = path.normals[i * 2 + 1];
+        const tx = -ny, ty = nx;
+        for (const side of [1, -1]) {
+          const cx = px + nx * side * dOff, cy = py + ny * side * dOff;
+          postGfx.poly([
+            cx - tx * 5 - nx * side * 5, cy - ty * 5 - ny * side * 5,
+            cx + tx * 5 - nx * side * 5, cy + ty * 5 - ny * side * 5,
+            cx + tx * 5 + nx * side * 20, cy + ty * 5 + ny * side * 20,
+            cx - tx * 5 + nx * side * 20, cy - ty * 5 + ny * side * 20,
+          ]).fill({ color: del.tint, alpha: 0.95 });
+          postGfx.circle(cx + nx * side * 17, cy + ny * side * 17, 6)
+            .fill({ color: del.reflector, alpha: 0.95 });
+        }
+      }
+    }
+
     layer.addChild(postGfx);
   }
 
   return layer;
+}
+
+/**
+ * Per-point "how far does the ground fall away, and on which side".
+ *
+ * Signed: a positive value means the drop is on the +normal side, negative
+ * the other way, and the magnitude (0..1) is how committed the corner is.
+ * The drop is always on the OUTSIDE of the bend, because that is where a
+ * mountain road is built out on fill; the inside is cut into the hill.
+ *
+ * Smoothed along the route afterwards so the apron grows and fades with the
+ * corner instead of switching on at one point, and so the sign change
+ * between two opposite bends passes through zero rather than flipping.
+ */
+export function outsideDropAmount(path, from = 0.20, full = 0.48) {
+  const n = path.count;
+  const raw = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let turn = path.tangents[path.wrap(i + 3)] - path.tangents[path.wrap(i - 3)];
+    while (turn > Math.PI) turn -= Math.PI * 2;
+    while (turn < -Math.PI) turn += Math.PI * 2;
+    const amount = Math.max(0, Math.min(1, (path.curvature[i] - from) / (full - from)));
+    // outside of the bend is opposite the direction it turns
+    raw[i] = -Math.sign(turn) * amount;
+  }
+  const half = Math.max(1, Math.round(160 / path.spacing));
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let sum = 0;
+    for (let k = -half; k <= half; k++) sum += raw[path.wrap(i + k)];
+    out[i] = sum / (2 * half + 1);
+  }
+  return out;
 }
 
 /**

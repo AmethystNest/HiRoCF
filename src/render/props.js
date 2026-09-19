@@ -193,13 +193,19 @@ const THEMES = {
   // of trees; more attempts per lap plus more depth for them to land in
   // both read as "natural" rather than "decorated".
   touge: {
-    step: 90,
+    step: 78,
     entries: [
-      { name: 'tree_pine', weight: 4, near: 260, far: 520, farInfield: 1700 },
-      { name: 'tree_green', weight: 2, near: 260, far: 480, farInfield: 1600 },
-      { name: 'rock_cluster_large', weight: 2, near: 250, far: 420, farInfield: 950 },
-      { name: 'rock_cluster_small', weight: 3, near: 245, far: 400, farInfield: 750 },
-      { name: 'bush_green', weight: 2, near: 250, far: 340, farInfield: 550 },
+      // Pine is still the backbone of the hillside, but a pass like this one
+      // is an autumn-colour road first and foremost -- a stand of nothing but
+      // dark conifer reads as generic forest, and the mix is what makes it
+      // read as a mountain in October rather than a tree-lined circuit.
+      { name: 'tree_pine', weight: 5, near: 250, far: 560, farInfield: 1700 },
+      { name: 'tree_autumn', weight: 4, near: 250, far: 540, farInfield: 1600 },
+      { name: 'tree_green', weight: 2, near: 255, far: 500, farInfield: 1600 },
+      { name: 'tree_cherry', weight: 1, near: 260, far: 520, farInfield: 1400 },
+      { name: 'rock_cluster_large', weight: 2, near: 245, far: 420, farInfield: 950 },
+      { name: 'rock_cluster_small', weight: 3, near: 240, far: 400, farInfield: 750 },
+      { name: 'bush_green', weight: 2, near: 240, far: 340, farInfield: 550 },
     ],
   },
   // Ordinary city street: pavement furniture close to the kerb (street
@@ -424,6 +430,42 @@ export function buildProps(path, sheet, shadowTex, {
     });
   }
 
+  // --- warning chevrons on the outside of the tightest corners ---
+  //
+  // Placed BEFORE the scenery passes, not after: these are signage on a
+  // specific corner, so they have to win the spot, and the mountain rock
+  // scatter below blankets exactly the same shoulder.
+  //
+  // On a mountain pass they go up far earlier than a 0.55 curvature (a
+  // ~340-radius corner) and run in a close row right around the bend --
+  // that row of boards facing you across the outside of a hairpin is the
+  // single most recognisable thing about a Japanese switchback. Every other
+  // preset keeps the sparse, tightest-corners-only placement.
+  //
+  // The lateral offset is derived from playerReach rather than written as a
+  // number. A first pass put the boards at wallHalf + 136 = 396, which is
+  // one single unit inside the reach guard (357 + a 40 reachPad = 397), so
+  // every last one of them was silently rejected and the corner signage
+  // simply did not exist.
+  const mountain = preset === 'mountain';
+  const chevronName = mountain ? 'chevron_blackyellow' : 'chevron_redwhite';
+  const chevronMinCurve = mountain ? 0.34 : 0.55;     // 0.34 ~= 555 radius
+  const chevronEvery = mountain ? 115 : 190;
+  const chevronLateral = mountain && playerReach != null
+    ? playerReach + 58
+    : edge + 70;
+  for (let i = 0; i < path.count; i++) {
+    if (path.curvature[i] < chevronMinCurve) continue;
+    const d = i * path.spacing;
+    if (d % chevronEvery > path.spacing) continue;    // thin them out along the corner
+    // outside of the bend = opposite the turn direction
+    let turn = path.tangents[path.wrap(i + 3)] - path.tangents[path.wrap(i - 3)];
+    while (turn > Math.PI) turn -= Math.PI * 2;
+    while (turn < -Math.PI) turn += Math.PI * 2;
+    const side = turn > 0 ? -1 : 1;
+    add(chevronName, d, side, chevronLateral, { pad: mountain ? 55 : 90, reachPad: 38 });
+  }
+
   // --- reserve side-street corridors so scatter props (buildings, bushes,
   // street furniture) never spawn on top of one -- buildSideStreets() draws
   // them in a completely separate pass with no idea what buildProps() is
@@ -447,30 +489,33 @@ export function buildProps(path, sheet, shadowTex, {
     }
   }
 
-  // --- mountain preset: rock-wall scatter behind the guardrail. The
-  // guardrail itself is a continuous painted ribbon now (see buildSurface
+  // --- mountain preset: rock scatter along the cut slope behind the rail.
+  // The guardrail itself is a continuous painted ribbon (see buildSurface
   // in surfaces.js), not individually placed sprites -- discrete rail
-  // segments left gaps wherever a curve made two neighbours' own
-  // collision checks conflict, which was exactly at the hairpins a real
-  // rail is most needed, and no amount of retuning the collision margin
-  // fixed that structurally. A dense (not 100%, real rock faces aren't
-  // perfectly uniform) rock-wall pass still sits just behind that ribbon
-  // on both sides, since which side is actually the cut-into-the-mountain
-  // face flips with every direction the road turns -- putting it on both
-  // is the only way that's always right regardless of corner direction.
+  // segments left gaps wherever a curve made two neighbours' own collision
+  // checks conflict, which was exactly at the hairpins a real rail is most
+  // needed. This pass puts rock just past that ribbon on both sides, since
+  // which side is the cut-into-the-mountain face flips with every direction
+  // the road turns, so putting it on both is the only thing always right.
+  //
+  // How far out it can sit is NOT a free choice: a prop inside
+  // playerReach + its own reach toward the road looks like something the
+  // car drives through, and the guard in add() rejects it. The previous
+  // constant here (wallHalf + 120) sat well inside that, so this entire
+  // pass had been placing nothing at all -- the "rock wall behind the
+  // guardrail" it describes was not on screen. Derived from playerReach
+  // now, with smaller rocks so the band it needs is narrower.
   if (preset === 'mountain') {
-    // Matches buildSurface's guardrail offset (wallHalf + its `inset`,
-    // currently 90) plus the rail's own half-width and a buffer, so rocks
-    // land just past the ribbon rather than on top of it or far behind it.
-    const rockOffsetAbs = wallHalf != null ? wallHalf + 90 + 30 : edge + 120;
-    const rockNear = rockOffsetAbs - edge;
+    const rockBase = playerReach != null
+      ? playerReach + 130
+      : (wallHalf != null ? wallHalf + 230 : edge + 150);
     const rockStep = 170; // denser than a first pass (230) -- for "natural" density
     for (let d = 0; d < path.length; d += rockStep) {
       for (const side of [1, -1]) {
         if (rng() < 0.12) continue; // an unbroken wall still has the odd gap
-        const name = rng() < 0.6 ? 'rock_cluster_large' : 'rock_cluster_small';
-        const lateral = edge + rockNear + rng() * 45;
-        add(name, d + (rng() - 0.5) * rockStep * 0.4, side, lateral, { scale: 0.9 + rng() * 0.35 });
+        const name = rng() < 0.45 ? 'rock_cluster_large' : 'rock_cluster_small';
+        add(name, d + (rng() - 0.5) * rockStep * 0.4, side, rockBase + rng() * 110,
+          { scale: 0.62 + rng() * 0.3 });
       }
     }
 
@@ -501,20 +546,6 @@ export function buildProps(path, sheet, shadowTex, {
       const name = fillNames[(rng() * fillNames.length) | 0];
       add(name, n.distance, side, Math.abs(lat) - edge, { scale: 0.85 + rng() * 0.5 });
     }
-  }
-
-  // --- warning chevrons on the outside of the tightest corners ---
-  const chevronName = preset === 'mountain' ? 'chevron_blackyellow' : 'chevron_redwhite';
-  for (let i = 0; i < path.count; i++) {
-    if (path.curvature[i] < 0.55) continue;
-    const d = i * path.spacing;
-    if (d % 190 > path.spacing) continue;             // thin them out along the corner
-    // outside of the bend = opposite the turn direction
-    let turn = path.tangents[path.wrap(i + 3)] - path.tangents[path.wrap(i - 3)];
-    while (turn > Math.PI) turn -= Math.PI * 2;
-    while (turn < -Math.PI) turn += Math.PI * 2;
-    const side = turn > 0 ? -1 : 1;
-    add(chevronName, d, side, edge + 70, { pad: 90 });
   }
 
   // --- themed sections around the lap ---
