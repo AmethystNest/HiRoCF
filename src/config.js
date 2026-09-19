@@ -140,7 +140,12 @@ export const STAGES = {
   5: {
     id: 5, name: 'STAGE 5', shortDesc: 'GRAND CIRCUIT',
     courseName: 'COURSE · GRAND TOUR',
-    courseDesc: 'CITY + TOUGE + HIGHWAY / FULL MIX',
+    // Describes the course it actually runs. Stage 5 shares stage 4's
+    // expressway loop (see STAGE_PATHS) dressed as open country, so the
+    // old "CITY + TOUGE + HIGHWAY / FULL MIX" was describing a course that
+    // has never existed -- it was written for a stage that, in practice,
+    // was silently running stage 1's beginner circuit.
+    courseDesc: 'EXPRESSWAY LOOP / OPEN COUNTRY / NARROW LANES',
     rivalName: 'ラスボス',
     roadHalf: 260, wallHalf: 340,
     // Retuned when stage 5 stopped falling back to stage 1's beginner

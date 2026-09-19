@@ -599,5 +599,9 @@ export async function boot({ stageId = 1, onReady } = {}) {
   });
 
   onReady?.(game, app);
-  return { game, app };
+  // `stages` is handed back so the shell can build a stage picker without
+  // importing config.js itself. The standalone build's shell reaches these
+  // modules through blob URLs it creates at runtime, so a second top-level
+  // import from the page would have nothing to resolve against.
+  return { game, app, stages: STAGES };
 }

@@ -105,6 +105,40 @@
   }
   #zoomBtn:active{transform:scale(.96);background:rgba(255,255,255,.18)}
 
+  #stagePick{
+    position:fixed;left:14px;top:170px;z-index:15;
+    width:auto;min-width:82px;height:38px;padding:0 12px;
+    border:1px solid rgba(255,255,255,.34);border-radius:12px;
+    background:rgba(8,10,16,.58);backdrop-filter:blur(6px);
+    color:#fff;font-size:12px;font-weight:900;letter-spacing:.05em;
+    touch-action:manipulation;-webkit-tap-highlight-color:transparent;
+  }
+  #stagePick:active{transform:scale(.96);background:rgba(255,255,255,.18)}
+
+  #stageOverlay{z-index:40}
+  #stageList{
+    width:min(420px,88vw);max-height:78vh;overflow:auto;-webkit-overflow-scrolling:touch;
+    background:rgba(10,12,18,.94);border:1px solid rgba(255,255,255,.16);
+    border-radius:18px;padding:16px;pointer-events:auto;
+  }
+  #stageList h3{margin:0 0 12px;font-size:13px;letter-spacing:.2em;opacity:.65;font-weight:900}
+  #stageList .row{
+    display:block;width:100%;text-align:left;margin-bottom:8px;padding:11px 13px;
+    border:1px solid rgba(255,255,255,.14);border-radius:13px;
+    background:rgba(255,255,255,.05);color:#fff;
+    touch-action:manipulation;-webkit-tap-highlight-color:transparent;
+  }
+  #stageList .row:active{background:rgba(255,255,255,.18)}
+  #stageList .row.current{border-color:#59b6ff;background:rgba(89,182,255,.16)}
+  #stageList .row .n{font-size:15px;font-weight:900;letter-spacing:.06em}
+  #stageList .row .c{font-size:11px;opacity:.72;margin-top:3px;letter-spacing:.06em}
+  #stageList .row .r{font-size:11px;opacity:.85;margin-top:3px}
+  #stageList .close{
+    display:block;width:100%;margin-top:6px;height:42px;border-radius:13px;
+    border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);
+    color:#fff;font-weight:900;letter-spacing:.1em;
+  }
+
 </style>
 </head>
 <body>
@@ -128,6 +162,15 @@
   <div class="side"><button id="brake">BRAKE</button><button id="boost">BOOST</button></div>
 </div>
 <button id="zoomBtn" aria-label="camera zoom">VIEW 1/3</button>
+<button id="stagePick" aria-label="choose stage">STAGE 1/5</button>
+
+<div class="overlay" id="stageOverlay" hidden>
+  <div id="stageList">
+    <h3>SELECT STAGE</h3>
+    <div id="stageRows"></div>
+    <button class="close" id="stageClose">CLOSE</button>
+  </div>
+</div>
 
 <div id="loading">LOADING…</div>
 
@@ -170,8 +213,14 @@
   try {
     const {boot}=await import('./src/main.js');
     const el=(id)=>document.getElementById(id);
-    const {game,app}=await boot({stageId:4});
+    const {game,app,stages}=await boot({stageId:1});
     loading.classList.add('hide');
+    // Five stages exist. The progression was capped at 3, so stages 4 and 5
+    // were unreachable by playing -- and there was no way to pick a stage at
+    // all, which is also why the boot call sat on whichever stage was last
+    // being worked on.
+    const STAGE_IDS=Object.keys(stages).map(Number).sort((a,b)=>a-b);
+    const LAST_STAGE=STAGE_IDS[STAGE_IDS.length-1];
     const zoomBtn=el('zoomBtn');
     const zoomNames=['VIEW 1/3','VIEW 2/3','VIEW 3/3'];
     zoomBtn.textContent=zoomNames[game.zoomLevel||0];
@@ -195,7 +244,7 @@
       vsStage.textContent=game.cfg.name;
       vsRival.textContent=game.cfg.rivalName;
       finishStage.textContent=`${game.cfg.name} CLEAR`;
-      stageBtn.textContent=game.stageId<3?'NEXT STAGE':'RETRY STAGE 3';
+      stageBtn.textContent=game.stageId<LAST_STAGE?'NEXT STAGE':'RETRY FINAL STAGE';
       lapEl.textContent=`LAP 1/${game.race?.totalLaps??3}`;
       posEl.textContent='POS 2/2';
       timeEl.textContent='00:00.000';
@@ -204,7 +253,36 @@
     const fmtTime=s=>{const ms=Math.max(0,Math.floor(s*1000)),m=Math.floor(ms/60000),sec=Math.floor((ms%60000)/1000),cs=ms%1000;return `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}.${String(cs).padStart(3,'0')}`};
     let shownFinish=false,finishDelay=0,lapPopupTimer=0;
     const showLapPopup=(lap,total)=>{lapPopupMain.textContent=`LAP ${lap}/${total}`;lapPopupSub.textContent=lap===total?'FINAL LAP':'CHECKPOINT';lapPopup.classList.remove('show');void lapPopup.offsetWidth;lapPopup.classList.add('show');lapPopupTimer=1.45};
-    app.ticker.add(ticker=>{const dt=Math.min(.033,ticker.deltaMS/1000),p=game.player;speedEl.textContent=Math.max(0,Math.round(p.displaySpeed));const gauge=p.boosting?Math.max(0,p.boostTimer/2.45):p.boostEnergy/100;fillEl.style.transform=`scaleX(${gauge})`;boostBtn.classList.toggle('ready',!p.boosting&&p.boostEnergy>=99.5);if(lapPopupTimer>0){lapPopupTimer-=dt;if(lapPopupTimer<=0)lapPopup.classList.remove('show')}const race=game.race;if(!race)return;if(race.lapAnnounce!=null){showLapPopup(race.lapAnnounce,race.totalLaps);race.lapAnnounce=null}const lap=Math.min(game.playerEntry.progress.lap,race.totalLaps);lapEl.textContent=`LAP ${lap}/${race.totalLaps}`;posEl.textContent=`POS ${race.positionOf(game.playerEntry)}/2`;timeEl.textContent=fmtTime(race.time);vsOverlay.hidden=race.state!=='vs';signalOverlay.hidden=race.state!=='countdown';if(race.state==='countdown'){const t=race.countdown;sig1.className='lamp'+(t<2.4?' on':'');sig2.className='lamp'+(t<1.6?' on':'');sig3.className='lamp'+(t<.8?' go':(t<1.6?' on':''))}if(race.state==='finished'&&!shownFinish){finishDelay+=dt;if(finishDelay>=1.9){shownFinish=true;const place=race.positionOf(game.playerEntry);finishPlace.textContent=place===1?'1st':'2nd';finishTime.textContent=fmtTime(game.playerEntry.progress.finishTime??race.time);stageBtn.textContent=(place===1&&game.stageId<3)?'NEXT STAGE':(place===1?'RETRY STAGE 3':'RETRY');finishOverlay.hidden=false}}});
+    app.ticker.add(ticker=>{const dt=Math.min(.033,ticker.deltaMS/1000),p=game.player;speedEl.textContent=Math.max(0,Math.round(p.displaySpeed));const gauge=p.boosting?Math.max(0,p.boostTimer/2.45):p.boostEnergy/100;fillEl.style.transform=`scaleX(${gauge})`;boostBtn.classList.toggle('ready',!p.boosting&&p.boostEnergy>=99.5);if(lapPopupTimer>0){lapPopupTimer-=dt;if(lapPopupTimer<=0)lapPopup.classList.remove('show')}const race=game.race;if(!race)return;if(race.lapAnnounce!=null){showLapPopup(race.lapAnnounce,race.totalLaps);race.lapAnnounce=null}const lap=Math.min(game.playerEntry.progress.lap,race.totalLaps);lapEl.textContent=`LAP ${lap}/${race.totalLaps}`;posEl.textContent=`POS ${race.positionOf(game.playerEntry)}/2`;timeEl.textContent=fmtTime(race.time);vsOverlay.hidden=race.state!=='vs';signalOverlay.hidden=race.state!=='countdown';if(race.state==='countdown'){const t=race.countdown;sig1.className='lamp'+(t<2.4?' on':'');sig2.className='lamp'+(t<1.6?' on':'');sig3.className='lamp'+(t<.8?' go':(t<1.6?' on':''))}if(race.state==='finished'&&!shownFinish){finishDelay+=dt;if(finishDelay>=1.9){shownFinish=true;const place=race.positionOf(game.playerEntry);finishPlace.textContent=place===1?'1st':'2nd';finishTime.textContent=fmtTime(game.playerEntry.progress.finishTime??race.time);stageBtn.textContent=(place===1&&game.stageId<LAST_STAGE)?'NEXT STAGE':(place===1?'RETRY FINAL STAGE':'RETRY');finishOverlay.hidden=false}}});
+    // --- stage picker ---
+    const stagePick=el('stagePick'),stageOverlay=el('stageOverlay'),stageRows=el('stageRows'),stageClose=el('stageClose');
+    const syncPickLabel=()=>{stagePick.textContent=`STAGE ${game.stageId}/${LAST_STAGE}`};
+    const buildRows=()=>{
+      stageRows.textContent='';
+      for(const id of STAGE_IDS){
+        const cfg=stages[id];
+        const b=document.createElement('button');
+        b.className='row'+(id===game.stageId?' current':'');
+        b.innerHTML=`<div class="n">${cfg.name} · ${cfg.shortDesc}</div>`
+          +`<div class="c">${cfg.courseName} — ${cfg.courseDesc}</div>`
+          +`<div class="r">RIVAL: ${cfg.rivalName}</div>`;
+        b.addEventListener('pointerdown',ev=>{
+          ev.preventDefault();
+          stageOverlay.hidden=true;
+          shownFinish=false;finishDelay=0;lapPopupTimer=0;
+          lapPopup.classList.remove('show');
+          finishOverlay.hidden=true;
+          game.loadStage(id);
+          syncStageUI();
+          syncPickLabel();
+        });
+        stageRows.appendChild(b);
+      }
+    };
+    stagePick.addEventListener('pointerdown',e=>{e.preventDefault();buildRows();stageOverlay.hidden=false});
+    stageClose.addEventListener('pointerdown',e=>{e.preventDefault();stageOverlay.hidden=true});
+    syncPickLabel();
+
     stageBtn.addEventListener('pointerdown',e=>{
       e.preventDefault();
       shownFinish=false;
@@ -213,9 +291,10 @@
       lapPopup.classList.remove('show');
       finishOverlay.hidden=true;
       const place=game.race?.positionOf(game.playerEntry)??2;
-      const nextStage=(place===1&&game.stageId<3)?game.stageId+1:game.stageId;
+      const nextStage=(place===1&&game.stageId<LAST_STAGE)?game.stageId+1:game.stageId;
       game.loadStage(nextStage);
       syncStageUI();
+      syncPickLabel();
     });
     window.__game=game;window.__app=app;
   } catch(err) {
