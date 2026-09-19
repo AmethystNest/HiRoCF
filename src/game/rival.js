@@ -219,6 +219,7 @@ export class RivalCar {
     // boost so both behaviours can coexist.
     this.bigCurveBoostLap = 0;
     this.wasInBigCurveBoostZone = false;
+    this._sideBlockBias = 0;
     this.finished = false;
     this.contactRecoveryTimer = 0;
 
@@ -230,6 +231,28 @@ export class RivalCar {
     // it's there to demonstrate a clean drift line through the touge, not
     // to harass the player).
     this.blockEnabled = tuning.block ?? true;
+    // --- side block ---
+    // A separate behaviour from `block` above, and deliberately so. That
+    // one weaves about the racing line for as long as the rival leads,
+    // which reads as a car driving badly; this one does nothing at all
+    // until a car actually draws level, and then leans across toward
+    // whichever side it came up, closing the door. 0 disables it.
+    //
+    // `sideBlock` is how far it leans, as a fraction of roadHalf.
+    // `sideBlockRate` is how fast it gets there (1/s): this is the knob
+    // that makes it a gentle shut-out rather than a swipe, since a slow
+    // lean gives the player time to back out or commit.
+    this.sideBlock = tuning.sideBlock ?? 0;
+    this.sideBlockRate = tuning.sideBlockRate ?? 1.4;
+    // route-distance window, in world units, within which the two count as
+    // abreast; and how far the player may get ahead before it gives up
+    this.sideBlockWindow = tuning.sideBlockWindow ?? 800;
+    this.sideBlockYield = tuning.sideBlockYield ?? 220;
+    this._sideBlockBias = 0;
+    // Half the rival's own body width, set by main.js once it knows the
+    // world scale. Without it the lean limit assumes a car; stage 4's
+    // truck is wide enough that a car's limit would hang it off the road.
+    this.bodyHalf = null;
     this.weavePhase = 0;
     this.blockGapMax = 620;   // only blocks when the player is within this close behind
     this.weaveSpeed = 2.6;    // rad/s -- one full swerve cycle roughly every 2.4s
@@ -376,6 +399,12 @@ export class RivalCar {
     // Once the player is actually close behind, the weave re-centres on
     // the player's own line instead of its own, so it's now actively
     // cutting them off rather than just wandering.
+    // How far the middle of this car may sit from the centreline before
+    // part of it is hanging off the road. `bodyHalf` is only known once
+    // the world scale is (see main.js); 45 is the car-sized default this
+    // used before there was anything on the grid wider than a car.
+    const lineLimit = this.roadHalf - (this.bodyHalf ?? 45) - 8;
+
     let steerLine = this._raceLine;
     if (this.blockEnabled && race?.player && race.gap != null && race.gap > 0) {
       this.weavePhase += dt * this.weaveSpeed;
@@ -383,10 +412,34 @@ export class RivalCar {
       const center = race.gap < this.blockGapMax
         ? path.lateralOf(race.player.x, race.player.y, near)
         : this._raceLine;
-      const limit = this.roadHalf - 45;
-      steerLine = Math.max(-limit, Math.min(limit, center + weave));
+      steerLine = Math.max(-lineLimit, Math.min(lineLimit, center + weave));
     } else {
       this.weavePhase = 0;
+    }
+
+    // --- side block: shut the door on a car drawing alongside ---
+    // Only while the two actually overlap along the route, and only toward
+    // the side the player came up. The lean is eased in and out at
+    // `sideBlockRate`, so it reads as the rival gradually taking the line
+    // away rather than swerving at them, and it decays to nothing the
+    // moment they drop back or get through.
+    if (this.sideBlock > 0 && race?.player && race.gap != null && !warmingUp) {
+      const abreast = Math.max(0, 1 - Math.abs(race.gap) / this.sideBlockWindow);
+      let target = 0;
+      // give up once the player is properly ahead -- leaning on someone
+      // already past reads as ramming them, not as defending a line
+      if (abreast > 0 && race.gap > -this.sideBlockYield) {
+        const playerLat = path.lateralOf(race.player.x, race.player.y, near);
+        const myLat = path.lateralOf(this.x, this.y, near);
+        const side = Math.sign(playerLat - myLat);
+        // ignore a player sitting in the rival's own tracks: there is no
+        // side to defend, and a zero-width gap would make `side` flicker
+        if (side !== 0 && Math.abs(playerLat - myLat) > 30) {
+          target = side * this.sideBlock * this.roadHalf * abreast;
+        }
+      }
+      this._sideBlockBias += (target - this._sideBlockBias) * (1 - Math.exp(-dt * this.sideBlockRate));
+      steerLine = Math.max(-lineLimit, Math.min(lineLimit, steerLine + this._sideBlockBias));
     }
 
     // --- aim at a point ahead, offset to this car's line. While drifting,

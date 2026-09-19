@@ -307,6 +307,11 @@ export class Game {
 
     // --- rival ---
     this.rival = new RivalCar(path, cfg, cfg.rival);
+    // The AI clamps its own racing line so the car stays on the road; that
+    // clamp needs the body's real half-width, which only exists once the
+    // world scale does. Stage 4's box truck is wide enough that the old
+    // car-sized default would have hung it over the edge while blocking.
+    this.rival.bodyHalf = rivalWorldSize.w / 2;
     this.rival.placeAtStart(-rivalStartBack, rivalStartLateral);
     this.rival.deckId = 0;
     this.rival.zLevel = 0;

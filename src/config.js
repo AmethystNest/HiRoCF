@@ -137,6 +137,13 @@ export const STAGES = {
     rival: {
       maxSpeed: 790, accel: 260, turn: 1.95, sprite: 'truck0164',
       cornerSlow: 0.10, block: false, weave: false,
+      // Shuts the door on a car coming alongside, and only then -- `block`
+      // stays off, because that one weaves about for as long as the rival
+      // leads, which on a truck would read as a driver who cannot hold a
+      // lane. 0.26 of roadHalf is about 94 world units of lean, eased in
+      // over roughly a second, so you get time to see it coming and decide
+      // whether to commit or lift.
+      sideBlock: 0.26, sideBlockRate: 1.3,
       // A loaded box truck does not get shoved aside by a car. `mass` is
       // how much of a contact the OTHER vehicle absorbs (see
       // resolveContacts): at 9 against the player's 1 the truck takes about
