@@ -558,7 +558,16 @@ export async function boot({ stageId = 1, onReady } = {}) {
   // data: JSON URLs are not automatically promoted to a Pixi Spritesheet
   // in every mobile browser. Build the atlas textures explicitly so the
   // standalone HTML behaves the same as the folder build.
-  const atlasData = await (await fetch(PROP_ATLAS)).json();
+  // Decoded directly rather than fetched. PROP_ATLAS is a data: URL, and
+  // fetching one counts as a network request: anywhere the page runs under
+  // a content-security-policy that does not list data: in connect-src --
+  // an embedded or sandboxed host, for instance -- the fetch is refused and
+  // the game dies at boot with no props. atob has no such dependency.
+  const atlasData = JSON.parse(
+    new TextDecoder().decode(
+      Uint8Array.from(atob(PROP_ATLAS.slice(PROP_ATLAS.indexOf(',') + 1)), (c) => c.charCodeAt(0)),
+    ),
+  );
   const atlasTexture = await Assets.load(atlasData.meta.image);
   const propTextures = {};
   for (const [name, entry] of Object.entries(atlasData.frames || {})) {
