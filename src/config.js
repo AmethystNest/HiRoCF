@@ -145,21 +145,23 @@ export const STAGES = {
     // old "CITY + TOUGE + HIGHWAY / FULL MIX" was describing a course that
     // has never existed -- it was written for a stage that, in practice,
     // was silently running stage 1's beginner circuit.
-    courseDesc: 'EXPRESSWAY LOOP / OPEN COUNTRY / NARROW LANES',
+    courseDesc: 'CITY + TUNNEL + PASS + VIADUCT / EVERYTHING',
     rivalName: 'ラスボス',
-    roadHalf: 260, wallHalf: 340,
-    // Retuned when stage 5 stopped falling back to stage 1's beginner
-    // circuit and took over stage 4's expressway loop. cornerSlow was never
-    // set here, so it ran on the 0.45 default -- on a course whose tightest
-    // corner is 984 radius that had the last boss lifting for bends stage
-    // 4's rival takes flat, and it finished the lap slower than 高速の帝王
-    // does on the same road. maxSpeed stays at or under the player's 760,
-    // per the spec that the rival is never outright faster in a straight
-    // line; what makes this one the boss is that it barely slows for
-    // anything and out-accelerates everything else in the game.
+    roadHalf: 240, wallHalf: 320,
+    // Tuned for the composite course, which asks for everything the other
+    // rivals only have to do one of: 520-radius city junctions, a
+    // 410-radius switchback, and an expressway. cornerSlow sits between
+    // stage 4's 0.10 (a rival that barely lifts) and stage 3's 0.52 (one
+    // that has to brake hard for a hairpin), with the longer lookahead
+    // stage 3 needed so it sees a switchback coming in time. maxSpeed
+    // stays at or under the player's 760, per the spec that the rival is
+    // never outright faster in a straight line; what makes this one the
+    // boss is that it gives up less speed than anything else in the game
+    // for every kind of corner in it, and blocks while it leads.
     rival: {
-      maxSpeed: 755, accel: 320, turn: 2.55, sprite: 'devilz', tint: 0x7a3ae0,
-      cornerSlow: 0.10, raceLine: true, block: true,
+      maxSpeed: 755, accel: 320, turn: 2.85, sprite: 'devilz', tint: 0x7a3ae0,
+      cornerSlow: 0.30, cornerLookAhead: 40, raceLine: true, block: true,
+      drift: 0.35, driftVisualBoost: 0.3, finalLapBoostOnly: true,
     },
     bestKey: 'topdownRacer_stage5_best_ms',
   },

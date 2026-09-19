@@ -406,19 +406,110 @@ export function buildStage4Path() {
   return path;
 }
 
+/**
+ * Stage 5 -- the last stage: one lap that is all three of the others, then
+ * climbs over the first of them on a viaduct.
+ *
+ * City streets with square junctions, a tunnel bored through the ridge, a
+ * switchback pass, and an expressway that runs the ridge west and turns
+ * south onto a viaduct straight down over the city street the lap started
+ * on -- crossing it twice, elevated, before dropping back to ground.
+ *
+ * One road width for the whole lap (roadHalf 240), because collision, the
+ * wall and the AI all take one number per stage. What changes per sector is
+ * the surface treatment and how tight the corners are allowed to be, and
+ * those two are linked: the inside of a turn has to clear that sector's
+ * built width or its outermost band folds through itself at the apex. The
+ * city's footpath takes it out to 416, so junctions are 520; the pass's
+ * rock band reaches 360, so the tightest apex is 420.
+ *
+ * The crossing is the reason the elevated metadata exists (see
+ * TrackPath.setLayerRange and the deck plumbing in main.js/player.js): two
+ * stretches of live road share an XY, so every "where am I on the route"
+ * lookup has to be local. Stage 4 proved that machinery on one crossing;
+ * this stage runs two, on a course four times as varied.
+ *
+ * Closure is solved at build time from two free lengths, as stages 2 and 3
+ * do. `S5_RIDGE` is NOT free: it sets how far west the ridge runs before
+ * the viaduct turns south, which is what decides whether the viaduct comes
+ * down over the city street at all. It was swept over a range and 13000 is
+ * the value that puts both crossings on the city's own blocks while leaving
+ * every other pair of stretches clear of the road's full swath.
+ */
+const S5_JUNCTION = 520;   // city junctions: must clear the 416 built width
+const S5_RIDGE = 13000;    // ridge run west -- sets where the viaduct falls
+
+function stage5Layout(A, B, dry) {
+  const t = new Turtle(0, 0, 0, dry);
+  const L = -1, R = 1;
+  const J = S5_JUNCTION;
+
+  // --- city: blocks and square junctions along the valley floor
+  t.fwd(3200); t.turn(J, 90);
+  t.fwd(1400); t.turn(J, -90);
+  t.fwd(2600); t.turn(J, -90);
+  t.fwd(1400); t.turn(J, 90);
+  t.fwd(3400);
+
+  // --- out of town, then straight through the ridge
+  t.turn(900, -34); t.fwd(1500);
+  t.turn(900, 34);
+  t.fwd(2600);                                  // the tunnel
+
+  // climb away from the approach road before the switchbacks start, or the
+  // bottom leg of the stack folds back on top of it
+  t.turn(800, -90); t.fwd(1800); t.turn(800, 90);
+
+  // --- the pass: four switchbacks with east-west legs, climbing north.
+  // An even count keeps the summit pointing the way the stack was entered.
+  hairpin(t, L, { apex: 440, entry: 700 });               t.fwd(1500);
+  hairpin(t, R, { apex: 420, entry: 700, entryDeg: 24 }); t.fwd(1100);
+  hairpin(t, L, { apex: 465, entry: 700, entryDeg: 17 }); t.waveFwd(1900, 90);
+  hairpin(t, R, { apex: 430, entry: 700 });               t.fwd(1400);
+
+  // --- over the crest and west onto the expressway
+  t.turn(900, -90); t.fwd(1200); t.turn(950, -90);
+
+  // --- expressway: the ridge run, then the viaduct south over the city
+  t.fwd(S5_RIDGE - 2400);
+  t.fwd(2400);                                  // ramp up onto the deck
+  t.turn(1700, -90);
+  t.fwd(A);                                     // FREE #1 -- due south
+  t.turn(1300, -90); t.fwd(1600);
+  t.turn(1300, 90);  t.fwd(900);
+  t.turn(1300, 90);
+  t.fwd(B);                                     // FREE #2 -- due west
+  t.turn(1000, 90);  t.fwd(1800);
+  t.turn(1000, 90);  t.fwd(600);
+  return t;
+}
+
+export function buildStage5Path() {
+  const at = (a, b) => stage5Layout(a, b, true);
+  const p00 = at(0, 0), p10 = at(1000, 0), p01 = at(0, 1000);
+  const ax = (p10.x - p00.x) / 1000, ay = (p10.y - p00.y) / 1000;
+  const bx = (p01.x - p00.x) / 1000, by = (p01.y - p00.y) / 1000;
+  const det = ax * by - ay * bx;
+  const A = (-p00.x * by + p00.y * bx) / det;
+  const B = (ax * -p00.y + ay * p00.x) / det;
+  const path = stage5Layout(A, B, false).build(SPACING);
+
+  // The tunnel, and the viaduct that carries the expressway over the city.
+  // Fractions read off the built path, not the turtle's running distance --
+  // resampling stretches it by about 6%.
+  path.setTunnelRange(0.200, 0.229);
+  path.setLayerRange(0.000, 0.612, 0, 0);   // ground: city, pass, ridge
+  path.setLayerRange(0.612, 0.669, 1, 1);   // up onto the deck
+  path.setLayerRange(0.669, 0.938, 1, 2);   // elevated, crossing the city
+  path.setLayerRange(0.938, 0.975, 1, 1);   // back down
+  path.setLayerRange(0.975, 1.000, 0, 0);   // ground, into the start
+  return path;
+}
+
 export const STAGE_PATHS = {
   1: buildStage1Path,
   2: buildStage2Path,
   3: buildStage3Path,
   4: buildStage4Path,
-  // Stage 5 has no course of its own and shares stage 4's expressway loop.
-  // It used to have no entry here at all, which meant main.js's
-  // `STAGE_PATHS[stageId] || STAGE_PATHS[1]` fallback quietly handed it
-  // stage 1's beginner circuit -- so the final stage was the first stage
-  // again, at a narrower road width, and nothing said so. Sharing a course
-  // is a decision; falling back to one is an accident. It gets its own
-  // surface preset (grandtour) and decoration layout so the two stages do
-  // not look alike, and a narrower roadHalf (260 vs 360) so the same
-  // corners ask more of the player.
-  5: buildStage4Path,
+  5: buildStage5Path,
 };

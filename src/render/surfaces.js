@@ -195,6 +195,73 @@ export const SURFACE_PRESETS = {
     ],
   },
 
+  /**
+   * Stage 5's three sectors. It is one road with one width (roadHalf 240)
+   * that changes character twice round the lap, so these are the existing
+   * city / mountain / highway treatments re-cut for that width rather than
+   * new looks: the band totals differ (176, 120, 104) because each sector's
+   * corners are sized against its own built width -- the inside of a turn
+   * has to clear it or the outermost band folds through itself -- and
+   * because a city footpath, a rock cut and a motorway hard shoulder are
+   * not the same size in the first place.
+   *
+   * Each carries its own `terrain`, so the ground changes with the road.
+   */
+  gt_city: {
+    ground: 'dirt', groundScale: 2.2, groundTint: 0x767c84,
+    terrain: 1600, terrainRepeat: 7, terrainV: 1 / 0.0011,
+    asphalt: { texture: 'road_asphalt', uRepeat: 3, vPer: 1 / 520, tint: 0xa6abb2 },
+    ruts: { offset: 86, width: 74, alpha: 0.4, vPer: 1 / 900 },
+    edgeLine: { inset: 14, width: 11, tint: 0xffffff, alpha: 0.85 },
+    centreLine: { texture: 'dash_white', width: 11, vPer: 1 / 120 },
+    junctionMarks: true,
+    paintStart: false,
+    startMarker: 'crosswalk',
+    bands: [
+      { texture: null, width: 12, tint: 0x5c6167, alpha: 0.95 },
+      { texture: null, width: 8, tint: 0xc8ccd0, alpha: 1.0 },
+      { texture: null, width: 26, tint: 0x7d848b, alpha: 0.98 },
+      { texture: null, width: 130, tint: 0x969ea6, alpha: 0.98 },
+    ],
+    bandEdge: { width: 28, tint: 0x4b5157, alpha: 0.85 },
+  },
+
+  gt_touge: {
+    ground: 'grass_dry', groundScale: 1.5, groundTint: 0x87906b,
+    terrain: 1600, terrainRepeat: 6, terrainV: 1 / 0.0009,
+    asphalt: { texture: 'road_asphalt', uRepeat: 2.6, vPer: 1 / 520, tint: 0xc3bfb8 },
+    ruts: { offset: 70, width: 62, alpha: 0.34, vPer: 1 / 900 },
+    edgeLine: { inset: 11, width: 9, tint: 0xf0ead8, alpha: 0.8 },
+    centreLine: { texture: null, width: 10, tint: 0xf0c542, alpha: 0.95 },
+    paintStart: false,
+    bands: [
+      { texture: null, width: 18, tint: 0x9d9384, alpha: 0.95 },
+      { texture: null, width: 24, tint: 0x61594e, alpha: 0.92 },
+      { texture: 'dirt', width: 78, vPer: 1 / 260, uRepeat: 1.3, tint: 0x8c8478, alpha: 0.94 },
+    ],
+    bandEdge: { width: 26, tint: 0xb5ab9c, alpha: 0.8 },
+    valleyDrop: { reach: 260, tint: 0x0d1a0b, alpha: 0.9, from: 0.20, full: 0.48, lip: 24, lipTint: 0xb2ab97 },
+    guardrail: { inset: 80, width: 18, tint: 0xf4f6f7, postTint: 0x2b2d30, postEvery: 95, postWidth: 8 },
+    delineator: { every: 320, tint: 0xf4f7f8, reflector: 0xff9838, out: 30 },
+  },
+
+  gt_highway: {
+    ground: 'dirt', groundScale: 2.4, groundTint: 0x4a5058,
+    terrain: 1600, terrainRepeat: 7, terrainV: 1 / 0.0011,
+    asphalt: { texture: 'road_asphalt', uRepeat: 4.2, vPer: 1 / 600, tint: 0x9fa5aa },
+    ruts: { offset: 96, width: 74, alpha: 0.22, vPer: 1 / 1000 },
+    edgeLine: { inset: 16, width: 12, tint: 0xf7f7f3, alpha: 0.95 },
+    centreLine: null,
+    highwayLanes: true,
+    elevatedDeck: true,
+    concreteWalls: true,
+    paintStart: false,
+    bands: [
+      { texture: null, width: 26, tint: 0x5d6267, alpha: 1.0 },
+      { texture: null, width: 78, tint: 0x73777a, alpha: 1.0 },
+    ],
+  },
+
 };
 
 /**
@@ -202,27 +269,69 @@ export const SURFACE_PRESETS = {
  * @param {object} tex loaded texture map keyed by base name
  * @param {object} cfg { roadHalf, wallHalf, preset }
  */
-export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit' }) {
+export function buildSurface(path, tex, {
+  roadHalf, wallHalf, preset = 'circuit', range = null, ground = true, terrainLayer = null,
+}) {
   const P = SURFACE_PRESETS[preset] || SURFACE_PRESETS.circuit;
   const layer = new Container();
   layer.label = 'surface';
 
+  // A stage whose road changes character part-way round (stage 5 runs city
+  // streets, then a pass, then an expressway) calls this once per sector
+  // with its own preset and the index range that sector covers. `R` goes
+  // into every ribbon so each layer is drawn over that span only, and the
+  // ground plane -- which is one sprite over the whole course -- is drawn
+  // by the first call alone.
+  const R = range ? { fromIndex: range.fromIndex, spanIndices: range.spanIndices } : {};
+  const base = range ? range.fromIndex : 0;
+  const span = range ? range.spanIndices : path.count;
+  const inSpan = (k) => path.wrap(k - base) < span;
+  const spanIndices = function* (step) {
+    for (let o = 0; o < span; o += step) yield path.wrap(base + o);
+  };
+
   // --- ground: one world-space tiling plane covering the track bounds ---
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  if (ground) {
   for (const [x, y] of path.points) {
     if (x < minX) minX = x; if (x > maxX) maxX = x;
     if (y < minY) minY = y; if (y > maxY) maxY = y;
   }
   const pad = roadHalf + 3200;
-  const ground = new TilingSprite({
+  const groundSprite = new TilingSprite({
     texture: tex[P.ground],
     width: (maxX - minX) + pad * 2,
     height: (maxY - minY) + pad * 2,
   });
-  ground.position.set(minX - pad, minY - pad);
-  ground.tileScale.set(P.groundScale ?? 1.6);
-  if (P.groundTint) ground.tint = P.groundTint;
-  layer.addChild(ground);
+  groundSprite.position.set(minX - pad, minY - pad);
+  groundSprite.tileScale.set(P.groundScale ?? 1.6);
+  if (P.groundTint) groundSprite.tint = P.groundTint;
+  layer.addChild(groundSprite);
+  }
+
+  // --- per-sector terrain ---
+  // The ground plane is one sprite over the whole course, which is right
+  // until a course changes country part-way round. A sector that sets
+  // `terrain` lays its own ground down as a band along its own stretch,
+  // over the shared plane, so stage 5 can run city dirt, then a dry
+  // hillside, then expressway scrub without three ground sprites fighting
+  // over the same bounding box.
+  //
+  // It goes in `terrainLayer`, a container the caller puts UNDERNEATH every
+  // sector's road, not in this sector's own container. Sector containers
+  // are siblings drawn in order, and on a course that crosses over itself
+  // the last sector's terrain is physically on top of an earlier sector's
+  // road -- stage 5's viaduct flies over the city, and with the terrain in
+  // the sector's own container it painted the city street out of existence
+  // for a third of a block either side.
+  if (P.terrain) {
+    (terrainLayer ?? layer).addChild(ribbonMesh(path, tex[P.ground], {
+      ...R,
+      innerOffset: -P.terrain, outerOffset: P.terrain,
+      uInner: 0, uOuter: P.terrainRepeat ?? 9, vPerWorldUnit: 1 / (P.terrainV ?? 900),
+      tint: P.groundTint,
+    }));
+  }
 
   // --- elevated expressway under-deck / cast shadow ---
   // Oversized dark ribbons underneath the asphalt make the road read as a
@@ -230,11 +339,13 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
   if (P.elevatedDeck) {
     for (const side of [1, -1]) {
       layer.addChild(ribbonMesh(path, Texture.WHITE, {
+        ...R,
         innerOffset: side * (roadHalf + 18),
         outerOffset: side * (roadHalf + 155),
         tint: 0x111820, alpha: 0.42,
       }));
       layer.addChild(ribbonMesh(path, Texture.WHITE, {
+        ...R,
         innerOffset: side * (roadHalf + 6),
         outerOffset: side * (roadHalf + 92),
         tint: 0x3d4247, alpha: 0.98,
@@ -244,6 +355,7 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
 
   // --- main asphalt ---
   layer.addChild(ribbonMesh(path, tex[P.asphalt.texture], {
+        ...R,
     innerOffset: -roadHalf, outerOffset: roadHalf,
     uInner: 0, uOuter: P.asphalt.uRepeat, vPerWorldUnit: P.asphalt.vPer,
     tint: P.asphalt.tint,
@@ -253,6 +365,7 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
   if (P.ruts) {
     for (const off of [-P.ruts.offset, P.ruts.offset]) {
       layer.addChild(ribbonMesh(path, tex.rut_overlay, {
+        ...R,
         innerOffset: off - P.ruts.width / 2, outerOffset: off + P.ruts.width / 2,
         uInner: 0, uOuter: 1, vPerWorldUnit: P.ruts.vPer, alpha: P.ruts.alpha,
       }));
@@ -262,6 +375,7 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
   // --- contact shading on the asphalt beside the boundary ---
   for (const side of [1, -1]) {
     layer.addChild(ribbonMesh(path, tex.edge_shadow, {
+        ...R,
       innerOffset: side * roadHalf, outerOffset: side * (roadHalf - 110),
       uInner: 0, uOuter: 1, vPerWorldUnit: 1 / 2048, alpha: 0.9,
     }));
@@ -272,6 +386,7 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
     for (const side of [1, -1]) {
       const inner = side * (roadHalf - P.edgeLine.inset);
       layer.addChild(ribbonMesh(path, Texture.WHITE, {
+        ...R,
         innerOffset: inner, outerOffset: inner - side * P.edgeLine.width,
         tint: P.edgeLine.tint, alpha: P.edgeLine.alpha,
       }));
@@ -282,6 +397,7 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
   if (P.centreLine) {
     const cl = P.centreLine;
     layer.addChild(ribbonMesh(path, cl.texture ? tex[cl.texture] : Texture.WHITE, {
+        ...R,
       innerOffset: -cl.width / 2, outerOffset: cl.width / 2,
       uInner: 0, uOuter: 1, vPerWorldUnit: cl.vPer ?? 1 / 1024,
       tint: cl.tint, alpha: cl.alpha ?? 0.92,
@@ -294,6 +410,7 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
   if (P.highwayLanes) {
     for (const off of [-roadHalf / 3, roadHalf / 3]) {
       layer.addChild(ribbonMesh(path, tex.dash_white, {
+        ...R,
         innerOffset: off - 6, outerOffset: off + 6,
         uInner: 0, uOuter: 1, vPerWorldUnit: 1 / 165, alpha: 0.94,
       }));
@@ -303,9 +420,10 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
   // --- start / finish chequer, painted across the road -- a racing-circuit
   // convention; ordinary street stages opt out (preset.paintStart: false)
   // since a public road has no painted start line ---
-  if (P.paintStart !== false) {
+  if (P.paintStart !== false && inSpan(0)) {
     const startSpan = 3;
     layer.addChild(ribbonMesh(path, tex.checker, {
+        ...R,
       innerOffset: -roadHalf, outerOffset: roadHalf,
       uInner: 0, uOuter: 1,
       // exactly one copy of the two-row pattern over the painted span
@@ -320,7 +438,7 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
   // it needs no new art: perpendicular strokes computed straight off the
   // path's own normal/tangent at distance 0, the same vector approach used
   // for the side-street stubs in props.js.
-  if (P.startMarker === 'crosswalk') {
+  if (P.startMarker === 'crosswalk' && inSpan(0)) {
     const g = new Graphics();
     paintCrossing(g, path, 0, roadHalf - (P.edgeLine?.inset ?? 14) - 4, { stopLine: false });
     layer.addChild(g);
@@ -342,6 +460,7 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
     const signalReach = roadHalf - 120;
     for (const [enter, exit] of cornerRuns(path, 0.16)) {
       for (const k of [path.wrap(enter - setback), path.wrap(exit + setback)]) {
+        if (!inSpan(k)) continue;
         paintCrossing(g, path, k, half, { stopLine: true });
         paintSignal(g, path, k, signalOut, signalReach);
       }
@@ -358,7 +477,7 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
   // which reads at speed and from a distance without pretending to be a
   // racetrack. Geometry comes straight off the path's own normal/tangent at
   // distance 0, the same approach as the crosswalk above.
-  if (P.startMarker === 'gate' && wallHalf != null) {
+  if (P.startMarker === 'gate' && wallHalf != null && inSpan(0)) {
     const nx = path.normals[0], ny = path.normals[1];
     const tx = -ny, ty = nx;
     const cx0 = path.points[0][0], cy0 = path.points[0][1];
@@ -419,6 +538,7 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
     const { band, to } = bounds[i];
     for (const side of [1, -1]) {
       layer.addChild(ribbonMesh(path, band.texture ? tex[band.texture] : Texture.WHITE, {
+        ...R,
         innerOffset: side * (roadHalf - OVERLAP),
         outerOffset: side * to,
         uInner: 0,
@@ -440,6 +560,7 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
     const outer = roadHalf + (P.bands || []).reduce((a, b) => a + b.width, 0);
     for (const side of [1, -1]) {
       layer.addChild(ribbonMesh(path, Texture.WHITE, {
+        ...R,
         innerOffset: side * (outer - P.bandEdge.width),
         outerOffset: side * outer,
         tint: P.bandEdge.tint, alpha: P.bandEdge.alpha,
@@ -463,6 +584,7 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
       // shade at the road's edge to nothing further out -- which is what
       // ground falling away from under you looks like from above.
       layer.addChild(ribbonMesh(path, tex.edge_shadow, {
+        ...R,
         innerOffset: (k) => side * (start + width(k) * 0.05),
         outerOffset: (k) => side * (start + width(k)),
         uInner: 0, uOuter: 1, vPerWorldUnit: 1 / 2048,
@@ -471,6 +593,7 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
       // the built-out lip itself, catching the light -- without it the
       // shade starts from nothing and the edge has no edge
       layer.addChild(ribbonMesh(path, Texture.WHITE, {
+        ...R,
         innerOffset: (k) => side * (start - vd.lip * Math.min(1, width(k) / vd.reach)),
         outerOffset: (k) => side * (start + vd.lip * 0.35 * Math.min(1, width(k) / vd.reach)),
         tint: vd.lipTint, alpha: 0.85,
@@ -485,15 +608,18 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
     for (const side of [1, -1]) {
       // broad cast shadow under the wall
       layer.addChild(ribbonMesh(path, Texture.WHITE, {
+        ...R,
         innerOffset: side * (offset - 18), outerOffset: side * (offset + 34),
         tint: 0x101418, alpha: 0.30,
       }));
       // dark wall base + bright concrete cap create height in top-down view
       layer.addChild(ribbonMesh(path, Texture.WHITE, {
+        ...R,
         innerOffset: side * (offset - 11), outerOffset: side * (offset + 17),
         tint: 0x555b60, alpha: 1,
       }));
       layer.addChild(ribbonMesh(path, Texture.WHITE, {
+        ...R,
         innerOffset: side * (offset - 8), outerOffset: side * (offset + 7),
         tint: 0xc9cdd0, alpha: 1,
       }));
@@ -501,7 +627,7 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
     // expansion joints / posts make the continuous wall read as constructed
     // concrete rather than a flat grey stripe.
     const step = Math.max(1, Math.round(115 / path.spacing));
-    for (let i = 0; i < path.count; i += step) {
+    for (const i of spanIndices(step)) {
       const px=path.points[i][0], py=path.points[i][1];
       const nx=path.normals[i*2], ny=path.normals[i*2+1];
       const tx=-ny, ty=nx;
@@ -534,10 +660,12 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
       // soft shadow first, wider and darker, so the rail reads as
       // standing proud of the shoulder rather than painted flat onto it
       layer.addChild(ribbonMesh(path, Texture.WHITE, {
+        ...R,
         innerOffset: side * (offset - rail.width * 0.8), outerOffset: side * (offset + rail.width * 0.8),
         tint: 0x000000, alpha: 0.16,
       }));
       layer.addChild(ribbonMesh(path, Texture.WHITE, {
+        ...R,
         innerOffset: side * (offset - rail.width / 2), outerOffset: side * (offset + rail.width / 2),
         tint: rail.tint, alpha: 0.95,
       }));
@@ -549,7 +677,7 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
     const postGfx = new Graphics();
     const postStep = Math.max(1, Math.round(rail.postEvery / path.spacing));
     const hw = rail.postWidth / 2, hl = rail.width * 0.7;
-    for (let i = 0; i < path.count; i += postStep) {
+    for (const i of spanIndices(postStep)) {
       const px = path.points[i][0], py = path.points[i][1];
       const nx = path.normals[i * 2], ny = path.normals[i * 2 + 1];
       const tx = -ny, ty = nx;
@@ -572,7 +700,7 @@ export function buildSurface(path, tex, { roadHalf, wallHalf, preset = 'circuit'
       const del = P.delineator;
       const delStep = Math.max(1, Math.round(del.every / path.spacing));
       const dOff = offset + del.out;
-      for (let i = 0; i < path.count; i += delStep) {
+      for (const i of spanIndices(delStep)) {
         const px = path.points[i][0], py = path.points[i][1];
         const nx = path.normals[i * 2], ny = path.normals[i * 2 + 1];
         const tx = -ny, ty = nx;

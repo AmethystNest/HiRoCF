@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { STAGE_PATHS, buildStage2Path, buildStage3Path, buildStage4Path } from './stages.js';
+import { STAGE_PATHS, buildStage2Path, buildStage3Path, buildStage4Path, buildStage5Path } from './stages.js';
 import { LAYOUTS } from './layouts.js';
 
 // Stage 4 road geometry, from config.js + the highway surface preset:
@@ -338,6 +338,99 @@ describe('stage 3 course', () => {
       if (path.curvature[i % n] < 0.06) { run++; best = Math.max(best, run); } else run = 0;
     }
     expect(Math.min(best, n) * path.spacing).toBeGreaterThan(3000);
+  });
+});
+
+describe('stage 5 course', () => {
+  const path = buildStage5Path();
+  const n = path.count;
+  const crossings = findCrossings(path);
+  // roadHalf 240; the widest sector's bands are the city's 176
+  const S5_EDGE = 240 + 176;
+
+  it('closes exactly on its start point', () => {
+    const a = path.points[0], b = path.points[n - 1];
+    expect(Math.hypot(b[0] - a[0], b[1] - a[1])).toBeLessThan(path.spacing * 1.6);
+  });
+
+  it('is the longest course in the game', () => {
+    for (const id of [1, 2, 3, 4]) {
+      expect(path.length).toBeGreaterThan(STAGE_PATHS[id]().length * 0.98);
+    }
+  });
+
+  it('crosses over itself twice, both times elevated over ground', () => {
+    expect(crossings.length).toBe(2);
+    for (const c of crossings) {
+      const a = path.layerAtIndex(c.i), b = path.layerAtIndex(c.j);
+      // one pass on the deck, one on the ground -- never both on the same
+      expect(a.deckId === b.deckId).toBe(false);
+      expect(Math.abs(a.zLevel - b.zLevel)).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('has all three kinds of corner on one lap', () => {
+    // city junctions (the 520 the footpath forces), switchback apexes, and
+    // expressway sweepers -- a composite stage that is really one of them
+    // repeated is not composite
+    const radii = [];
+    for (let i = 0; i < n; i++) radii.push(radiusAt(path, i));
+    const tightest = Math.min(...radii);
+    expect(tightest).toBeGreaterThan(360);   // the pass's own built width
+    expect(tightest).toBeLessThan(470);      // but still a switchback
+    const junctions = radii.filter((r) => r > 470 && r < 620).length;
+    expect(junctions).toBeGreaterThan(40);   // the city's square corners
+    const sweepers = radii.filter((r) => r >= 1000 && r < 4000).length;
+    expect(sweepers).toBeGreaterThan(40);    // expressway curves
+  });
+
+  it('never turns tighter than its own road is wide', () => {
+    // the inside of a turn must clear the built width of the sector it is
+    // in, or that sector's outermost band folds through itself
+    for (let i = 0; i < n; i++) {
+      if (path.zLevels[i] > 0) continue;
+      expect(radiusAt(path, i)).toBeGreaterThan(360);
+    }
+    // the city sector specifically, where the bands are widest
+    for (let i = 0; i < Math.floor(n * 0.245); i++) {
+      expect(radiusAt(path, i)).toBeGreaterThan(S5_EDGE);
+    }
+  });
+
+  it('runs ground -> ramp -> elevated -> ramp -> ground', () => {
+    const seen = [];
+    for (let i = 0; i < n; i++) {
+      const z = path.zLevels[i];
+      if (!seen.length || seen[seen.length - 1] !== z) seen.push(z);
+    }
+    expect(seen).toEqual([0, 1, 2, 1, 0]);
+  });
+
+  it('puts the tunnel on the ground section only', () => {
+    let any = false;
+    for (let i = 0; i < n; i++) {
+      if (!path.tunnelFlags[i]) continue;
+      any = true;
+      expect(path.zLevels[i]).toBe(0);
+    }
+    expect(any).toBe(true);
+  });
+
+  it('keeps every non-crossing pair of stretches clear of the road swath', () => {
+    const adj = Math.ceil(2600 / path.spacing);
+    const near = (i, j) => crossings.some(
+      (c) => (routeGap(i, c.i, n) < 140 && routeGap(j, c.j, n) < 140)
+          || (routeGap(i, c.j, n) < 140 && routeGap(j, c.i, n) < 140),
+    );
+    let worst = Infinity;
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        if (routeGap(i, j, n) < adj || near(i, j)) continue;
+        const a = path.points[i], b = path.points[j];
+        worst = Math.min(worst, Math.hypot(a[0] - b[0], a[1] - b[1]));
+      }
+    }
+    expect(worst).toBeGreaterThan(S5_EDGE * 2);
   });
 });
 

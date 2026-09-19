@@ -177,22 +177,22 @@ export const LAYOUTS = {
   },
 
   5: {
-    // Same expressway loop as stage 4 (see STAGE_PATHS in track/stages.js),
-    // deliberately dressed as the opposite place: open country in daylight
-    // rather than a city at night. Gantries stay -- they belong to the road
-    // itself, and they are what makes a motorway read as a motorway -- but
-    // they sit at different points around the lap so the two stages do not
-    // even share their landmarks.
+    // The last stage runs city streets, a tunnel, a switchback pass and an
+    // expressway viaduct in one lap (see buildStage5Path), so unlike every
+    // other stage it needs a different theme per sector rather than one for
+    // the whole loop. The boundaries match the surface sectors in main.js:
+    // a stretch of road dressed as a mountainside while it is still painted
+    // as a city street reads as a mistake, not as a transition.
     sections: [
-      { from: 0.00, to: 1.00, theme: 'expressway_country' },
+      { from: 0.000, to: 0.245, theme: 'street' },
+      { from: 0.245, to: 0.520, theme: 'touge' },
+      { from: 0.520, to: 1.000, theme: 'expressway_country' },
     ],
     landmarks: [
-      { name: 'plain_gantry', at: 0.155, side: 1, lateral: 40, scale: 1.05 },
-      { name: 'plain_gantry', at: 0.430, side: -1, lateral: 40, scale: 1.05 },
-      { name: 'plain_gantry', at: 0.680, side: 1, lateral: 40, scale: 1.05 },
-      { name: 'plain_gantry', at: 0.905, side: -1, lateral: 40, scale: 1.05 },
+      { name: 'plain_gantry', at: 0.560, side: 1, lateral: 40, scale: 1.05 },
+      { name: 'plain_gantry', at: 0.600, side: -1, lateral: 40, scale: 1.05 },
     ],
-    patches: { count: 46, textures: ['patch_dry', 'patch_dirt', 'patch_dark'] },
+    patches: { count: 60, textures: ['patch_dry', 'patch_dirt', 'patch_dark'] },
   },
 
 };
