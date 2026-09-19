@@ -355,19 +355,24 @@ export class Game {
     this.world.addChild(props.overhead);
     this.world.addChild(props.deckOverhead);
 
-    // What the under-deck fade drives, and how far each part goes. The
-    // road almost away and its markings completely (white paint at 0.10
-    // over dark ground still reads, and crossing the road being driven it
-    // reads as lines drawn across it); the structure to a ghost that still
-    // outlines the bridge; the shadow to a hint that something is above.
-    // Anything standing ON the deck goes with it, or a lamp post is left
-    // hanging in mid-air over the car.
+    // What the under-deck fade drives, and how far each part goes.
+    //
+    // Everything that draws as a LINE across the road being driven goes to
+    // zero: the deck's markings, and its structure -- the retaining wall
+    // and fascia are tinted near-white to stand off the road beside them,
+    // so even at 0.30 their caps read as two hard stripes laid over the
+    // carriageway, which is the one thing the fade exists to prevent. What
+    // is left is the deck's own dark road and its cast shadow, both broad
+    // soft shapes: enough to see that something passes overhead, with
+    // nothing in them that can be mistaken for road marking. Anything
+    // standing ON the deck goes with it, or a lamp post is left hanging in
+    // mid-air over the car.
     this._deckFade = [
-      [this.elevatedDeck, 0.10],
-      [this.elevatedStructure, 0.30],
-      [this.elevatedShadow, 0.14],
-      [props.deckLayer, 0.10],
-      [props.deckOverhead, 0.10],
+      [this.elevatedDeck, 0.08],
+      [this.elevatedStructure, 0],
+      [this.elevatedShadow, 0.12],
+      [props.deckLayer, 0],
+      [props.deckOverhead, 0],
       ...this.elevatedMarkings.map((m) => [m, 0]),
     ];
 
@@ -713,15 +718,95 @@ export class Game {
 const CAR_TEXTURE_MARGIN = 1.4;
 
 /**
+ * Close transparent gaps in a canvas's alpha narrower than 2*radius, by
+ * dilating the alpha channel and then eroding it back.
+ *
+ * This is what keeps an islanded feature opaque. An opaque shape a few
+ * pixels across with transparency on BOTH sides has nothing solid nearby
+ * for a resample to average with, so it thins toward transparent every
+ * time the image is reduced -- stage 2's rival is drawn with its wheels
+ * standing clear of the bodywork, and they came out see-through while
+ * every other car, whose wheels touch the body, did not. Bridging the gap
+ * gives the wheel a solid neighbour and it survives at any size. The gap
+ * is a few pixels on screen, so closing it is invisible.
+ *
+ * Separable: a horizontal pass then a vertical one, which is a square
+ * structuring element rather than a disc -- the difference does not show
+ * at this radius. Colour is carried into the filled pixels from the
+ * nearest opaque pixel on the same row, so the bridge takes the wheel's
+ * own dark instead of the transparent background's black.
+ */
+function closeAlphaGaps(canvas, radius) {
+  if (radius < 1) return canvas;
+  const w = canvas.width, h = canvas.height;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+
+  const alpha = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) alpha[i] = d[i * 4 + 3];
+
+  const sweep = (src, wantMax) => {
+    const mid = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let v = wantMax ? 0 : 255;
+        for (let k = -radius; k <= radius; k++) {
+          const q = x + k;
+          if (q < 0 || q >= w) continue;
+          const t = src[y * w + q];
+          v = wantMax ? (t > v ? t : v) : (t < v ? t : v);
+        }
+        mid[y * w + x] = v;
+      }
+    }
+    const out = new Uint8Array(w * h);
+    for (let x = 0; x < w; x++) {
+      for (let y = 0; y < h; y++) {
+        let v = wantMax ? 0 : 255;
+        for (let k = -radius; k <= radius; k++) {
+          const q = y + k;
+          if (q < 0 || q >= h) continue;
+          const t = mid[q * w + x];
+          v = wantMax ? (t > v ? t : v) : (t < v ? t : v);
+        }
+        out[y * w + x] = v;
+      }
+    }
+    return out;
+  };
+
+  const closed = sweep(sweep(alpha, true), false);
+  for (let i = 0; i < w * h; i++) {
+    if (closed[i] <= d[i * 4 + 3]) continue;
+    const y = (i / w) | 0, x = i % w;
+    let src = -1;
+    for (let k = 1; k <= radius * 2 && src < 0; k++) {
+      if (x - k >= 0 && d[(y * w + x - k) * 4 + 3] > 200) src = y * w + x - k;
+      else if (x + k < w && d[(y * w + x + k) * 4 + 3] > 200) src = y * w + x + k;
+    }
+    if (src >= 0) {
+      d[i * 4] = d[src * 4];
+      d[i * 4 + 1] = d[src * 4 + 1];
+      d[i * 4 + 2] = d[src * 4 + 2];
+    }
+    d[i * 4 + 3] = closed[i];
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvas;
+}
+
+/**
  * Resample one car photo down to roughly the size that car is drawn at,
- * and restore the alpha the resampling costs it.
+ * and put back the alpha the resampling costs it.
  *
  * Halved repeatedly rather than scaled in one go: a single large downscale
  * step in canvas2d point-samples rather than averaging, which loses thin
- * features outright. The alpha curve then runs once on the result:
- * 1-(1-a)^2 leaves 0 and 1 alone and lifts the middle (0.5 -> 0.75), so a
- * mostly-covered texel reads solid again while a genuine outline texel
- * stays soft.
+ * features outright. Then closeAlphaGaps reunites anything the art draws
+ * islanded in transparency with the body beside it, and the alpha curve
+ * runs once over the result: 1-(1-a)^2 leaves 0 and 1 alone and lifts the
+ * middle (0.5 -> 0.75), so a mostly-covered texel reads solid again while
+ * a genuine outline texel stays soft.
  *
  * Returns the texture unchanged when the photo is already at or under the
  * target.
@@ -752,6 +837,10 @@ function conditionCarTexture(texture, targetLong) {
     const k = targetLong / Math.max(w, h);
     step(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
   }
+
+  // Radius from the texture's own size, not a fixed number of pixels: the
+  // gap to bridge is a fraction of the car, so it scales with it.
+  closeAlphaGaps(canvas, Math.round(Math.max(w, h) / 30));
 
   const img = ctx.getImageData(0, 0, w, h);
   const d = img.data;
