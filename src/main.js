@@ -710,145 +710,92 @@ export class Game {
 }
 
 /**
- * Headroom over a car's actual on-screen size. The conditioned texture is
- * this much larger than the car is ever drawn, so the GPU is always
- * minifying a little (no magnification blur) but never enough to need a
- * mip level.
+ * Widest transparent gap that gets bridged, as a fraction of the photo's
+ * long side. 0.09 covers the ~48px channel stage 2's rival has between
+ * each wheel and the bodywork on a 1189px-tall photo; anything genuinely
+ * meant to read as a hole through the car is wider than this.
  */
-const CAR_TEXTURE_MARGIN = 1.4;
+const CAR_ALPHA_GAP = 0.09;
 
 /**
- * Close transparent gaps in a canvas's alpha narrower than 2*radius, by
- * dilating the alpha channel and then eroding it back.
+ * Fill transparent channels that are narrow AND enclosed -- opaque pixels
+ * on both sides of them, along a row or a column.
  *
- * This is what keeps an islanded feature opaque. An opaque shape a few
- * pixels across with transparency on BOTH sides has nothing solid nearby
- * for a resample to average with, so it thins toward transparent every
- * time the image is reduced -- stage 2's rival is drawn with its wheels
- * standing clear of the bodywork, and they came out see-through while
- * every other car, whose wheels touch the body, did not. Bridging the gap
- * gives the wheel a solid neighbour and it survives at any size. The gap
- * is a few pixels on screen, so closing it is invisible.
+ * This is the whole of the stage 2 rival fix. Its wheels are drawn
+ * standing clear of the bodywork with a transparent channel either side,
+ * so they are islands: at the minification a car is drawn at, every mip
+ * level averages them against that transparency and they arrive
+ * see-through. Every other car's wheels touch the body, which is why only
+ * this one showed it. Bridging the channel gives the wheel an opaque
+ * neighbour and mip averaging then keeps it solid.
  *
- * Separable: a horizontal pass then a vertical one, which is a square
- * structuring element rather than a disc -- the difference does not show
- * at this radius. Colour is carried into the filled pixels from the
- * nearest opaque pixel on the same row, so the bridge takes the wheel's
- * own dark instead of the transparent background's black.
+ * Deliberately not a morphological close. A dilate-and-erode also fattens
+ * the outline wherever the silhouette turns a corner, and doing it at a
+ * size near the drawn one -- which is what makes it affordable -- means
+ * resampling the art down first and losing the detail this is trying to
+ * protect. This runs on the photo at full size, is O(pixels), and cannot
+ * move the outer silhouette at all: a run of transparency open to the
+ * edge of the image has no opaque pixel on one side, so it is never
+ * filled.
  */
-function closeAlphaGaps(canvas, radius) {
-  if (radius < 1) return canvas;
+function bridgeAlphaGaps(canvas, maxGap) {
   const w = canvas.width, h = canvas.height;
   const ctx = canvas.getContext('2d');
   const img = ctx.getImageData(0, 0, w, h);
   const d = img.data;
 
-  const alpha = new Uint8Array(w * h);
-  for (let i = 0; i < w * h; i++) alpha[i] = d[i * 4 + 3];
-
-  const sweep = (src, wantMax) => {
-    const mid = new Uint8Array(w * h);
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        let v = wantMax ? 0 : 255;
-        for (let k = -radius; k <= radius; k++) {
-          const q = x + k;
-          if (q < 0 || q >= w) continue;
-          const t = src[y * w + q];
-          v = wantMax ? (t > v ? t : v) : (t < v ? t : v);
+  // One pass over each axis, walking a pixel stride rather than indexing
+  // through a helper: this runs over a megapixel photo per car at boot,
+  // and the same loop written with per-pixel closures took about a second.
+  const run = (lines, length, lineStride, stride) => {
+    for (let line = 0; line < lines; line++) {
+      const base = line * lineStride;
+      let last = -1;
+      for (let pos = 0; pos < length; pos++) {
+        const i = base + pos * stride;
+        if (d[i * 4 + 3] <= 200) continue;
+        const gap = pos - last;
+        if (last >= 0 && gap > 1 && gap <= maxGap) {
+          const from = base + last * stride;
+          // Colour comes from the two ends of the channel rather than one,
+          // so a bridge between a dark tyre and a red wing reads as a
+          // shaded join instead of a hard band of one or the other.
+          const r0 = d[from * 4], g0 = d[from * 4 + 1], b0 = d[from * 4 + 2];
+          const r1 = d[i * 4], g1 = d[i * 4 + 1], b1 = d[i * 4 + 2];
+          for (let k = 1; k < gap; k++) {
+            const j = (from + k * stride) * 4;
+            const t = k / gap, u = 1 - t;
+            d[j] = r0 * u + r1 * t;
+            d[j + 1] = g0 * u + g1 * t;
+            d[j + 2] = b0 * u + b1 * t;
+            d[j + 3] = 255;
+          }
         }
-        mid[y * w + x] = v;
+        last = pos;
       }
     }
-    const out = new Uint8Array(w * h);
-    for (let x = 0; x < w; x++) {
-      for (let y = 0; y < h; y++) {
-        let v = wantMax ? 0 : 255;
-        for (let k = -radius; k <= radius; k++) {
-          const q = y + k;
-          if (q < 0 || q >= h) continue;
-          const t = mid[q * w + x];
-          v = wantMax ? (t > v ? t : v) : (t < v ? t : v);
-        }
-        out[y * w + x] = v;
-      }
-    }
-    return out;
   };
+  run(h, w, w, 1);
+  run(w, h, 1, w);
 
-  const closed = sweep(sweep(alpha, true), false);
-  for (let i = 0; i < w * h; i++) {
-    if (closed[i] <= d[i * 4 + 3]) continue;
-    const y = (i / w) | 0, x = i % w;
-    let src = -1;
-    for (let k = 1; k <= radius * 2 && src < 0; k++) {
-      if (x - k >= 0 && d[(y * w + x - k) * 4 + 3] > 200) src = y * w + x - k;
-      else if (x + k < w && d[(y * w + x + k) * 4 + 3] > 200) src = y * w + x + k;
-    }
-    if (src >= 0) {
-      d[i * 4] = d[src * 4];
-      d[i * 4 + 1] = d[src * 4 + 1];
-      d[i * 4 + 2] = d[src * 4 + 2];
-    }
-    d[i * 4 + 3] = closed[i];
-  }
   ctx.putImageData(img, 0, 0);
   return canvas;
 }
 
 /**
- * Resample one car photo down to roughly the size that car is drawn at,
- * and put back the alpha the resampling costs it.
- *
- * Halved repeatedly rather than scaled in one go: a single large downscale
- * step in canvas2d point-samples rather than averaging, which loses thin
- * features outright. Then closeAlphaGaps reunites anything the art draws
- * islanded in transparency with the body beside it, and the alpha curve
- * runs once over the result: 1-(1-a)^2 leaves 0 and 1 alone and lifts the
- * middle (0.5 -> 0.75), so a mostly-covered texel reads solid again while
- * a genuine outline texel stays soft.
- *
- * Returns the texture unchanged when the photo is already at or under the
- * target.
+ * Return `texture` with its narrow transparent channels bridged. The photo
+ * is otherwise untouched -- same size, same pixels, same mipmapping -- so
+ * nothing about how a car draws changes except that an islanded feature
+ * now has something solid beside it.
  */
-function conditionCarTexture(texture, targetLong) {
+function conditionCarTexture(texture) {
   const src = texture.source?.resource;
-  if (!src?.width || Math.max(src.width, src.height) <= targetLong) return texture;
-
-  let w = src.width, h = src.height;
-  let canvas = document.createElement('canvas');
-  canvas.width = w; canvas.height = h;
-  let ctx = canvas.getContext('2d');
-  ctx.drawImage(src, 0, 0);
-
-  const step = (nw, nh) => {
-    const next = document.createElement('canvas');
-    next.width = nw; next.height = nh;
-    const nctx = next.getContext('2d');
-    nctx.imageSmoothingEnabled = true;
-    nctx.imageSmoothingQuality = 'high';
-    nctx.drawImage(canvas, 0, 0, nw, nh);
-    canvas = next; ctx = nctx; w = nw; h = nh;
-  };
-  while (Math.max(w, h) > targetLong * 2) {
-    step(Math.max(1, Math.round(w / 2)), Math.max(1, Math.round(h / 2)));
-  }
-  if (Math.max(w, h) > targetLong) {
-    const k = targetLong / Math.max(w, h);
-    step(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
-  }
-
-  // Radius from the texture's own size, not a fixed number of pixels: the
-  // gap to bridge is a fraction of the car, so it scales with it.
-  closeAlphaGaps(canvas, Math.round(Math.max(w, h) / 30));
-
-  const img = ctx.getImageData(0, 0, w, h);
-  const d = img.data;
-  for (let i = 3; i < d.length; i += 4) {
-    const a = d[i] / 255;
-    d[i] = Math.round((1 - (1 - a) * (1 - a)) * 255);
-  }
-  ctx.putImageData(img, 0, 0);
+  if (!src?.width) return texture;
+  const canvas = document.createElement('canvas');
+  canvas.width = src.width;
+  canvas.height = src.height;
+  canvas.getContext('2d').drawImage(src, 0, 0);
+  bridgeAlphaGaps(canvas, Math.round(Math.max(src.width, src.height) * CAR_ALPHA_GAP));
   return Texture.from(canvas);
 }
 
@@ -897,35 +844,25 @@ export async function boot({ stageId = 1, onReady } = {}) {
 
   for (const k of WRAPPED) tex[k].source.addressMode = 'repeat';
 
-  // Car art comes from source photos far larger than a car is ever drawn
-  // (up to 1189px on the long side against an on-screen 98px), and the
-  // sprite is drawn at a fixed CSS size, so the world scale cancels out and
-  // the minification is the same at every zoom level: roughly 6x to 12x.
+  // Car art is drawn from large source photos (the rival roster is well
+  // over 700px on a side) down to a car's actual ~50-90px on-screen size --
+  // a >10x minification. Without mipmaps, GPU bilinear sampling at that
+  // ratio point-samples the source, which makes every thin detail crawl
+  // and sparkle as the car turns. Mipmapping fixes the sampling, not just
+  // antialiasing quality.
   //
-  // That used to be handled with mipmaps, which is the wrong tool here.
-  // Every mip level averages alpha along with colour, so an opaque feature
-  // a few source pixels across that is ISLANDED in transparency is averaged
-  // away to a partial alpha and renders see-through. That is exactly stage
-  // 2's rival: its wheels are drawn standing clear of the body with a
-  // 48px transparent gap either side, so there is nothing opaque nearby for
-  // the averaging to pull from, and they came out washed out over anything
-  // brighter than asphalt. The other cars' wheels touch the bodywork, so
-  // the same averaging keeps them solid -- which is why only one car showed
-  // it.
-  //
-  // Resampling to the size the car is actually drawn at removes the cause
-  // rather than filtering around it: one high-quality downscale we control,
-  // an alpha curve to put back what it costs, and then no mip chain at all
-  // because at CAR_TEXTURE_MARGIN there is no longer anything to minify.
-  const carTargetLong = (k) => {
-    const size = CAR_SIZE[k] || CAR_SIZE.player;
-    return Math.ceil(Math.max(size.w, size.h) * app.renderer.resolution * CAR_TEXTURE_MARGIN);
-  };
+  // What mipmapping cannot fix is an opaque detail ISLANDED in
+  // transparency, because every level averages its alpha against the
+  // transparency around it -- see bridgeAlphaGaps, which is run first so
+  // there is no island left to average away.
   for (const k of Object.keys(CARS)) {
-    cars[k] = conditionCarTexture(cars[k], carTargetLong(k));
+    cars[k] = conditionCarTexture(cars[k]);
     const src = cars[k].source;
-    src.mipmap = 'off';
-    src.autoGenerateMipmaps = false;
+    src.mipmap = 'on';
+    // `mipmap` alone is just the policy flag -- PixiJS only actually
+    // generates the mip chain when this is also on, otherwise it's sampled
+    // as if mipmap were 'off' regardless of the setting above.
+    src.autoGenerateMipmaps = true;
     src.update();
   }
 
