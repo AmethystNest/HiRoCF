@@ -5,7 +5,7 @@
  * a verbatim carry-over of the Canvas build's tuning — the car must feel
  * identical.
  */
-import { PHYSICS as P, DRIFT_MARK_LIFE } from '../config.js';
+import { PHYSICS as P, NITRO, DRIFT_MARK_LIFE } from '../config.js';
 
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
@@ -21,7 +21,10 @@ export class PlayerCar {
     this.drifting = false;
     this.boosting = false;
     this.boostTimer = 0;
-    this.boostEnergy = 100;
+    // Banked nitro charges, plus the 0-100 meter working toward the next
+    // one. See NITRO in config.js and tryNitro below.
+    this.nitroStock = NITRO.startStock;
+    this.nitroCharge = 0;
     this.shake = 0;
     this.wallStuckTime = 0;
     this.driftTrail = [];
@@ -70,7 +73,8 @@ export class PlayerCar {
     this.angle = s.angle;
     this._routeHint = k;
     this.speed = 0;
-    this.boostEnergy = 100;
+    this.nitroStock = NITRO.startStock;
+    this.nitroCharge = 0;
     this.boosting = false;
     this.boostTimer = 0;
     this.wallStuckTime = 0;
@@ -81,11 +85,19 @@ export class PlayerCar {
     this.driftSign = 0;
   }
 
-  tryBoost() {
-    if (this.boosting || this.boostEnergy < 99.5) return false;
+  /**
+   * Spend one banked charge. Returns false without spending anything if
+   * there is none, or if the press would waste one -- see NITRO.chainWindow
+   * in config.js for why both halves of that rule exist.
+   */
+  tryNitro() {
+    if (this.nitroStock <= 0) return false;
+    if (this.boosting && this.boostTimer > NITRO.chainWindow) return false;
+    this.nitroStock--;
+    // Extend, never restart: whatever is left of the running burst is kept
+    // and this charge's full duration is added on top of it.
+    this.boostTimer += P.boostDuration;
     this.boosting = true;
-    this.boostTimer = P.boostDuration;
-    this.boostEnergy = 0;
     return true;
   }
 
@@ -103,15 +115,23 @@ export class PlayerCar {
     const near = this.nearestOnRoute(this.x, this.y);
     const onGrass = near.dist > this.roadHalf;
 
-    // --- boost ---
+    // --- nitro ---
     if (this.boosting) {
       this.boostTimer -= dt;
       if (this.boostTimer <= 0) {
         this.boosting = false;
         this.boostTimer = 0;
       }
-    } else {
-      this.boostEnergy = Math.min(100, this.boostEnergy + P.boostRecover * dt);
+    } else if (this.nitroStock < NITRO.maxStock) {
+      // The meter is frozen for as long as a burst is running, as it was
+      // with the single boost. That is what a chain costs: three charges
+      // spent back to back also buy seven seconds of no recharge.
+      this.nitroCharge += P.boostRecover * dt;
+      while (this.nitroCharge >= 100 && this.nitroStock < NITRO.maxStock) {
+        this.nitroCharge -= 100;
+        this.nitroStock++;
+      }
+      if (this.nitroStock >= NITRO.maxStock) this.nitroCharge = 0;
     }
 
     // --- longitudinal ---
@@ -132,9 +152,9 @@ export class PlayerCar {
         this.speed -= P.coast * dt;
       }
 
-      // Boost now adds actual acceleration as well as movement scaling.
-      // It is strongest at low speed so pressing BOOST from a slow corner
-      // clearly launches the car instead of only draining the gauge.
+      // Nitro adds actual acceleration as well as movement scaling. It is
+      // strongest at low speed so firing one out of a slow corner clearly
+      // launches the car instead of only draining the gauge.
       if (this.boosting) {
         const boostAccelScale = 0.35 + 0.95 * (1 - Math.min(1, this.speed / P.maxSpeed));
         this.speed += P.accel * 1.55 * boostAccelScale * dt;

@@ -63,7 +63,8 @@ const SURFACE_SECTORS_BY_STAGE = {
   5: {
     main: 'gt_highway',
     sectors: [
-      { preset: 'gt_city', from: 0.000, to: 0.245 },
+      { preset: 'gt_circuit', from: 0.000, to: 0.082 },
+      { preset: 'gt_city', from: 0.079, to: 0.245 },
       { preset: 'gt_touge', from: 0.242, to: 0.522 },
       { preset: 'gt_highway', from: 0.519, to: 1.000 },
     ],
@@ -127,6 +128,12 @@ export class Game {
     const mixed = SURFACE_SECTORS_BY_STAGE[stageId];
     const preset = mixed ? mixed.main : (SURFACE_PRESET_BY_STAGE[stageId] || 'circuit');
 
+    // Road furniture that hangs over the carriageway (junction signal
+    // gantries) is built by buildSurface but parented above the cars, below
+    // -- a signal head painted into the road layer is one the car drives
+    // over, which from a top-down camera reads as a lamp lying in the road.
+    const surfaceOverheads = [];
+
     if (mixed) {
       // Every sector's terrain goes into one container drawn under ALL of
       // the sector roads. They are siblings otherwise, and on a course that
@@ -138,21 +145,25 @@ export class Game {
       mixed.sectors.forEach((sec, i) => {
         const from = Math.floor(sec.from * path.count);
         const to = Math.ceil(sec.to * path.count);
-        this.world.addChild(buildSurface(path, this.tex, {
+        const surface = buildSurface(path, this.tex, {
           roadHalf: cfg.roadHalf,
           wallHalf: cfg.wallHalf,
           preset: sec.preset,
           range: { fromIndex: from, spanIndices: Math.max(1, to - from) },
           ground: i === 0,
           terrainLayer,
-        }));
+        });
+        this.world.addChild(surface);
+        surfaceOverheads.push(surface.overhead);
       });
     } else {
-      this.world.addChild(buildSurface(path, this.tex, {
+      const surface = buildSurface(path, this.tex, {
         roadHalf: cfg.roadHalf,
         wallHalf: cfg.wallHalf,
         preset,
-      }));
+      });
+      this.world.addChild(surface);
+      surfaceOverheads.push(surface.overhead);
     }
 
     // Tunnel: darkens/walls/lights whatever stretch of route the stage
@@ -168,21 +179,22 @@ export class Game {
     // resolve it: the raised road is re-laid over the ground one, then the
     // deck's own structure (walls, fascia, piers, cast shadow) frames it.
     // Both no-op on a stage whose route never leaves zLevel 0.
-    this.world.addChild(buildElevatedDeckShadow(path, { roadHalf: cfg.roadHalf }));
+    this.elevatedShadow = buildElevatedDeckShadow(path, { roadHalf: cfg.roadHalf });
+    this.world.addChild(this.elevatedShadow);
     this.elevatedDeck = buildElevatedRoadOverlay(path, this.tex, {
       roadHalf: cfg.roadHalf,
       preset,
     });
     this.world.addChild(this.elevatedDeck);
-    this.world.addChild(buildRampStructure(path, { wallHalf: cfg.wallHalf }));
+    this.elevatedStructure = buildRampStructure(path, { wallHalf: cfg.wallHalf });
+    this.world.addChild(this.elevatedStructure);
 
     // Grid of just the elevated points, so update() can ask "is the player
     // underneath the deck right now" in O(1). A top-down camera has no way
     // to show one road passing under another: the deck is opaque, so at the
     // crossing it would simply cover the car, and the player loses the car
-    // they are steering. Fading the deck road (its shadow and its walls stay
-    // put, so the bridge keeps its outline) is what makes "I am under it"
-    // legible. See the fade in update().
+    // they are steering. Fading everything overhead is what makes "I am
+    // under it" legible. See the fade in update().
     this._deckGrid = null;
     if (elevatedRuns(path).length) {
       const cell = 400;
@@ -195,7 +207,10 @@ export class Game {
         if (!b) grid.set(k, (b = []));
         b.push(i);
       }
-      this._deckGrid = { grid, cell, reach: cfg.roadHalf + 70 };
+      // +210 rather than a hair past the deck edge: the fade needs to be
+      // finished by the time the car is actually under the bridge, not
+      // starting then, and at the current moveScale that edge arrives fast.
+      this._deckGrid = { grid, cell, reach: cfg.roadHalf + 210 };
     }
 
     // (The old stage-4 pass here painted a decorative overpass at a fixed
@@ -252,6 +267,9 @@ export class Game {
     this.actors = new Container();
     this.actors.label = 'actors';
     this.world.addChild(this.actors);
+
+    // ...and the overhead road furniture sits above the actors.
+    for (const oh of surfaceOverheads) this.world.addChild(oh);
 
     const rivalSize = CAR_SIZE[cfg.rival.sprite] || CAR_SIZE.devilz;
     this.rivalSize = rivalSize;
@@ -435,12 +453,17 @@ export class Game {
     }
     this.race.update(dt);
 
-    // Fade the elevated deck road while the player is underneath it, so the
-    // car stays visible where the course crosses over itself. Only the deck
-    // ROAD fades -- its cast shadow and its walls/fascia/piers are separate
-    // layers and stay put, so the bridge keeps a clear outline overhead
-    // instead of vanishing. Eased rather than switched, otherwise the whole
-    // bridge pops the instant the car's nose reaches its edge.
+    // Fade everything overhead while the player is underneath it, so the
+    // car stays visible where the course crosses over itself. Fading the
+    // deck road alone left the bridge reading as solid: its cast shadow is
+    // near-black over the very stretch of ground road being driven, and the
+    // walls/fascia/piers are a separate opaque layer, so between them the
+    // crossing stayed hard to read. All three fade together now, each to
+    // its own floor -- the road almost away, the structure to a ghost that
+    // still outlines the bridge, the shadow to a hint that it is overhead.
+    // Eased rather than switched, and faster going out than coming back:
+    // arriving under a deck that is still fading is the case that loses the
+    // car, while it re-appearing over a beat behind reads as natural.
     if (this._deckGrid && this.elevatedDeck) {
       const { grid, cell, reach } = this._deckGrid;
       let under = false;
@@ -458,8 +481,16 @@ export class Game {
           }
         }
       }
-      const target = under ? 0.42 : 1;
-      this.elevatedDeck.alpha += (target - this.elevatedDeck.alpha) * (1 - Math.exp(-dt * 9));
+      const k = 1 - Math.exp(-dt * (under ? 16 : 7));
+      for (const [layer, floor] of [
+        [this.elevatedDeck, 0.10],
+        [this.elevatedStructure, 0.30],
+        [this.elevatedShadow, 0.14],
+      ]) {
+        if (!layer) continue;
+        const target = under ? floor : 1;
+        layer.alpha += (target - layer.alpha) * k;
+      }
     }
 
     // race.update() can flip state to 'finished' just now (checked fresh,

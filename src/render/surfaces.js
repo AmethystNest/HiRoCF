@@ -207,6 +207,37 @@ export const SURFACE_PRESETS = {
    *
    * Each carries its own `terrain`, so the ground changes with the road.
    */
+  /**
+   * Stage 5's start/finish complex: a permanent grand-prix pit straight the
+   * lap launches out of before the course spills into the city streets.
+   * Racing kerbs, a concrete apron and a gravel trap, a painted chequer at
+   * the line, and no centre line -- a circuit does not have one.
+   *
+   * Its ground/terrain settings are gt_city's verbatim, on purpose: this is
+   * the first sector in the list, and buildSurface only lays the shared
+   * ground plane for the first one, so anything different here would
+   * re-tint the whole lap.
+   *
+   * The band widths total 180 against gt_city's 176. That is not a
+   * coincidence either -- surfaceExtent() of the WIDEST sector is what prop
+   * placement measures `near`/`far` from, so a generous run-off here would
+   * quietly push every kerbside prop on the city streets outward too.
+   */
+  gt_circuit: {
+    ground: 'dirt', groundScale: 2.2, groundTint: 0x767c84,
+    terrain: 1600, terrainRepeat: 7, terrainV: 1 / 0.0011,
+    asphalt: { texture: 'road_asphalt', uRepeat: 3.4, vPer: 1 / 540, tint: 0x9aa0a7 },
+    ruts: { offset: 92, width: 78, alpha: 0.26, vPer: 1 / 950 },
+    edgeLine: { inset: 15, width: 13, tint: 0xffffff, alpha: 0.95 },
+    centreLine: null,
+    bands: [
+      { texture: 'curb_redwhite', width: 60, vPer: 1 / 78 },
+      { texture: null, width: 44, tint: 0xb0b5b9, alpha: 0.95 },   // concrete apron
+      { texture: 'gravel', width: 76, vPer: 1 / 300, uRepeat: 1.4, alpha: 0.95 },
+    ],
+    bandEdge: { width: 26, tint: 0x5b6067, alpha: 0.8 },
+  },
+
   gt_city: {
     ground: 'dirt', groundScale: 2.2, groundTint: 0x767c84,
     terrain: 1600, terrainRepeat: 7, terrainV: 1 / 0.0011,
@@ -275,6 +306,11 @@ export function buildSurface(path, tex, {
   const P = SURFACE_PRESETS[preset] || SURFACE_PRESETS.circuit;
   const layer = new Container();
   layer.label = 'surface';
+  // Anything that physically hangs OVER the carriageway goes in here rather
+  // than into `layer`. The caller parents it above the actors, so a car
+  // passes under it instead of over it; see paintSignalOverhead.
+  layer.overhead = new Container();
+  layer.overhead.label = 'surface-overhead';
 
   // A stage whose road changes character part-way round (stage 5 runs city
   // streets, then a pass, then an expressway) calls this once per sector
@@ -453,6 +489,7 @@ export function buildSurface(path, tex, {
   // the moment the course is regenerated.
   if (P.junctionMarks) {
     const g = new Graphics();
+    const gantry = new Graphics();
     const half = roadHalf - (P.edgeLine?.inset ?? 14) - 4;
     const setback = Math.round(210 / path.spacing);
     // post at the back of the pavement, head reaching back in over the road
@@ -462,10 +499,12 @@ export function buildSurface(path, tex, {
       for (const k of [path.wrap(enter - setback), path.wrap(exit + setback)]) {
         if (!inSpan(k)) continue;
         paintCrossing(g, path, k, half, { stopLine: true });
-        paintSignal(g, path, k, signalOut, signalReach);
+        paintSignalShadow(g, path, k, signalOut, signalReach);
+        paintSignalOverhead(gantry, path, k, signalOut, signalReach);
       }
     }
     layer.addChild(g);
+    layer.overhead.addChild(gantry);
   }
 
   // --- start/finish gate (expressway stages) ---
@@ -1318,28 +1357,57 @@ export function cornerRuns(path, threshold = 0.16, minLength = 300) {
  * being regenerated.
  *
  * On an arm, not on the shoulder. A post standing at the kerb has to sit
- * past the player's reach (roadHalf + 270 on this stage) or it reads as
- * something the car drives through -- and at that distance it falls outside
- * the visible half-width at the player's own row, so the first version of
- * this was invisible in play. Reaching the head out over the road is both
- * what a real signal at a Japanese junction does and the only way it is
- * actually in shot.
+ * past the player's reach or it reads as something the car drives through
+ * -- and at that distance it falls outside the visible half-width at the
+ * player's own row, so the first version of this was invisible in play.
+ * Reaching the head out over the road is both what a real signal at a
+ * Japanese junction does and the only way it is actually in shot.
+ *
+ * Which is why it is split in two. The head hangs over the carriageway, so
+ * painting it into the road layer put it UNDER the cars and the car drove
+ * over the signal -- from directly above, the one thing that reads as is a
+ * lamp lying in the road. `paintSignalOverhead` goes into the surface's
+ * `overhead` container, which main.js parents above the actors, so the car
+ * passes beneath the head exactly as it would in life; `paintSignalShadow`
+ * stays down on the road, and the offset between the two is what gives the
+ * gantry its height.
  */
-function paintSignal(g, path, k, out, reach) {
+const SIGNAL_LAMPS = [[-32, 0xd9463c], [0, 0xe0a83a], [32, 0x35b45f]];
+
+/** Local frame at centreline index `k`: (lateral, along) -> world. */
+function signalFrame(path, k) {
   const nx = path.normals[k * 2], ny = path.normals[k * 2 + 1];
   const tx = -ny, ty = nx;
   const cx = path.points[k][0], cy = path.points[k][1];
-  const at = (lat, along) => [cx + nx * lat + tx * along, cy + ny * lat + ty * along];
-  const quad = (lat0, lat1, a0, a1, colour, alpha) => {
-    const p0 = at(lat0, a0), p1 = at(lat1, a0), p2 = at(lat1, a1), p3 = at(lat0, a1);
-    g.poly([p0[0], p0[1], p1[0], p1[1], p2[0], p2[1], p3[0], p3[1]]).fill({ color: colour, alpha });
-  };
+  return (lat, along) => [cx + nx * lat + tx * along, cy + ny * lat + ty * along];
+}
+
+function signalQuad(g, at, lat0, lat1, a0, a1, colour, alpha) {
+  const p0 = at(lat0, a0), p1 = at(lat1, a0), p2 = at(lat1, a1), p3 = at(lat0, a1);
+  g.poly([p0[0], p0[1], p1[0], p1[1], p2[0], p2[1], p3[0], p3[1]]).fill({ color: colour, alpha });
+}
+
+/** The gantry's shadow on the road, offset from the structure itself. */
+function paintSignalShadow(g, path, k, out, reach) {
+  const at = signalFrame(path, k);
+  const dLat = -46, dAlong = 34;   // offset of the shadow from the structure
+  const q = (l0, l1, a0, a1, alpha) =>
+    signalQuad(g, at, l0 + dLat, l1 + dLat, a0 + dAlong, a1 + dAlong, 0x0a0d10, alpha);
+  q(out - 16, out + 16, -16, 16, 0.22);
+  q(reach, out, -9, 9, 0.18);
+  q(reach - 18, reach + 18, -56, 56, 0.26);
+}
+
+/** The gantry itself: post, arm and lamp head, all of it above the cars. */
+function paintSignalOverhead(g, path, k, out, reach) {
+  const at = signalFrame(path, k);
+  const q = (l0, l1, a0, a1, colour, alpha) => signalQuad(g, at, l0, l1, a0, a1, colour, alpha);
   // post at the back of the pavement, then the arm reaching in over the road
-  quad(out - 16, out + 16, -16, 16, 0x33383d, 0.95);
-  quad(reach, out, -7, 7, 0x3a3f45, 0.92);
+  q(out - 16, out + 16, -16, 16, 0x33383d, 0.95);
+  q(reach, out, -7, 7, 0x3a3f45, 0.92);
   // head, across the arm's inner end, with three lamps down it
-  quad(reach - 16, reach + 16, -52, 52, 0x23262a, 0.96);
-  for (const [off, colour] of [[-32, 0xd9463c], [0, 0xe0a83a], [32, 0x35b45f]]) {
+  q(reach - 16, reach + 16, -52, 52, 0x23262a, 0.96);
+  for (const [off, colour] of SIGNAL_LAMPS) {
     const c = at(reach, off);
     g.circle(c[0], c[1], 11).fill({ color: colour, alpha: 0.92 });
   }

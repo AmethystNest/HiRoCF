@@ -8,7 +8,15 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>TOPDOWN RACER</title>
 <style>
-  :root{ --ctrl: clamp(86px, 23vw, 106px); --ctrlWide: clamp(104px, 27vw, 124px); }
+  /* Sized so the whole four-pad row always FITS: 2*ctrlW + 2*actW + 2 gaps
+     + the side padding has to stay under 100vw, or the last pad runs off
+     the right edge (which is exactly what the old clamp()s did -- at 430px
+     they asked for 470px of row). vw-driven with a px ceiling keeps that
+     true at every width instead of only at the one it was eyeballed on.
+     The pads are taller than they are wide: on a phone the thumb has
+     vertical room to spare and none horizontally, so height is where the
+     extra target area actually comes from. */
+  :root{ --ctrlW: min(21vw, 106px); --actW: min(23vw, 118px); --ctrlH: min(31vw, 152px); }
   html,body{margin:0;height:100%;overflow:hidden;background:#161a1e;
     font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
     touch-action:none;-webkit-user-select:none;user-select:none;
@@ -20,42 +28,95 @@
     text-shadow:0 2px 5px rgba(0,0,0,.75)}
   .hud .top{position:absolute;top:max(10px,env(safe-area-inset-top));left:14px;right:14px;
     display:flex;justify-content:space-between;align-items:flex-start;font-size:14px}
-  .hud .speed{position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + var(--ctrl) + 40px);
+  .hud .speed{position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + var(--ctrlH) + 40px);
     text-align:center;font-size:22px;letter-spacing:.02em}
   .hud .speed small{font-size:11px;opacity:.75;margin-left:4px;font-weight:600}
-  .hud .boostWrap{position:absolute;left:50%;transform:translateX(-50%);
-    bottom:calc(env(safe-area-inset-bottom) + var(--ctrl) + 14px);
-    width:min(46vw,200px)}
-  .hud .boostBar{height:7px;border-radius:6px;background:rgba(255,255,255,.16);overflow:hidden}
-  .hud .boostFill{height:100%;width:100%;transform-origin:left center;transform:scaleX(0);
-    background:linear-gradient(90deg,#49b7ff,#8ef0ff)}
-  .hud .boostLabel{font-size:9px;opacity:.7;text-align:center;margin-top:3px;letter-spacing:.1em}
+  .hud .nitroWrap{position:absolute;left:50%;transform:translateX(-50%);
+    bottom:calc(env(safe-area-inset-bottom) + var(--ctrlH) + 14px);
+    width:min(54vw,238px)}
+  .hud .nitroCells{display:flex;gap:5px}
+  .hud .nitroCell{flex:1;height:9px;border-radius:5px;background:rgba(255,255,255,.13);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.14);overflow:hidden}
+  .hud .nitroCell i{display:block;height:100%;transform-origin:left center;transform:scaleX(0);
+    background:linear-gradient(90deg,#2f9ae8,#7fe6ff)}
+  .hud .nitroCell.full i{background:linear-gradient(90deg,#54c8ff,#c2f7ff);
+    box-shadow:0 0 12px rgba(120,220,255,.85)}
+  /* Burst meter: only up while a charge is actually running. Normalised to
+     one charge and clamped, so a chained run simply holds full until the
+     last charge starts draining. */
+  .hud .nitroBurst{height:4px;margin-top:4px;border-radius:3px;overflow:hidden;
+    background:rgba(255,255,255,.10);opacity:0;transition:opacity .12s ease}
+  .hud .nitroWrap.firing .nitroBurst{opacity:1}
+  .hud .nitroBurst i{display:block;height:100%;transform-origin:left center;transform:scaleX(0);
+    background:linear-gradient(90deg,#ffb23a,#ffe9a8)}
+  .hud .nitroLabel{font-size:9px;opacity:.72;text-align:center;margin-top:4px;letter-spacing:.16em}
+  .hud .nitroWrap.firing .nitroLabel{opacity:1;color:#ffd489}
   .hud .note{position:absolute;left:14px;top:calc(env(safe-area-inset-top) + 46px);
     font-size:11px;opacity:.5;font-weight:600}
 
   .controls{position:fixed;left:0;right:0;bottom:0;
-    padding:0 10px calc(env(safe-area-inset-bottom) + 12px);
+    padding:0 9px calc(env(safe-area-inset-bottom) + 12px);
     display:flex;justify-content:space-between;pointer-events:none}
-  .controls .side{display:flex;gap:10px;pointer-events:auto}
-  .controls button{width:var(--ctrl);height:var(--ctrl);border:2px solid rgba(255,255,255,.16);border-radius:22px;
-    background:rgba(255,255,255,.14);color:#fff;font-size:clamp(18px,4.9vw,24px);font-weight:900;
-    backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
-    transition:transform .06s ease,background .06s ease,border-color .06s ease,box-shadow .06s ease}
+  .controls .side{display:flex;gap:9px;pointer-events:auto}
+  /* Glass pad rather than a flat translucent square: a top-lit gradient over
+     a dark blurred base, a hairline rim, and an inset highlight along the top
+     edge. The dark base is what keeps a white glyph readable over bright
+     track as well as over asphalt -- the old .14-white fill washed out
+     completely against a concrete apron. */
+  .controls button{width:var(--ctrlW);height:var(--ctrlH);
+    display:flex;align-items:center;justify-content:center;
+    border:1px solid rgba(255,255,255,.26);border-radius:24px;
+    background:
+      radial-gradient(125% 100% at 50% -10%, rgba(255,255,255,.26), rgba(255,255,255,.04) 62%),
+      rgba(16,20,25,.44);
+    color:#fff;font-size:clamp(22px,5.6vw,30px);font-weight:800;line-height:1;
+    box-shadow:0 8px 22px rgba(0,0,0,.38),
+               inset 0 1px 0 rgba(255,255,255,.34),
+               inset 0 -3px 8px rgba(0,0,0,.28);
+    backdrop-filter:blur(10px) saturate(1.25);-webkit-backdrop-filter:blur(10px) saturate(1.25);
+    transition:transform .07s ease,background .07s ease,border-color .07s ease,box-shadow .07s ease}
   .controls button:active,.controls button.pressed{
-    transform:scale(.92);
-    background:rgba(255,255,255,.42);
-    border-color:rgba(255,255,255,.72);
-    box-shadow:0 0 0 4px rgba(255,255,255,.10),0 0 22px rgba(255,255,255,.22)
+    transform:scale(.94);
+    background:
+      radial-gradient(125% 100% at 50% -10%, rgba(255,255,255,.5), rgba(255,255,255,.14) 62%),
+      rgba(40,48,56,.58);
+    border-color:rgba(255,255,255,.85);
+    box-shadow:0 0 0 5px rgba(255,255,255,.10),0 0 26px rgba(255,255,255,.26),
+               inset 0 1px 0 rgba(255,255,255,.5)
   }
-  #boost,#brake{width:var(--ctrlWide);font-size:clamp(14px,3.6vw,17px);letter-spacing:.02em}
-  #boost{background:rgba(73,183,255,.24)}
-  #boost.ready{background:rgba(73,183,255,.44)}
-  #boost:active,#boost.pressed{background:rgba(73,183,255,.68);border-color:rgba(143,222,255,.95);box-shadow:0 0 24px rgba(73,183,255,.55)}
-  #brake:active,#brake.pressed{background:rgba(255,112,112,.52);border-color:rgba(255,190,190,.92);box-shadow:0 0 22px rgba(255,92,92,.34)}
-  @media (max-width:390px){
-    :root{ --ctrl: clamp(74px, 21vw, 92px); --ctrlWide: clamp(88px, 24vw, 106px); }
-    .controls{padding:0 8px calc(env(safe-area-inset-bottom) + 10px)}
-    .controls .side{gap:8px}
+  #left,#right{font-size:clamp(26px,6.4vw,34px)}
+  #nitro,#brake{width:var(--actW);font-size:clamp(14px,3.6vw,18px);letter-spacing:.06em;font-weight:900;
+    flex-direction:column;gap:5px}
+  /* NITRO stays dim until a press would actually fire -- stock in hand and,
+     mid-burst, inside the chain window. That is the no-wasted-press rule
+     from config.js NITRO, shown rather than explained. */
+  #nitro{border-color:rgba(120,205,255,.34)}
+  #nitro.ready{border-color:rgba(143,222,255,.9);
+    background:
+      radial-gradient(125% 100% at 50% -10%, rgba(150,225,255,.42), rgba(60,150,220,.16) 62%),
+      rgba(12,30,44,.5);
+    box-shadow:0 8px 22px rgba(0,0,0,.38),0 0 22px rgba(73,183,255,.42),
+               inset 0 1px 0 rgba(200,240,255,.5)}
+  #nitro:active,#nitro.pressed{border-color:rgba(190,240,255,1);
+    background:
+      radial-gradient(125% 100% at 50% -10%, rgba(200,244,255,.62), rgba(80,180,240,.3) 62%),
+      rgba(18,52,74,.62);
+    box-shadow:0 0 0 5px rgba(73,183,255,.14),0 0 32px rgba(73,183,255,.66),
+               inset 0 1px 0 rgba(225,250,255,.6)}
+  #nitro .cnt{font-size:1.05em;opacity:.9;letter-spacing:0;font-variant-numeric:tabular-nums}
+  #nitro.ready .cnt{opacity:1;text-shadow:0 0 12px rgba(143,222,255,.9)}
+  #brake:active,#brake.pressed{border-color:rgba(255,190,190,.95);
+    background:
+      radial-gradient(125% 100% at 50% -10%, rgba(255,190,190,.5), rgba(210,80,80,.22) 62%),
+      rgba(56,20,20,.58);
+    box-shadow:0 0 0 5px rgba(255,92,92,.12),0 0 28px rgba(255,92,92,.4),
+               inset 0 1px 0 rgba(255,220,220,.5)}
+  /* Short viewports (landscape phones): tall pads would eat the road, and
+     there is width to spare there, so height comes off the viewport
+     instead of the width. */
+  @media (max-height:520px){
+    :root{ --ctrlW: min(15vw, 116px); --actW: min(17vw, 132px); --ctrlH: min(27vh, 124px); }
+    .controls{padding:0 10px calc(env(safe-area-inset-bottom) + 8px)}
   }
 
   #loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
@@ -151,15 +212,20 @@
   </div>
   <div class="note" id="note">v2.0 · PIXI RENDER CORE</div>
   <div class="speed"><span id="speed">0</span><small>km/h</small></div>
-  <div class="boostWrap">
-    <div class="boostBar"><div class="boostFill" id="boostFill"></div></div>
-    <div class="boostLabel">BOOST</div>
+  <div class="nitroWrap" id="nitroWrap">
+    <div class="nitroCells" id="nitroCells">
+      <div class="nitroCell"><i></i></div>
+      <div class="nitroCell"><i></i></div>
+      <div class="nitroCell"><i></i></div>
+    </div>
+    <div class="nitroBurst"><i id="nitroBurst"></i></div>
+    <div class="nitroLabel" id="nitroLabel">NITRO</div>
   </div>
 </div>
 
 <div class="controls">
   <div class="side"><button id="left">◀</button><button id="right">▶</button></div>
-  <div class="side"><button id="brake">BRAKE</button><button id="boost">BOOST</button></div>
+  <div class="side"><button id="brake">BRAKE</button><button id="nitro">NITRO<span class="cnt" id="nitroCnt">×0</span></button></div>
 </div>
 <button id="zoomBtn" aria-label="camera zoom">VIEW 1/3</button>
 <button id="stagePick" aria-label="choose stage">STAGE 1/5</button>
@@ -212,6 +278,7 @@
   const loading=document.getElementById('loading');
   try {
     const {boot}=await import('./src/main.js');
+    const {NITRO,PHYSICS}=await import('./src/config.js');
     const el=(id)=>document.getElementById(id);
     const {game,app,stages}=await boot({stageId:1});
     loading.classList.add('hide');
@@ -231,13 +298,35 @@
     });
     const bind=(id,key)=>{const b=el(id);const on=e=>{e.preventDefault();game.input[key]=true;b.classList.add('pressed');try{b.setPointerCapture(e.pointerId)}catch{}};const off=e=>{e.preventDefault();game.input[key]=false;b.classList.remove('pressed')};b.addEventListener('pointerdown',on);b.addEventListener('pointerup',off);b.addEventListener('pointercancel',off);b.addEventListener('lostpointercapture',off)};
     bind('left','left');bind('right','right');bind('brake','brake');
-    const boostControl=el('boost');
-    boostControl.addEventListener('pointerdown',e=>{e.preventDefault();boostControl.classList.add('pressed');game.player.tryBoost();try{boostControl.setPointerCapture(e.pointerId)}catch{}});
-    const releaseBoost=e=>{boostControl.classList.remove('pressed')};
-    boostControl.addEventListener('pointerup',releaseBoost);boostControl.addEventListener('pointercancel',releaseBoost);boostControl.addEventListener('lostpointercapture',releaseBoost);
-    addEventListener('keydown',e=>{if(e.key==='ArrowLeft'||e.key==='a')game.input.left=true;if(e.key==='ArrowRight'||e.key==='d')game.input.right=true;if(e.key==='ArrowDown'||e.key==='s')game.input.brake=true;if(e.key===' ')game.player.tryBoost()});
+    const nitroControl=el('nitro');
+    nitroControl.addEventListener('pointerdown',e=>{e.preventDefault();nitroControl.classList.add('pressed');game.player.tryNitro();try{nitroControl.setPointerCapture(e.pointerId)}catch{}});
+    const releaseNitro=e=>{nitroControl.classList.remove('pressed')};
+    nitroControl.addEventListener('pointerup',releaseNitro);nitroControl.addEventListener('pointercancel',releaseNitro);nitroControl.addEventListener('lostpointercapture',releaseNitro);
+    addEventListener('keydown',e=>{if(e.key==='ArrowLeft'||e.key==='a')game.input.left=true;if(e.key==='ArrowRight'||e.key==='d')game.input.right=true;if(e.key==='ArrowDown'||e.key==='s')game.input.brake=true;if(e.key===' ')game.player.tryNitro()});
     addEventListener('keyup',e=>{if(e.key==='ArrowLeft'||e.key==='a')game.input.left=false;if(e.key==='ArrowRight'||e.key==='d')game.input.right=false;if(e.key==='ArrowDown'||e.key==='s')game.input.brake=false});
-    const speedEl=el('speed'),fillEl=el('boostFill'),boostBtn=el('boost'),lapEl=el('lap'),posEl=el('pos'),timeEl=el('time');
+    const speedEl=el('speed'),nitroBtn=el('nitro'),nitroCnt=el('nitroCnt'),nitroWrap=el('nitroWrap'),
+      nitroBurstEl=el('nitroBurst'),nitroLabel=el('nitroLabel'),
+      nitroCells=Array.from(el('nitroCells').children).map(c=>({box:c,fill:c.firstElementChild})),
+      lapEl=el('lap'),posEl=el('pos'),timeEl=el('time');
+    // One cell per banked charge: filled cells are charges in hand, the cell
+    // after them is the meter working toward the next. The label doubles as
+    // the chain cue -- CHAIN READY is up exactly while a press would extend
+    // the running burst instead of being refused, so the player can see the
+    // window rather than having to guess at it.
+    const paintNitro=(p)=>{
+      const stock=p.nitroStock,part=p.nitroCharge/100;
+      for(let i=0;i<nitroCells.length;i++){
+        const v=i<stock?1:(i===stock?part:0);
+        nitroCells[i].fill.style.transform=`scaleX(${v})`;
+        nitroCells[i].box.classList.toggle('full',i<stock);
+      }
+      nitroWrap.classList.toggle('firing',p.boosting);
+      nitroBurstEl.style.transform=`scaleX(${p.boosting?Math.min(1,p.boostTimer/PHYSICS.boostDuration):0})`;
+      nitroCnt.textContent='×'+stock;
+      const canFire=stock>0&&(!p.boosting||p.boostTimer<=NITRO.chainWindow);
+      nitroBtn.classList.toggle('ready',canFire);
+      nitroLabel.textContent=p.boosting?(canFire?'NITRO · CHAIN READY':'NITRO · FIRING'):'NITRO';
+    };
     const vsOverlay=el('vsOverlay'),vsStage=el('vsStage'),vsRival=el('vsRival'),signalOverlay=el('signalOverlay'),sig1=el('sig1'),sig2=el('sig2'),sig3=el('sig3');
     const finishOverlay=el('finishOverlay'),finishStage=el('finishStage'),finishPlace=el('finishPlace'),finishTime=el('finishTime'),lapPopup=el('lapPopup'),lapPopupMain=el('lapPopupMain'),lapPopupSub=el('lapPopupSub'),stageBtn=el('retryBtn');
     const syncStageUI=()=>{
@@ -253,7 +342,7 @@
     const fmtTime=s=>{const ms=Math.max(0,Math.floor(s*1000)),m=Math.floor(ms/60000),sec=Math.floor((ms%60000)/1000),cs=ms%1000;return `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}.${String(cs).padStart(3,'0')}`};
     let shownFinish=false,finishDelay=0,lapPopupTimer=0;
     const showLapPopup=(lap,total)=>{lapPopupMain.textContent=`LAP ${lap}/${total}`;lapPopupSub.textContent=lap===total?'FINAL LAP':'CHECKPOINT';lapPopup.classList.remove('show');void lapPopup.offsetWidth;lapPopup.classList.add('show');lapPopupTimer=1.45};
-    app.ticker.add(ticker=>{const dt=Math.min(.033,ticker.deltaMS/1000),p=game.player;speedEl.textContent=Math.max(0,Math.round(p.displaySpeed));const gauge=p.boosting?Math.max(0,p.boostTimer/2.45):p.boostEnergy/100;fillEl.style.transform=`scaleX(${gauge})`;boostBtn.classList.toggle('ready',!p.boosting&&p.boostEnergy>=99.5);if(lapPopupTimer>0){lapPopupTimer-=dt;if(lapPopupTimer<=0)lapPopup.classList.remove('show')}const race=game.race;if(!race)return;if(race.lapAnnounce!=null){showLapPopup(race.lapAnnounce,race.totalLaps);race.lapAnnounce=null}const lap=Math.min(game.playerEntry.progress.lap,race.totalLaps);lapEl.textContent=`LAP ${lap}/${race.totalLaps}`;posEl.textContent=`POS ${race.positionOf(game.playerEntry)}/2`;timeEl.textContent=fmtTime(race.time);vsOverlay.hidden=race.state!=='vs';signalOverlay.hidden=race.state!=='countdown';if(race.state==='countdown'){const t=race.countdown;sig1.className='lamp'+(t<2.4?' on':'');sig2.className='lamp'+(t<1.6?' on':'');sig3.className='lamp'+(t<.8?' go':(t<1.6?' on':''))}if(race.state==='finished'&&!shownFinish){finishDelay+=dt;if(finishDelay>=1.9){shownFinish=true;const place=race.positionOf(game.playerEntry);finishPlace.textContent=place===1?'1st':'2nd';finishTime.textContent=fmtTime(game.playerEntry.progress.finishTime??race.time);stageBtn.textContent=(place===1&&game.stageId<LAST_STAGE)?'NEXT STAGE':(place===1?'RETRY FINAL STAGE':'RETRY');finishOverlay.hidden=false}}});
+    app.ticker.add(ticker=>{const dt=Math.min(.033,ticker.deltaMS/1000),p=game.player;speedEl.textContent=Math.max(0,Math.round(p.displaySpeed));paintNitro(p);if(lapPopupTimer>0){lapPopupTimer-=dt;if(lapPopupTimer<=0)lapPopup.classList.remove('show')}const race=game.race;if(!race)return;if(race.lapAnnounce!=null){showLapPopup(race.lapAnnounce,race.totalLaps);race.lapAnnounce=null}const lap=Math.min(game.playerEntry.progress.lap,race.totalLaps);lapEl.textContent=`LAP ${lap}/${race.totalLaps}`;posEl.textContent=`POS ${race.positionOf(game.playerEntry)}/2`;timeEl.textContent=fmtTime(race.time);vsOverlay.hidden=race.state!=='vs';signalOverlay.hidden=race.state!=='countdown';if(race.state==='countdown'){const t=race.countdown;sig1.className='lamp'+(t<2.4?' on':'');sig2.className='lamp'+(t<1.6?' on':'');sig3.className='lamp'+(t<.8?' go':(t<1.6?' on':''))}if(race.state==='finished'&&!shownFinish){finishDelay+=dt;if(finishDelay>=1.9){shownFinish=true;const place=race.positionOf(game.playerEntry);finishPlace.textContent=place===1?'1st':'2nd';finishTime.textContent=fmtTime(game.playerEntry.progress.finishTime??race.time);stageBtn.textContent=(place===1&&game.stageId<LAST_STAGE)?'NEXT STAGE':(place===1?'RETRY FINAL STAGE':'RETRY');finishOverlay.hidden=false}}});
     // --- stage picker ---
     const stagePick=el('stagePick'),stageOverlay=el('stageOverlay'),stageRows=el('stageRows'),stageClose=el('stageClose');
     const syncPickLabel=()=>{stagePick.textContent=`STAGE ${game.stageId}/${LAST_STAGE}`};

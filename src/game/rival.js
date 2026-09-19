@@ -149,20 +149,21 @@ export class RivalCar {
     this.finalLapBoostOnly = tuning.finalLapBoostOnly ?? false;
 
     this.accel = tuning.accel;
-    // Getaway. The player leaves the line HARDER than any rival: it gets
-    // `launchBoostMul` (1.16x, 1.28x on stage 3) on top of its own accel
-    // below `launchBoostBelow`, while a rival starts from `launchAccel`
-    // and only ramps up to its own figure by `launchAccelUntil`. So the
-    // player wins the drag off the grid and out of a spin, and the rival
-    // takes it back further up the road on top speed (every rival's
-    // maxSpeed now sits above the player's -- see config.js).
+    // Getaway, opt-in per stage. A rival that sets `launchAccel` pulls away
+    // from a standstill at that rate instead of its own `accel` and only
+    // reaches its own figure by `launchAccelUntil`, so the player wins the
+    // drag off the grid and the rival takes it back further up the road on
+    // top speed. Only stage 4's box truck is specified this way; every
+    // other rival leaves the line on its own accel exactly as before, so
+    // omitting the key has to mean "no ramp" rather than a default one.
     //
-    // The ramp ends at 300, below every stage's corner-exit speed (the
-    // lowest is stage 3's 343 at the hairpin apex), so this shapes the
-    // getaway only and leaves corner exits and cruising pace as they were.
+    // The ramp ends at 300, below every stage's corner-exit speed, so it
+    // shapes the getaway only and leaves corner exits and cruising alone.
     // min() so a rival whose own accel is already under the launch figure
     // is never sped up by it.
-    this.launchAccel = Math.min(tuning.launchAccel ?? 140, tuning.accel);
+    this.launchAccel = tuning.launchAccel != null
+      ? Math.min(tuning.launchAccel, tuning.accel)
+      : tuning.accel;
     this.launchAccelUntil = tuning.launchAccelUntil ?? 300;
     this.turn = tuning.turn;
     // 0 for every rival except stage 3's AE86 -- a per-stage "drift spec"

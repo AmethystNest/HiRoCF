@@ -7,6 +7,50 @@
  * priority over the themed scatter.
  */
 
+/**
+ * Stage 5's start/finish venue: stands and lighting down the outside of the
+ * pit straight, the pit wall and garages down the inside, and the podium at
+ * the line. Lap fractions, since the course is generated -- 0.000 to ~0.082
+ * is the gt_circuit road sector.
+ *
+ * `fromCentre` throughout: these are positioned against the centreline, not
+ * the surface edge, because the whole point is a fixed distance off a road
+ * whose painted edge is the same all the way down this sector anyway.
+ */
+function gpVenue() {
+  const out = [];
+  const at = (i, step, from) => from + i * step;
+  // outside: a continuous bank of stands behind a crowd fence
+  for (let i = 0; i < 8; i++) {
+    out.push({ name: 'grandstand', at: at(i, 0.0105, 0.004), side: 1, lateral: 560, fromCentre: true, force: true });
+  }
+  for (let i = 0; i < 12; i++) {
+    out.push({ name: 'crowd_fence', at: at(i, 0.0068, 0.003), side: 1, lateral: 424, fromCentre: true, force: true });
+  }
+  // inside: pit wall, then the garages behind it
+  for (let i = 0; i < 12; i++) {
+    out.push({ name: 'pitwall_barrier', at: at(i, 0.0068, 0.003), side: -1, lateral: 400, fromCentre: true, force: true });
+  }
+  for (let i = 0; i < 6; i++) {
+    out.push({
+      name: i % 2 ? 'pit_tent_red' : 'pit_tent_blue',
+      at: at(i, 0.0135, 0.008), side: -1, lateral: 530, fromCentre: true, force: true,
+    });
+  }
+  // lighting rigs down both sides, offset from each other
+  for (let i = 0; i < 4; i++) {
+    out.push({ name: 'floodlight', at: at(i, 0.021, 0.006), side: 1, lateral: 670, fromCentre: true, force: true });
+    out.push({ name: 'floodlight', at: at(i, 0.021, 0.016), side: -1, lateral: 670, fromCentre: true, force: true });
+  }
+  // the line itself
+  out.push({ name: 'podium_stage', at: 0.020, side: -1, lateral: 650, fromCentre: true, force: true });
+  out.push({ name: 'marshal_tower', at: 0.002, side: -1, lateral: 640, fromCentre: true, force: true });
+  out.push({ name: 'broadcast_camera_tower', at: 0.036, side: 1, lateral: 640, fromCentre: true, force: true });
+  out.push({ name: 'racing_billboard', at: 0.055, side: 1, lateral: 470, fromCentre: true, force: true });
+  out.push({ name: 'racing_billboard', at: 0.068, side: -1, lateral: 470, fromCentre: true, force: true });
+  return out;
+}
+
 export const LAYOUTS = {
   1: {
     // Stage 1 runs counter-clockwise from the start/finish on the bottom
@@ -188,7 +232,21 @@ export const LAYOUTS = {
       { from: 0.245, to: 0.520, theme: 'touge' },
       { from: 0.520, to: 1.000, theme: 'expressway_country' },
     ],
+    // The grand-prix venue around the start/finish line, on top of the
+    // gt_circuit road sector (see SURFACE_SECTORS_BY_STAGE in main.js).
+    //
+    // All of it is `force`d hand placement rather than a scatter theme, and
+    // that is not a shortcut. buildProps rejects a prop whose centre lands
+    // within playerReach + max(w, h) / 2 of ANY lane, and for a face-on
+    // structure that radius is its span ALONG the road, not its depth
+    // toward it -- half an 880-wide grandstand is 440, so a stand can never
+    // be placed nearer than about 860 from the centreline however small its
+    // `near` is. That is why the existing `grandstand` theme puts nothing on
+    // a straight. Laid out by hand, each row sits in its own lateral band
+    // (pit wall 400, stands 560, lighting 660) and is spaced wider than the
+    // sprite it repeats, so skipping the overlap test costs nothing.
     landmarks: [
+      ...gpVenue(),
       { name: 'plain_gantry', at: 0.560, side: 1, lateral: 40, scale: 1.05 },
       { name: 'plain_gantry', at: 0.600, side: -1, lateral: 40, scale: 1.05 },
     ],

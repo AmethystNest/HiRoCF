@@ -22,14 +22,12 @@ export const PHYSICS = {
   // each one has to be paid for elsewhere, because raising it alone makes
   // every corner harder without making the cars any better at them. A car
   // needs radius = speed * moveScale / turnRate, so a +9.6% moveScale is
-  // a +9.6% radius at the same speed. Everything tied to that got scaled
-  // by the same factor in this step: every rival's cornerSlow (so corner
-  // speed in WORLD units per second is unchanged), driftMinSpeed here and
-  // on stage 3 (or the player's drift would break at the apex of corners
-  // it used to hold, which is exactly the bug the stage 3 value below was
-  // set to fix), and the AI's aim/corner-scan lookaheads in rival.js (a
-  // lookahead is a distance, so at a higher moveScale the same number of
-  // route points buys less warning time).
+  // a +9.6% radius at the same speed. What had to move with it: the
+  // player's driftMinSpeed here and on stage 3 (or the drift breaks at the
+  // apex of corners it used to hold, which is the exact bug the stage 3
+  // value below was set to fix) and the AI's aim/corner-scan lookaheads in
+  // rival.js, which are DISTANCES, so the same number of route points buys
+  // proportionally less warning time as the world moves faster.
   moveScale: 1.82,
   driftTurnBoost: 1.42,
   driftSlip: 0.50,
@@ -64,6 +62,28 @@ export const RACE = {
   totalLaps: 3,
 };
 
+/**
+ * Nitro. The meter fills at PHYSICS.boostRecover and banks a charge every
+ * time it tops out, up to `maxStock`; each charge is worth one full
+ * PHYSICS.boostDuration burst and they can be spent back to back.
+ *
+ * `chainWindow` is the whole of the "don't waste a press" rule. A second
+ * charge fired into a running burst EXTENDS it (boostTimer += duration)
+ * rather than restarting it, so no bought time is ever thrown away -- and
+ * a press while more than `chainWindow` of the current burst is still left
+ * is refused outright, with the charge kept, so a panicked double-tap
+ * cannot dump the stock into the road. Between them, three charges chain
+ * into one unbroken 3 x boostDuration run with nothing lost, but only if
+ * they are spent as each burst runs out.
+ */
+export const NITRO = {
+  maxStock: 3,
+  // One ready on the grid, as the single-boost build had. Starting on a
+  // full three would hand the opening straight a seven-second burst.
+  startStock: 1,
+  chainWindow: 1.0,
+};
+
 /** Per-stage rival tuning, also carried over verbatim. */
 export const STAGES = {
   1: {
@@ -72,13 +92,7 @@ export const STAGES = {
     courseDesc: 'LONG STRAIGHTS / GENTLE CURVES / BIG CORNER',
     rivalName: '悪魔のアイツ',
     roadHalf: 300, wallHalf: 410,
-    // Top speed above the player's 760 and a soft getaway, per the spec
-    // that every rival out-runs the player flat out but loses the drag off
-    // the line (see rival.js launchAccel). cornerSlow is re-derived from
-    // the new maxSpeed so the speed it actually takes corners at is
-    // unchanged: it was 710 * (1 - 0.22) = 554, and 780 * (1 - 0.290) is
-    // the same 554. Only the straight-line pace moves.
-    rival: { maxSpeed: 780, accel: 250, turn: 2.25, sprite: 'devilz', block: false, weave: false, raceLine: true, cornerSlow: 0.352, holdOpeningStraight: true, finalLapBoostOnly: true },
+    rival: { maxSpeed: 710, accel: 250, turn: 2.25, sprite: 'devilz', block: false, weave: false, raceLine: true, cornerSlow: 0.22, holdOpeningStraight: true, finalLapBoostOnly: true },
     bestKey: 'topdownRacer_stage1_best_ms',
   },
   2: {
@@ -89,9 +103,7 @@ export const STAGES = {
     roadHalf: 230, wallHalf: 320,
     playerPhysics: { wallInset: 2 },
     wallTriggerExtra: 18,
-    // Same re-derivation as stage 1, from the previous 650 and the
-    // default cornerSlow of 0.45: corner speed stays 357.
-    rival: { maxSpeed: 775, accel: 280, turn: 3.05, sprite: 'prius', cornerSlow: 0.580, cornerLookAhead: 42 },
+    rival: { maxSpeed: 650, accel: 280, turn: 3.05, sprite: 'prius' },
     bestKey: 'topdownRacer_stage2_best_ms',
   },
   3: {
@@ -135,13 +147,10 @@ export const STAGES = {
     // Now it actually brakes for the hairpin and drifts through it at a
     // speed its own steering rate can hold.
     rival: {
-      maxSpeed: 790, accel: 210, turn: 3.35, sprite: 'ae86',
+      maxSpeed: 715, accel: 210, turn: 3.35, sprite: 'ae86',
       drift: 0.62, driftVisualBoost: 0.5,
-      // 0.52 of the old 715 and 0.566 of the new 790 are the same 343 at
-      // the hairpin apex -- the switchback pace this stage was tuned
-      // around is untouched; what rises is only the valley straight.
-      block: false, cornerSlow: 0.604, raceLine: true, driftDelay: 4.0,
-      cornerLookAhead: 50,   // ~1300 units: a hairpin here needs a real braking zone
+      block: false, cornerSlow: 0.52, raceLine: true, driftDelay: 4.0,
+      cornerLookAhead: 46,   // ~1200 units: a hairpin here needs a real braking zone
       // The per-lap "big curve boost" is off on this stage. It fires on the
       // leading edge of a long corner and, while it runs, bypasses corner
       // braking entirely (speed goes to maxSpeed * 1.18) -- which on the old
@@ -163,12 +172,14 @@ export const STAGES = {
     wallTriggerExtra: 6,
     rival: {
       maxSpeed: 815, accel: 260, turn: 1.95, sprite: 'truck0164',
-      // Corner speed held at the old 790 * (1 - 0.10) = 711. The truck is
-      // the heaviest thing on the grid, so it also gets the softest
-      // getaway of the five (120 against the default 140, and the
-      // player's 244) -- a loaded box truck should be the one car you can
-      // out-drag off the line, and the one you cannot out-run once it is
-      // rolling.
+      // The one rival specified as slow away and fast flat out: 815
+      // against the player's 760 at the top end, and a launch rate of 120
+      // against the player's 244 off the line (see rival.js launchAccel).
+      // A loaded box truck is the one car you can out-drag away from the
+      // lights and the one you cannot out-run once it is rolling. No other
+      // stage sets launchAccel, and no other rival's maxSpeed is above
+      // the player's. Corner speed is held at the old 790 * (1 - 0.10)
+      // = 711 by re-deriving cornerSlow from the raised maxSpeed.
       cornerSlow: 0.205, cornerLookAhead: 24, launchAccel: 120, block: false, weave: false,
       // Shuts the door on a car coming alongside, and only then -- `block`
       // stays off, because that one weaves about for as long as the rival
@@ -202,23 +213,16 @@ export const STAGES = {
     // Tuned for the composite course, which asks for everything the other
     // rivals only have to do one of: 520-radius city junctions, a
     // 410-radius switchback, and an expressway. cornerSlow sits between
-    // stage 4's (a rival that barely lifts) and stage 3's (one that has to
-    // brake hard for a hairpin), with the longer lookahead stage 3 needed
-    // so it sees a switchback coming in time. It carries the highest top
-    // speed of the five, 825 against the player's 760 -- the spec is now
-    // that every rival out-runs the player flat out and loses the getaway,
-    // and the boss is the extreme of it. Corner speed is unchanged from
-    // the old 755 / 0.30 pairing (528); what makes this one the boss is
-    // still that it gives up less speed than anything else in the game for
-    // every kind of corner in it, and blocks while it leads.
+    // stage 4's 0.10 (a rival that barely lifts) and stage 3's 0.52 (one
+    // that has to brake hard for a hairpin), with the longer lookahead
+    // stage 3 needed so it sees a switchback coming in time. maxSpeed
+    // stays at or under the player's 760: only stage 4's truck is
+    // specified as outright faster in a straight line. What makes this one
+    // the boss is that it gives up less speed than anything else in the
+    // game for every kind of corner in it, and blocks while it leads.
     rival: {
-      maxSpeed: 825, accel: 320, turn: 2.85, sprite: 'devilz', tint: 0x7a3ae0,
-      // Its own accel of 320 is the highest on the grid, which pulls the
-      // launch ramp back up almost immediately; 125 against the default
-      // 140 keeps the boss losing the getaway by about as much as the
-      // others do, without touching what it does once it is rolling.
-      launchAccel: 125,
-      cornerSlow: 0.415, cornerLookAhead: 44, raceLine: true, block: true,
+      maxSpeed: 755, accel: 320, turn: 2.85, sprite: 'devilz', tint: 0x7a3ae0,
+      cornerSlow: 0.30, cornerLookAhead: 40, raceLine: true, block: true,
       drift: 0.35, driftVisualBoost: 0.3, finalLapBoostOnly: true,
     },
     bestKey: 'topdownRacer_stage5_best_ms',

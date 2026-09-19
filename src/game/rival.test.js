@@ -85,27 +85,25 @@ describe('rival side block', () => {
   });
 });
 
-describe('rival pace spec: soft getaway, higher top end', () => {
-  const P_LAUNCH = (id) => {
+describe('rival pace spec: stage 4 alone is slow away and fast flat out', () => {
+  const playerLaunchRate = (id) => {
     const over = STAGES[id].playerPhysics || {};
     const accel = over.accel ?? PHYSICS.accel;
     return accel * (over.launchBoostMul ?? PHYSICS.launchBoostMul);
   };
 
-  for (const id of [1, 2, 3, 4, 5]) {
-    it(`stage ${id}: rival out-runs the player flat out`, () => {
-      expect(STAGES[id].rival.maxSpeed).toBeGreaterThan(PHYSICS.maxSpeed);
-    });
+  it('stage 4: the truck out-runs the player flat out', () => {
+    expect(STAGES[4].rival.maxSpeed).toBeGreaterThan(PHYSICS.maxSpeed);
+  });
 
-    it(`stage ${id}: rival loses the drag off the line`, () => {
-      const r = new RivalCar(STAGE_PATHS[id](), STAGES[id], STAGES[id].rival);
-      // from a standstill, and for the whole first half of the ramp
-      expect(r.launchAccelAt(0)).toBeLessThan(P_LAUNCH(id));
-      expect(r.launchAccelAt(r.launchAccelUntil * 0.5)).toBeLessThan(P_LAUNCH(id));
-    });
-  }
+  it('stage 4: the truck loses the drag off the line', () => {
+    const r = new RivalCar(STAGE_PATHS[4](), STAGES[4], STAGES[4].rival);
+    // from a standstill, and for the whole first half of the ramp
+    expect(r.launchAccelAt(0)).toBeLessThan(playerLaunchRate(4));
+    expect(r.launchAccelAt(r.launchAccelUntil * 0.5)).toBeLessThan(playerLaunchRate(4));
+  });
 
-  it('hands the car its own acceleration back by the top of the ramp', () => {
+  it('hands the truck its own acceleration back by the top of the ramp', () => {
     const r = new RivalCar(STAGE_PATHS[4](), STAGES[4], STAGES[4].rival);
     expect(r.launchAccelAt(r.launchAccelUntil)).toBeCloseTo(r.accel, 6);
     expect(r.launchAccelAt(9999)).toBeCloseTo(r.accel, 6);
@@ -122,14 +120,23 @@ describe('rival pace spec: soft getaway, higher top end', () => {
     }
   });
 
-  it('shapes the getaway only -- corner exits keep the car own accel', () => {
-    // the ramp has to finish below the slowest speed any stage takes a
+  it('shapes the getaway only -- the truck keeps its own accel out of corners', () => {
+    // the ramp has to finish below the speed this stage takes its tightest
     // corner at, or it would be quietly detuning corner exits too
-    for (const id of [1, 2, 3, 4, 5]) {
-      const cfgId = STAGES[id];
-      const r = new RivalCar(STAGE_PATHS[id](), cfgId, cfgId.rival);
-      const slowestCorner = cfgId.rival.maxSpeed * (1 - (cfgId.rival.cornerSlow ?? 0.45));
-      expect(r.launchAccelUntil).toBeLessThan(slowestCorner);
-    }
+    const c = STAGES[4];
+    const r = new RivalCar(STAGE_PATHS[4](), c, c.rival);
+    expect(r.launchAccelUntil).toBeLessThan(c.rival.maxSpeed * (1 - c.rival.cornerSlow));
   });
+
+  for (const id of [1, 2, 3, 5]) {
+    it(`stage ${id}: no launch ramp -- it leaves the line on its own accel`, () => {
+      expect(STAGES[id].rival.launchAccel).toBeUndefined();
+      const r = new RivalCar(STAGE_PATHS[id](), STAGES[id], STAGES[id].rival);
+      expect(r.launchAccelAt(0)).toBeCloseTo(r.accel, 6);
+    });
+
+    it(`stage ${id}: not outright faster than the player in a straight line`, () => {
+      expect(STAGES[id].rival.maxSpeed).toBeLessThanOrEqual(PHYSICS.maxSpeed);
+    });
+  }
 });
