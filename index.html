@@ -484,19 +484,19 @@
 
 <div class="overlay" id="pauseOverlay" hidden>
   <div id="pauseCard">
-    <h2>PAUSED</h2>
-    <button id="pauseResume">RESUME</button>
-    <button id="pauseRestart">RESTART STAGE</button>
-    <button id="pauseTitle">BACK TO TITLE</button>
+    <h2>一時停止中</h2>
+    <button id="pauseResume">再開</button>
+    <button id="pauseRestart">ステージをやり直す</button>
+    <button id="pauseTitle">タイトルへ戻る</button>
     <div class="sub" id="pauseStage">STAGE 1</div>
   </div>
 </div>
 
 <div class="overlay" id="stageOverlay" hidden>
   <div id="stageList">
-    <h3>SELECT STAGE</h3>
+    <h3>ステージ選択</h3>
     <div id="stageRows"></div>
-    <button class="close" id="stageClose">CLOSE</button>
+    <button class="close" id="stageClose">閉じる</button>
   </div>
 </div>
 
@@ -753,7 +753,7 @@
           b.className='row'+(id===game.stageId?' current':'');
           b.innerHTML=`<div class="n">${cfg.name} · ${cfg.shortDesc}</div>`
             +`<div class="c">${cfg.courseName} — ${cfg.courseDesc}</div>`
-            +`<div class="r">RIVAL: ${cfg.rivalName}</div>`;
+            +`<div class="r">ライバル: ${cfg.rivalName}</div>`;
           b.addEventListener('pointerdown',ev=>{
             ev.preventDefault();
             stageOverlay.hidden=true;

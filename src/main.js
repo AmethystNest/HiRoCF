@@ -513,11 +513,24 @@ export class Game {
     this.rivalSize = rivalSize;
     const playerWorldSize = { w: CAR_SIZE.player.w * s, h: CAR_SIZE.player.h * s };
     const rivalWorldSize = { w: rivalSize.w * s, h: rivalSize.h * s };
-    // Cosmetic-only correction (see CAR_VISUAL_SCALE) -- deliberately kept
-    // separate from rivalWorldSize/rivalSize, which still drive start-grid
-    // spacing and the collision hull, so this never touches gameplay feel.
+    // Cosmetic-only correction (see CAR_VISUAL_SCALE): rivalWorldSize/
+    // rivalSize still drive start-grid spacing, which is fine to keep on
+    // the wider uncorrected box (it only wants clear air between the
+    // grid slots). The collision hull is NOT kept on it any more --
+    // prius and r8 draw at 0.55-0.57x their box, so a hull sized off the
+    // box registered contact (and, once contactfx read the same sizes,
+    // sparks) with up to 45% daylight still visibly showing between the
+    // two cars. resolveContacts and the nitro flame below both take
+    // rivalDrawSize instead now; see this.rivalDrawSize.
     const rivalVisualScale = CAR_VISUAL_SCALE[cfg.rival.sprite] ?? { w: 1, h: 1 };
     const rivalDrawSize = { w: rivalWorldSize.w * rivalVisualScale.w, h: rivalWorldSize.h * rivalVisualScale.h };
+    this.rivalDrawSize = rivalDrawSize;
+    // Same correction, but in SCREEN-PIXEL units (not yet multiplied by
+    // `s`) -- boostfx.js's `size` parameter is authored-pixel, same
+    // contract as CAR_SIZE.player passed for the player below, and
+    // multiplies by `s` itself. Passing rivalDrawSize (already world
+    // units) there would scale it by `s` twice.
+    this.rivalDrawSizePx = { w: rivalSize.w * rivalVisualScale.w, h: rivalSize.h * rivalVisualScale.h };
 
     // Side-by-side start grid: half of each car's world-space width, plus a
     // clear margin, so they never spawn overlapping regardless of zoom. Cars
@@ -692,7 +705,9 @@ export class Game {
           [p, this.rival],
           [
             { w: CAR_SIZE.player.w * this.worldScale, h: CAR_SIZE.player.h * this.worldScale },
-            { w: this.rivalSize.w * this.worldScale, h: this.rivalSize.h * this.worldScale },
+            // rivalDrawSize, not rivalSize -- already in world units (see
+            // where it's built above), so no further * worldScale here.
+            this.rivalDrawSize,
           ],
           dt,
         );
@@ -826,8 +841,13 @@ export class Game {
     // result: gone for the grid shot, back before the lights go green.
     this.miniMap.view.alpha = 1 - blend;
     this.updateDriftFX();
-    this.boostFlame.update(p, this.worldScale, CAR_SIZE.player);
-    this.rivalBoostFlame.update(this.rival, this.worldScale, this.rivalSize);
+    this.boostFlame.update(p, dt, this.worldScale, CAR_SIZE.player);
+    // rivalDrawSizePx, not rivalSize -- the actual drawn body (in the
+    // same screen-pixel units this call expects), same reason the
+    // collision hull switched to rivalDrawSize. Sizing the exhaust off
+    // the wider undrawn box sat it noticeably outside stage 2/5's rivals,
+    // which draw at 0.55-0.57x their box.
+    this.rivalBoostFlame.update(this.rival, dt, this.worldScale, this.rivalDrawSizePx);
     this.contactFX.update([p, this.rival], dt, this.worldScale);
     this.finishFX.update(dt, W, H);
   }

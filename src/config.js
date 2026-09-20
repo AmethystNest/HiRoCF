@@ -99,18 +99,18 @@ export const NITRO = {
 /** Per-stage rival tuning, also carried over verbatim. */
 export const STAGES = {
   1: {
-    id: 1, name: 'STAGE 1', shortDesc: 'BEGINNER STAGE',
-    courseName: 'COURSE · SIMPLE CIRCUIT',
-    courseDesc: 'LONG STRAIGHTS / GENTLE CURVES / BIG CORNER',
+    id: 1, name: 'STAGE 1', shortDesc: '初心者向け',
+    courseName: 'コース・シンプルサーキット',
+    courseDesc: '長い直線 / 緩やかなカーブ / 大コーナー',
     rivalName: '悪魔のアイツ',
     roadHalf: 300, wallHalf: 410,
     rival: { maxSpeed: 710, accel: 250, turn: 2.25, sprite: 'devilz', block: false, weave: false, raceLine: true, cornerSlow: 0.22, holdOpeningStraight: true, finalLapBoostOnly: true },
     bestKey: 'topdownRacer_stage1_best_ms',
   },
   2: {
-    id: 2, name: 'STAGE 2', shortDesc: 'CITY STAGE',
-    courseName: 'COURSE · CITY CIRCUIT',
-    courseDesc: 'TIGHT STREETS / SWITCHBACKS / CITY BLOCKS',
+    id: 2, name: 'STAGE 2', shortDesc: '市街地ステージ',
+    courseName: 'コース・シティサーキット',
+    courseDesc: '狭い街路 / つづら折り / 市街区画',
     rivalName: 'クルドカー',
     roadHalf: 230, wallHalf: 320,
     playerPhysics: { wallInset: 2 },
@@ -119,9 +119,9 @@ export const STAGES = {
     bestKey: 'topdownRacer_stage2_best_ms',
   },
   3: {
-    id: 3, name: 'STAGE 3', shortDesc: 'MOUNTAIN PASS',
-    courseName: 'COURSE · IROHA SWITCHBACKS',
-    courseDesc: '8 HAIRPINS / SWITCHBACK CLIMB / VALLEY STRAIGHT',
+    id: 3, name: 'STAGE 3', shortDesc: '峠道',
+    courseName: 'コース・いろは坂',
+    courseDesc: 'ヘアピン8箇所 / つづら折りの登坂 / 渓谷ストレート',
     rivalName: '峠の走り屋',
     roadHalf: 190, wallHalf: 260,
     playerPhysics: {
@@ -175,9 +175,9 @@ export const STAGES = {
     bestKey: 'topdownRacer_stage3_best_ms',
   },
   4: {
-    id: 4, name: 'STAGE 4', shortDesc: 'HIGHWAY STAGE',
-    courseName: 'COURSE · HIGHWAY LOOP',
-    courseDesc: 'LONG STRAIGHTS / SWEEPERS / TOP SPEED',
+    id: 4, name: 'STAGE 4', shortDesc: '高速道路ステージ',
+    courseName: 'コース・高速ループ',
+    courseDesc: '長い直線 / 高速コーナー / 最高速勝負',
     rivalName: '高速の帝王',
     roadHalf: 360, wallHalf: 420,
     playerPhysics: { wallInset: 3, wallSpeedMul: 0.82 },
@@ -212,14 +212,14 @@ export const STAGES = {
     bestKey: 'topdownRacer_stage4_best_ms',
   },
   5: {
-    id: 5, name: 'STAGE 5', shortDesc: 'GRAND CIRCUIT',
-    courseName: 'COURSE · GRAND TOUR',
+    id: 5, name: 'STAGE 5', shortDesc: 'グランドサーキット',
+    courseName: 'コース・グランドツアー',
     // Describes the course it actually runs. Stage 5 shares stage 4's
     // expressway loop (see STAGE_PATHS) dressed as open country, so the
     // old "CITY + TOUGE + HIGHWAY / FULL MIX" was describing a course that
     // has never existed -- it was written for a stage that, in practice,
     // was silently running stage 1's beginner circuit.
-    courseDesc: 'CITY + TUNNEL + PASS + VIADUCT / EVERYTHING',
+    courseDesc: '市街+トンネル+峠+高架 / 全部入り',
     rivalName: 'ラスボス',
     roadHalf: 240, wallHalf: 320,
     // The last rival is deliberately NOT faster or dirtier than the player.
