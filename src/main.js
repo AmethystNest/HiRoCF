@@ -73,16 +73,18 @@ const SURFACE_PRESET_BY_STAGE = { 1: 'circuit', 2: 'city', 3: 'mountain', 4: 'hi
  * doing on stage 1 cut the end off it. START_CAM_MAX only caps how close
  * the solve may get.
  */
-const START_CAM_MAX = 2.4;
+const START_CAM_MAX = 3.0;
 const START_CAM_FROM = 1.75;
 const START_CAM_TO = 0.62;
 /**
  * Where both cars have to fit, as fractions of the screen: clear of the
  * side edges, below the countdown numeral, above the control pads. The
- * player sits at 0.62 of the height (the camera anchor), so the room
- * above it is the tight one.
+ * camera centres the pair in this box, so how close it can get is set by
+ * the box's half-size against the pair's half-spread -- not, as it was
+ * while the camera stayed pinned to the player, by the whole spread
+ * against whichever side had less room.
  */
-const START_CAM_BOX = { side: 0.04, top: 0.46, bottom: 0.90 };
+const START_CAM_BOX = { side: 0.04, top: 0.50, bottom: 0.88 };
 
 const SURFACE_SECTORS_BY_STAGE = {
   5: {
@@ -176,58 +178,55 @@ export class Game {
   }
 
   /**
-   * Camera multiplier for the pre-race presentation: close in on the grid
-   * while the VS card and the lights are up, and be back at the racing
-   * framing before the lights go green.
+   * How much of the pre-race framing is in effect: 1 while the grid is
+   * being shown, easing to 0 so the racing framing is back before the
+   * lights go green.
    *
    * Driven straight off the countdown rather than eased toward a target,
-   * so it ARRIVES: an exponential approach would still be pulling back as
-   * the car left the line. The value is continuous across the vs ->
-   * countdown -> racing handover, so nothing has to blend it.
+   * so it ARRIVES: an exponential approach would still be moving as the
+   * car left the line. Continuous across the vs -> countdown -> racing
+   * handover, so nothing has to blend it.
    */
-  startCameraZoom() {
+  startCameraBlend() {
     const race = this.race;
-    if (!race) return 1;
-    const wide = race.state === 'vs' ? 1 : race.state === 'countdown' ? null : 0;
-    if (wide === 0) return 1;
-    const close = this.gridFitZoom();
-    if (wide === 1) return close;
+    if (!race) return 0;
+    if (race.state === 'vs') return 1;
+    if (race.state !== 'countdown') return 0;
     const span = START_CAM_FROM - START_CAM_TO;
     const k = Math.max(0, Math.min(1, (START_CAM_FROM - race.countdown) / span));
     // ease-in-out, so the pull-back neither jerks off the mark nor
     // arrives with a bump
     const e = k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2;
-    return close + (1 - close) * e;
+    return 1 - e;
   }
 
   /**
-   * Closest the camera may sit and still hold both cars inside
-   * START_CAM_BOX.
+   * Where to point the pre-race camera and how close it may get: centred
+   * between the two cars, and as tight as START_CAM_BOX allows.
    *
-   * The camera pins the player to a fixed screen point and rotates the
-   * world so the player points up, so the rival's place on screen is its
-   * offset from the player resolved into that frame: the component along
-   * the player's heading goes up the screen, the perpendicular one across
-   * it.
+   * Centring on the pair rather than on the player is most of the zoom.
+   * Pinned to the player, the rival's whole offset has to fit on one side
+   * of the anchor and the anchor is not in the middle of the box, so the
+   * limit is set by the worst single direction. Centred, each car is only
+   * half the spread from the middle and the box is used symmetrically --
+   * on a two-car grid that is the difference between 1.5x and 2.3x.
    *
-   * Each car contributes the extent of its own oriented box in each of
-   * those two directions, not one radius for both. A car is half again as
-   * long as it is wide, and on a starting grid the two sit side by side
-   * with the long axis up the screen -- so the width is what has to fit
-   * across and the length is what has to fit up and down. Treating the
-   * length as a radius in both, which is the safe shortcut, inflates the
-   * across-the-screen demand by a third and gives back camera for nothing.
+   * Each car contributes the extent of its own ORIENTED box along each of
+   * the camera's axes, not one radius for both. A car is half again as
+   * long as it is wide, and on a grid the two sit side by side with the
+   * long axis up the screen -- so width is what has to fit across and
+   * length is what has to fit up and down.
    */
-  gridFitZoom() {
+  gridFraming(W, H) {
     const p = this.player, r = this.rival;
-    if (!p || !r) return 1;
-    const { width: W, height: H } = this.app.screen;
+    const idle = { x: p?.x ?? 0, y: p?.y ?? 0, anchorY: H * 0.62, zoom: 1 };
+    if (!p || !r) return idle;
+
     const dx = r.x - p.x, dy = r.y - p.y;
     const ca = Math.cos(p.angle), sa = Math.sin(p.angle);
     const forward = dx * ca + dy * sa;
     const across = dy * ca - dx * sa;
 
-    // Half-extents of an oriented box, in the camera's own axes.
     const half = (size, angle) => {
       const c = Math.abs(Math.cos(angle)), s2 = Math.abs(Math.sin(angle));
       const w = size.w * this.worldScale * 0.5, h = size.h * this.worldScale * 0.5;
@@ -236,23 +235,20 @@ export class Game {
     const me = half(CAR_SIZE.player, 0);
     const them = half(this.rivalSize ?? CAR_SIZE.player, r.angle - p.angle);
 
-    const anchorY = H * 0.62;
-    const roomSide = W * (0.5 - START_CAM_BOX.side);
-    const roomUp = anchorY - H * START_CAM_BOX.top;
-    const roomDown = H * START_CAM_BOX.bottom - anchorY;
-    // Each entry is "screen room available" over "world units that have to
-    // fit in it", for one car against one edge. The smallest binds.
-    const fits = [
-      roomSide / me.across,
-      roomUp / me.up,
-      roomDown / me.up,
-      roomSide / (Math.abs(across) + them.across),
-      roomUp / Math.max(1e-3, forward + them.up),
-      roomDown / Math.max(1e-3, them.up - forward),
-    ];
+    // From the midpoint, each car sits half the spread out, plus its own
+    // extent. The bigger of the two is what has to fit.
+    const needAcross = Math.abs(across) / 2 + Math.max(me.across, them.across);
+    const needUp = Math.abs(forward) / 2 + Math.max(me.up, them.up);
+    const roomAcross = W * (0.5 - START_CAM_BOX.side);
+    const roomUp = H * (START_CAM_BOX.bottom - START_CAM_BOX.top) / 2;
 
-    const scale = Math.min(...fits);
-    return Math.max(1, Math.min(START_CAM_MAX, scale / this.zoom));
+    const scale = Math.min(roomAcross / needAcross, roomUp / needUp);
+    return {
+      x: (p.x + r.x) / 2,
+      y: (p.y + r.y) / 2,
+      anchorY: H * (START_CAM_BOX.top + START_CAM_BOX.bottom) / 2,
+      zoom: Math.max(1, Math.min(START_CAM_MAX, scale / this.zoom)),
+    };
   }
 
   cycleZoom() {
@@ -725,13 +721,28 @@ export class Game {
     const shakeX = p.shake ? (Math.random() - 0.5) * p.shake : 0;
     const shakeY = p.shake ? (Math.random() - 0.5) * p.shake : 0;
     const { width: W, height: H } = this.app.screen;
-    this.world.pivot.set(p.x, p.y);
-    this.world.position.set(W / 2 + shakeX, H * 0.62 + shakeY);
+    // Pre-race, the camera slides off the player and onto the midpoint of
+    // the two cars, and the anchor slides to the middle of the box they
+    // have to fit in. Both return to the racing framing on the same blend
+    // as the zoom, so the three move as one.
+    const blend = this.startCameraBlend();
+    let pivotX = p.x, pivotY = p.y, anchorY = H * 0.62;
+    this.camZoom = 1;
+    if (blend > 0) {
+      const grid = this.gridFraming(W, H);
+      pivotX += (grid.x - p.x) * blend;
+      pivotY += (grid.y - p.y) * blend;
+      anchorY += (grid.anchorY - anchorY) * blend;
+      this.camZoom += (grid.zoom - 1) * blend;
+    }
+    this.world.pivot.set(pivotX, pivotY);
+    this.world.position.set(W / 2 + shakeX, anchorY + shakeY);
     this.world.rotation = -(p.angle + Math.PI / 2);
-    this.camZoom = this.startCameraZoom();
     this.world.scale.set(this.zoom * this.camZoom);
 
-    this.cullProps(p.x, p.y, W, H);
+    // Cull about whatever the camera is actually looking at, not the
+    // player -- they are not the same point while the grid is in shot.
+    this.cullProps(pivotX, pivotY, W, H);
     this.miniMap.update(W, p, this.rival);
     this.updateDriftFX();
     this.boostFlame.update(p, this.worldScale, CAR_SIZE.player);
