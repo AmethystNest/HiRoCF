@@ -16,6 +16,10 @@ const root = new URL('..', import.meta.url).pathname;
 const src = readFileSync(join(root, 'index.html'), 'utf8');
 
 const style = src.slice(src.indexOf('<style>'), src.indexOf('</style>') + 8);
+// The repo page puts state on <body> (the control pads start hidden), and
+// this build writes its own body tag, so carry the attributes across or
+// that state is silently dropped in the standalone only.
+const bodyTag = /<body([^>]*)>/.exec(src)?.[1] ?? '';
 const bodyStart = src.indexOf('<div id="app"></div>');
 const scriptStart = src.indexOf('<script type="module">');
 const scriptEnd = src.indexOf('</script>', scriptStart) + '</script>'.length;
@@ -50,6 +54,7 @@ const bundle = result.outputFiles[0].text;
 
 const out = `<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"><title>HiRoCF Top-Down Racer</title>
 ${style}
+</head><body${bodyTag}>
 ${body}
 <script>${bundle}</script>
 </body></html>

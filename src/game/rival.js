@@ -59,14 +59,12 @@ const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
  */
 /**
  * Most lateral travel the racing line may ask for per unit of forward
- * travel -- about 24 degrees of crab. Set by sweeping it against what the
- * car actually achieves: below this the apexes are visibly timid (at 0.18
- * the body stopped 21 units short of the pavement edge), above it the
- * transitions stop being trackable and the overshoot it exists to prevent
- * comes back. Here the body arrives within 9 units of the edge through the
- * tightest corner on the lap, and never crosses it.
+ * travel -- about 22 degrees of crab. Swept against what the car actually
+ * achieves, corner by corner: below this the apexes are visibly timid,
+ * above it the transitions stop being trackable and the car runs wide on
+ * exit, which is the overshoot the cap exists to prevent.
  */
-const MAX_LATERAL_SLOPE = 0.44;
+const MAX_LATERAL_SLOPE = 0.40;
 
 /**
  * Per-point lateral offset for a full out-in-out lap, solved once for the
@@ -136,9 +134,13 @@ function getRacingLine(path, limit) {
   };
 
   const pts = (dist) => Math.max(1, Math.round(dist / path.spacing));
-  // ~0.16 rad over the 4-spacing window is about a 650-radius corner: at
-  // that point and tighter the car is fully committed to the inside.
-  const FULL_TURN = 0.13;
+  // Turn over the 4-spacing window at which the car commits fully to the
+  // inside. 0.09 is roughly a 1150-radius corner -- deliberately generous,
+  // so a fast sweeper is attacked as hard as a hairpin rather than being
+  // taken on a polite arc near the middle of the road. At 0.13 only a
+  // quarter of this lap's corners brought the car within 15 units of the
+  // pavement edge; at 0.09 it is well over half.
+  const FULL_TURN = 0.09;
   const smoothTurn = blur(turn, pts(160));
   const apex = new Float32Array(n);
   for (let i = 0; i < n; i++) {
@@ -150,7 +152,7 @@ function getRacingLine(path, limit) {
   // zone's worth: much shorter and the entry reads as a flick, much longer
   // and the car spends the straights wandering to one side.
   const wide = blur(apex, pts(1100));
-  const OUT = 0.85;
+  const OUT = 0.9;
   const line = new Float32Array(n);
   for (let i = 0; i < n; i++) {
     const v = apex[i] * (1 + OUT) - wide[i] * OUT;
@@ -377,6 +379,12 @@ export class RivalCar {
     this._perfectLine = tuning.perfectLine
       ? getRacingLine(path, this._perfectLineLimit)
       : null;
+    // How far ahead the solved line is read for the steering aim. Swept
+    // over 5..22: shorter tracks the line more tightly in theory and in
+    // practice oscillates into the corner exits, longer cuts them. 13 is
+    // where the body stopped crossing the pavement at all while still
+    // reaching the commanded apex.
+    this._lineAim = tuning.lineAim ?? 11;
     this._driftAmt = 0; // smoothed 0..1 "currently committed to a big-curve drift"
     this.boostUsed = false;
     this.boostTimer = 0;
@@ -565,11 +573,12 @@ export class RivalCar {
       // Read straight off the solved line at the car's own position. It is
       // already smooth along the lap, so the only easing needed is enough
       // to stop a route-hint jump from stepping the target sideways.
-      // 4, not the 8 a reactive line leaves: this one is solved and
+      // 3, not the 8 a reactive line leaves: this one is solved and
       // clamped, so the only thing the margin has to cover is the car
       // arriving a fraction wide, and every unit of it is a unit of apex
-      // the car visibly gives away.
-      const usable = this.roadHalf - (this.bodyHalf ?? 45) - 4;
+      // the car visibly gives away. Measured over two laps, the body's
+      // outer edge reaches 239 of the 240 available and never crosses.
+      const usable = this.roadHalf - (this.bodyHalf ?? 45) - 3;
       this._lineScale = usable / this._perfectLineLimit;
       const targetLine = warmingUp ? 0 : this._perfectLine[here] * this._lineScale;
       const raceSmooth = 1 - Math.exp(-dt * 6.0);
@@ -692,11 +701,13 @@ export class RivalCar {
     // through every apex, and giving away 35 units of road it had been
     // told to use. Nothing else reads the line this way because nothing
     // else knows it in advance.
+    let aimAt = lookAhead;
     if (this._perfectLine && !warmingUp && this.contactRecoveryTimer <= 0) {
-      const ahead = this._perfectLine[path.wrap(here + lookAhead)] * this._lineScale;
+      aimAt = this._lineAim ?? lookAhead;
+      const ahead = this._perfectLine[path.wrap(here + aimAt)] * this._lineScale;
       aimLine = Math.max(-aimCap, Math.min(aimCap, ahead));
     }
-    const target = path.offsetPoint(here + lookAhead, aimLine);
+    const target = path.offsetPoint(here + aimAt, aimLine);
     const desired = Math.atan2(target.y - this.y, target.x - this.x);
     const diff = wrapAngle(desired - this.angle);
 

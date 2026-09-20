@@ -69,8 +69,15 @@
      over a third of a second. */
   body.pre-race .controls{pointer-events:none}
   body.pre-race .controls .side{pointer-events:none}
-  body.pre-race .controls button{opacity:0;transform:translateY(150%)}
-  body.pre-race .controls button{transition-delay:0s}
+  /* `transition:none` on the way IN is the point: the pads are simply not
+     there, they are never seen going away. Without it the page opens with
+     them up, the first frame of the countdown pushes them down, and the
+     start reads as the controls leaving and coming back. The body carries
+     this class in the markup so the very first painted frame is already
+     without them. Only the rise animates, from the rule above. */
+  body.pre-race .controls button{
+    opacity:0;transform:translateY(150%);
+    transition:none;transition-delay:0s}
   .controls .side{display:flex;gap:9px;pointer-events:auto}
   /* Glass pad rather than a flat translucent square: a top-lit gradient over
      a dark blurred base, a hairline rim, and an inset highlight along the top
@@ -318,7 +325,7 @@
 
 </style>
 </head>
-<body>
+<body class="pre-race">
 <div id="app"></div>
 
 <div class="hud">
@@ -512,7 +519,7 @@
     };
     const clearBanners=()=>{
       lapPopup.classList.remove('show','final');
-      document.body.classList.remove('final-lap','pre-race');
+      document.body.classList.remove('final-lap');
       resetStart();
     };
     app.ticker.add(ticker=>{
