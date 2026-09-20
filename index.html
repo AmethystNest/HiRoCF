@@ -28,7 +28,12 @@
     text-shadow:0 2px 5px rgba(0,0,0,.75)}
   .hud .top{position:absolute;top:max(10px,env(safe-area-inset-top));left:14px;right:14px;
     display:flex;justify-content:space-between;align-items:flex-start;font-size:14px}
-  .hud .speed{position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + var(--ctrlH) + 40px);
+  /* Clear of the WHOLE nitro block, not just of its top bar. The gauge
+     stack below is 46px tall (cells + burst meter + label) starting
+     14px above the pads, so anything under +60 here lands on top of it
+     -- at +40 the speed readout was sitting directly across the nitro
+     cells and neither could be read. */
+  .hud .speed{position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + var(--ctrlH) + 68px);
     text-align:center;font-size:22px;letter-spacing:.02em}
   .hud .speed small{font-size:11px;opacity:.75;margin-left:4px;font-weight:600}
   .hud .nitroWrap{position:absolute;left:50%;transform:translateX(-50%);
@@ -206,8 +211,20 @@
     pointer-events:none;z-index:15;color:#fff;font-weight:800;text-align:center}
   .overlay[hidden]{display:none}
 
+  /* Fades both ways, rather than the hard [hidden] flip the other
+     overlays use: this one is the opening title of the race, and it is
+     on screen alone with the two cars, so it is the one overlay whose
+     arrival and exit are part of the show. visibility rides the same
+     transition, delayed on the way out so it only cuts once the fade
+     has finished. */
+  #vsOverlay{opacity:0;visibility:hidden;
+    transition:opacity .34s ease,visibility 0s linear .34s}
+  #vsOverlay.vis{opacity:1;visibility:visible;
+    transition:opacity .3s ease,visibility 0s}
   #vsCard{background:rgba(10,13,17,.82);border:1px solid rgba(255,255,255,.14);
-    border-radius:20px;padding:26px 34px;backdrop-filter:blur(6px)}
+    border-radius:20px;padding:26px 34px;backdrop-filter:blur(6px);
+    transform:scale(.94);transition:transform .34s cubic-bezier(.16,1,.3,1)}
+  #vsOverlay.vis #vsCard{transform:none}
   #vsCard .stage{font-size:13px;opacity:.7;letter-spacing:.14em;margin-bottom:6px}
   #vsCard .rival{font-size:26px}
   /* VS crackles rather than sitting still -- a stepped (not eased)
@@ -283,10 +300,20 @@
   /* reserved even when empty, so clearing the text on GO does not shunt
      the numeral up the screen at the moment it should be holding still */
   #startSignal .cue{min-height:2.1em;display:flex;align-items:center}
-  /* one full-screen blink on the green */
+  /* one full-screen blink on the green, then a cooler wash that lingers
+     a beat behind it -- the tail of the same hit the side lightning
+     (render/boltfx.js) strikes across the screen on that frame */
   #signalOverlay.go::after{content:'';position:absolute;inset:0;background:#eaf7ff;
     animation:goFlash .34s ease-out forwards;pointer-events:none}
   @keyframes goFlash{from{opacity:.55}to{opacity:0}}
+  #signalOverlay.go::before{content:'';position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(120% 70% at 50% 46%,rgba(134,228,255,.42),rgba(134,228,255,0) 70%);
+    animation:goWash .55s ease-out forwards}
+  @keyframes goWash{from{opacity:1}to{opacity:0}}
+  /* the gantry and numeral fade up rather than cutting in */
+  #startSignal{animation:signalIn .3s ease-out}
+  @keyframes signalIn{from{opacity:0;transform:translateY(-16vh) scale(.94)}
+    to{opacity:1;transform:translateY(-16vh) scale(1)}}
 
   /* --- result --------------------------------------------------------- */
   /* Anchored to the top rather than centred like the other overlays: the
@@ -619,7 +646,7 @@
 
 <div id="loading" class="hide">LOADING…</div>
 
-<div class="overlay" id="vsOverlay" hidden>
+<div class="overlay" id="vsOverlay">
   <div id="vsCard">
     <div class="stage" id="vsStage">STAGE 1</div>
     <div class="rival" id="vsRival">悪魔のアイツ</div>
@@ -828,7 +855,7 @@
         lapEl.textContent=`LAP ${lap}/${race.totalLaps}`;
         posEl.textContent=`POS ${race.positionOf(game.playerEntry)}/2`;
         timeEl.textContent=fmtTime(race.time);
-        vsOverlay.hidden=race.state!=='vs';
+        vsOverlay.classList.toggle('vis',race.state==='vs');
         signalOverlay.hidden=race.state!=='countdown';
         if(race.state==='countdown')paintStart(race.countdown);
         // Pads are away for the VS card and most of the countdown, and rise

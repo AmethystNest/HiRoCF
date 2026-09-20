@@ -19,32 +19,13 @@
  * to a letterbox.
  */
 import { Container, Graphics, Text } from '../pixi.js';
+import { boltPath } from './boltfx.js';
 
 /** Cubic ease-out: fast arrival, soft landing. Used by every entrance. */
 const easeOut = (t) => 1 - (1 - t) ** 3;
 const clamp01 = (t) => (t < 0 ? 0 : t > 1 ? 1 : t);
 /** 0 before `from`, eased 0..1 across `dur`, 1 after. */
 const phase = (t, from, dur) => easeOut(clamp01((t - from) / dur));
-
-/**
- * A jagged path from (x0,y0) to (x1,y1) -- straight-line displacement
- * jittered perpendicular to its own direction, more so in the middle
- * than at either end, which is what keeps a lightning bolt's start and
- * finish looking chosen while the middle looks struck.
- */
-function boltPath(x0, y0, x1, y1, segments, jitter) {
-  const pts = [[x0, y0]];
-  const dx = x1 - x0, dy = y1 - y0;
-  const nx = -dy, ny = dx;
-  const nlen = Math.hypot(nx, ny) || 1;
-  for (let i = 1; i < segments; i++) {
-    const t = i / segments;
-    const off = (Math.random() - 0.5) * jitter * (1 - Math.abs(t - 0.5) * 1.3);
-    pts.push([x0 + dx * t + (nx / nlen) * off, y0 + dy * t + (ny / nlen) * off]);
-  }
-  pts.push([x1, y1]);
-  return pts;
-}
 
 export function buildFinishFX() {
   const view = new Container();

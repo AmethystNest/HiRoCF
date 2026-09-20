@@ -5,6 +5,7 @@ import { buildSurface, surfaceExtent, buildRampStructure, buildTunnelStructure, 
 import { buildProps, buildGroundPatches, buildSideStreets } from './render/props.js';
 import { buildMiniMap } from './render/minimap.js';
 import { buildFinishFX } from './render/finishfx.js';
+import { buildSideBolts } from './render/boltfx.js';
 import { buildBoostFlame } from './render/boostfx.js';
 import { buildContactFX } from './render/contactfx.js';
 import { LAYOUTS } from './track/layouts.js';
@@ -99,25 +100,18 @@ const FINISH_CAM_EASE = 0.9;
 const START_CAM_BOX = { side: 0.04, top: 0.50, bottom: 0.88 };
 /** Clear air between the two cars on the starting grid, per side. */
 const GRID_MARGIN = 30;
-/** Below this, fitting both cars would mean pulling back to roughly the
- *  ordinary racing zoom or wider -- the rival is a lap or more away, and
- *  the "shot" would be an empty stretch of road between two dots rather
- *  than a finish. finishFraming gives up on the pair at that point and
- *  frames the player alone instead. */
+/** Below this, fitting the rival in as well would mean pulling back to
+ *  roughly the ordinary racing zoom or wider -- it is a lap or more
+ *  away, and the "shot" would be an empty stretch of road between two
+ *  dots rather than a finish. solveFinishZoom gives up on the pair at
+ *  that point and frames the player alone. Safe as a hard cutoff
+ *  because the solve runs ONCE, on the frame the line is crossed --
+ *  evaluating it per frame is what used to make a rival drifting across
+ *  the threshold pop the camera. */
 const FINISH_CAM_MIN_ZOOM = 1.3;
 /** Zoom used for that solo framing -- a deliberate fixed close-up on the
  *  car that just crossed the line, not a solve like the grid's. */
 const FINISH_CAM_SOLO_ZOOM = 2.0;
-/** The pair-fit zoom solve is handed off to the fixed solo framing over
- *  this band, not at a single cutoff -- a hard "if" here used to pop
- *  both the zoom and the pan target the instant the rival's distance
- *  crossed FINISH_CAM_MIN_ZOOM, which is exactly the case a close
- *  finish spends the most time hovering around (the trailing car is
- *  still closing the gap after the leader crosses, so the fit solve
- *  keeps sliding past the old cutoff and back). Blended, that same
- *  drift just eases the shot from "both cars" to "the one that
- *  finished" instead of snapping it. */
-const FINISH_CAM_BLEND_BAND = 0.5;
 /**
  * How solid the rival is left while it passes under a deck the player is
  * not under. Not 0: the point is to say "this one is below the bridge",
@@ -203,8 +197,13 @@ export class Game {
 
     this.finishFX = buildFinishFX();
     app.stage.addChild(this.finishFX.view);
+    // Under the finish effect, so its banner and title still read over
+    // the top of a strike that happens on the same frame.
+    this.sideBolts = buildSideBolts();
+    app.stage.addChildAt(this.sideBolts.view, app.stage.getChildIndex(this.finishFX.view));
     this._prevRaceState = null;
     this._finishCamTimer = 0;
+    this._finishZoom = FINISH_CAM_SOLO_ZOOM;
   }
 
   /**
@@ -316,42 +315,54 @@ export class Game {
   }
 
   /**
-   * Where to point the post-race camera. Cannot reuse gridFraming: that
-   * solve assumes the two cars are still side by side at grid spacing,
-   * true by construction before the start but not after it -- the rival
-   * can be anywhere from right on the player's bumper to a lap behind.
-   * Sizing the box off their REAL separation instead, and centring on
-   * the player rather than the pair's midpoint, means the shot degrades
-   * to "close up on the car that just finished" instead of panning the
-   * camera out into empty road looking for a rival that isn't there.
+   * How close the post-race camera gets, solved ONCE on the frame the
+   * line is crossed and then held (see this._finishZoom). Both cars if
+   * the rival is near enough for that to still be a close-up, otherwise
+   * a fixed close-up on the player alone.
+   *
+   * Solving it once is what makes the shot hold still. Re-solving per
+   * frame -- which is what this did -- means the answer keeps changing
+   * as the trailing car goes on driving, so the zoom crawls for as long
+   * as the result card is up.
+   *
+   * Measured from the PLAYER, not from the pair's midpoint: the camera
+   * stays pinned to the car that just finished (see finishFraming), so
+   * the rival's whole offset has to fit on one side of the anchor
+   * rather than half of it on each.
    */
-  finishFraming(W, H) {
+  solveFinishZoom(W, H) {
     const p = this.player, r = this.rival;
-    const anchorY = H * (START_CAM_BOX.top + START_CAM_BOX.bottom) / 2;
-    if (!p) return { x: 0, y: 0, anchorY, zoom: FINISH_CAM_SOLO_ZOOM };
-    if (!r) return { x: p.x, y: p.y, anchorY, zoom: FINISH_CAM_SOLO_ZOOM };
-
+    if (!p || !r) return FINISH_CAM_SOLO_ZOOM;
     const carW = CAR_SIZE.player.w * this.worldScale;
     const carH = CAR_SIZE.player.h * this.worldScale;
     const roomAcross = W * (0.5 - START_CAM_BOX.side);
     const roomUp = H * (START_CAM_BOX.bottom - START_CAM_BOX.top) / 2;
-    const needAcross = Math.abs(r.x - p.x) / 2 + carW / 2 + GRID_MARGIN;
-    const needUp = Math.abs(r.y - p.y) / 2 + carH / 2 + GRID_MARGIN;
-    const scale = Math.min(roomAcross / needAcross, roomUp / needUp);
-    const pairZoom = Math.max(1, Math.min(START_CAM_MAX, scale / this.zoom));
+    const needAcross = Math.abs(r.x - p.x) + carW / 2 + GRID_MARGIN;
+    const needUp = Math.abs(r.y - p.y) + carH / 2 + GRID_MARGIN;
+    const pairZoom = Math.min(roomAcross / needAcross, roomUp / needUp) / this.zoom;
+    return pairZoom >= FINISH_CAM_MIN_ZOOM
+      ? Math.min(START_CAM_MAX, pairZoom)
+      : FINISH_CAM_SOLO_ZOOM;
+  }
 
-    // How much of the shot is "both cars" vs "the one that finished",
-    // as a continuous function of the fit zoom rather than a branch on
-    // it -- see FINISH_CAM_BLEND_BAND. 1 at/above MIN_ZOOM (pure pair),
-    // 0 at MIN_ZOOM - BAND or below (pure solo).
-    const pairT = easeInOutCubic(
-      Math.max(0, Math.min(1, (pairZoom - (FINISH_CAM_MIN_ZOOM - FINISH_CAM_BLEND_BAND)) / FINISH_CAM_BLEND_BAND)),
-    );
+  /**
+   * Where to point the post-race camera: at the car that just crossed,
+   * full stop. Pinning the pivot to the player is what keeps the shot
+   * centred and still -- the camera tracks the one car it is about, and
+   * nothing the rival does afterwards can pull the frame off it.
+   *
+   * Cannot reuse gridFraming here: that one centres on the midpoint of
+   * the pair and sizes itself for two cars side by side at grid
+   * spacing, which is true by construction before the start and false
+   * immediately after it.
+   */
+  finishFraming(W, H) {
+    const p = this.player;
     return {
-      x: p.x + ((p.x + r.x) / 2 - p.x) * pairT,
-      y: p.y + ((p.y + r.y) / 2 - p.y) * pairT,
-      anchorY,
-      zoom: FINISH_CAM_SOLO_ZOOM + (pairZoom - FINISH_CAM_SOLO_ZOOM) * pairT,
+      x: p?.x ?? 0,
+      y: p?.y ?? 0,
+      anchorY: H * (START_CAM_BOX.top + START_CAM_BOX.bottom) / 2,
+      zoom: this._finishZoom,
     };
   }
 
@@ -372,8 +383,10 @@ export class Game {
     this.world.removeChildren();
     if (this.miniMap) { this.app.stage.removeChild(this.miniMap.view); this.miniMap = null; }
     this.finishFX.reset();
+    this.sideBolts.reset();
     this._prevRaceState = null;
     this._finishCamTimer = 0;
+    this._finishZoom = FINISH_CAM_SOLO_ZOOM;
     this._wasBoosting = { player: false, rival: false };
     this._scrapeSfxAccum = { player: 0, rival: 0 };
     this.stageId = stageId;
@@ -875,8 +888,31 @@ export class Game {
         if ('_driftAmt' in car) car._driftAmt = 0;
       }
 
+      // Locked in here, on the one frame the line is crossed, and held
+      // for the whole post-race shot -- see solveFinishZoom.
+      this._finishZoom = this.solveFinishZoom(this.app.screen.width, this.app.screen.height);
+
       const place = this.race.positionOf(this.playerEntry);
       this.finishFX.trigger(place, this.app.screen.width, this.app.screen.height);
+      // Graded like the rest of the finish: gold and wide for a win,
+      // cold steel and shorter for anything else.
+      const won = place === 1;
+      this.sideBolts.strike(this.app.screen.width, this.app.screen.height, {
+        perSide: won ? 4 : 2,
+        reach: won ? 0.56 : 0.42,
+        focusY: 0.42,
+        life: won ? 0.52 : 0.4,
+        core: won ? 0xfffaf0 : 0xdce8ef,
+        glow: won ? 0xffd64a : 0x7d94a6,
+      });
+    }
+    // The lights going green gets the same strike, cool-toned -- the
+    // two moments the whole screen is about one event.
+    if (this.race.state === 'racing' && this._prevRaceState === 'countdown') {
+      this.sideBolts.strike(this.app.screen.width, this.app.screen.height, {
+        perSide: 3, reach: 0.5, focusY: 0.44, life: 0.42,
+        core: 0xf4ffff, glow: 0x86e4ff,
+      });
     }
     this._prevRaceState = this.race.state;
     // Drives startCameraBlend's 'finished' branch -- elapsed time since
@@ -996,6 +1032,7 @@ export class Game {
     this.rivalBoostFlame.update(this.rival, dt, this.worldScale, this.rivalDrawSizePx);
     this.contactFX.update([p, this.rival], dt, this.worldScale);
     this.finishFX.update(dt, W, H);
+    this.sideBolts.update(dt, W, H);
   }
 
   /**
