@@ -129,10 +129,12 @@ export class Game {
     app.stage.addChild(this.world);
 
     this.input = { left: false, right: false, brake: false };
-    // Three camera distances. Level 0 is the existing/current framing
-    // (closest); levels 1 and 2 progressively pull the camera back.
+    // Three camera distances. Level 0 is the existing/original framing;
+    // levels 1 and 2 progressively magnify it -- each is a multiplier on
+    // `zoom`, which IS the world's on-screen scale (see world.scale.set
+    // below), so a bigger number here is a closer view, not a further one.
     this.baseZoom = Math.max(0.28, Math.min(0.42, app.screen.width / 1080));
-    this.zoomLevels = [1.00, 1.15, 1.30];
+    this.zoomLevels = [1.00, 1.15, 2.3];
     this.zoomLevel = 0;
     this.zoom = this.baseZoom * this.zoomLevels[this.zoomLevel];
     // Presentation-only camera multiplier, applied to world.scale and to
@@ -670,14 +672,26 @@ export class Game {
     }
     this.race.update(dt);
 
-    // Fade everything overhead while the player is underneath it, so the
-    // car stays visible where the course crosses over itself. What fades,
-    // and how far, is set up in loadStage as this._deckFade.
+    // Fade everything overhead while a car is underneath it, so it stays
+    // visible where the course crosses over itself. What fades, and how
+    // far, is set up in loadStage as this._deckFade.
     // Eased rather than switched, and faster going out than coming back:
     // arriving under a deck that is still fading is the case that loses the
     // car, while it re-appearing over a beat behind reads as natural.
+    //
+    // Checked for the rival too, not just the player -- with only the
+    // player's position gating it, the rival passing underneath alone (the
+    // player elsewhere on the lap) left the deck fully opaque over it, so
+    // the rival visibly rode the bridge deck instead of disappearing under
+    // it. One shared boolean is correct here because a stage has exactly
+    // one deck's worth of fading layers in `_deckFade`; if a future course
+    // ever stacks two independent crossings this will need to fade them
+    // separately.
     if (this._deckGrid && this._deckFade) {
-      const under = (p.zLevel ?? 0) < 2 && this.underDeck(p.x, p.y, p._routeHint ?? 0);
+      const playerUnder = (p.zLevel ?? 0) < 2 && this.underDeck(p.x, p.y, p._routeHint ?? 0);
+      const rivalUnder = (this.rival.zLevel ?? 0) < 2
+        && this.underDeck(this.rival.x, this.rival.y, this.rival._routeHint ?? 0);
+      const under = playerUnder || rivalUnder;
       const k = 1 - Math.exp(-dt * (under ? 16 : 7));
       for (const [layer, floor] of this._deckFade) {
         if (!layer) continue;
