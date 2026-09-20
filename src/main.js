@@ -99,6 +99,15 @@ const FINISH_CAM_EASE = 0.9;
 const START_CAM_BOX = { side: 0.04, top: 0.50, bottom: 0.88 };
 /** Clear air between the two cars on the starting grid, per side. */
 const GRID_MARGIN = 30;
+/** Below this, fitting both cars would mean pulling back to roughly the
+ *  ordinary racing zoom or wider -- the rival is a lap or more away, and
+ *  the "shot" would be an empty stretch of road between two dots rather
+ *  than a finish. finishFraming gives up on the pair at that point and
+ *  frames the player alone instead. */
+const FINISH_CAM_MIN_ZOOM = 1.3;
+/** Zoom used for that solo framing -- a deliberate fixed close-up on the
+ *  car that just crossed the line, not a solve like the grid's. */
+const FINISH_CAM_SOLO_ZOOM = 2.0;
 /**
  * How solid the rival is left while it passes under a deck the player is
  * not under. Not 0: the point is to say "this one is below the bridge",
@@ -293,6 +302,44 @@ export class Game {
       y: (p.y + r.y) / 2,
       anchorY: H * (START_CAM_BOX.top + START_CAM_BOX.bottom) / 2,
       zoom: Math.max(1, Math.min(START_CAM_MAX, scale / this.zoom)),
+    };
+  }
+
+  /**
+   * Where to point the post-race camera. Cannot reuse gridFraming: that
+   * solve assumes the two cars are still side by side at grid spacing,
+   * true by construction before the start but not after it -- the rival
+   * can be anywhere from right on the player's bumper to a lap behind.
+   * Sizing the box off their REAL separation instead, and centring on
+   * the player rather than the pair's midpoint, means the shot degrades
+   * to "close up on the car that just finished" instead of panning the
+   * camera out into empty road looking for a rival that isn't there.
+   */
+  finishFraming(W, H) {
+    const p = this.player, r = this.rival;
+    const anchorY = H * (START_CAM_BOX.top + START_CAM_BOX.bottom) / 2;
+    const solo = { x: p?.x ?? 0, y: p?.y ?? 0, anchorY, zoom: FINISH_CAM_SOLO_ZOOM };
+    if (!p) return solo;
+    if (!r) return solo;
+
+    const carW = CAR_SIZE.player.w * this.worldScale;
+    const carH = CAR_SIZE.player.h * this.worldScale;
+    const roomAcross = W * (0.5 - START_CAM_BOX.side);
+    const roomUp = H * (START_CAM_BOX.bottom - START_CAM_BOX.top) / 2;
+    const needAcross = Math.abs(r.x - p.x) / 2 + carW / 2 + GRID_MARGIN;
+    const needUp = Math.abs(r.y - p.y) / 2 + carH / 2 + GRID_MARGIN;
+    const scale = Math.min(roomAcross / needAcross, roomUp / needUp);
+    const pairZoom = scale / this.zoom;
+
+    // Worth widening for the rival only while the result is still a
+    // respectable close-up. Below that, fall back to the fixed solo shot
+    // rather than let the framing get looser the further behind they are.
+    if (pairZoom < FINISH_CAM_MIN_ZOOM) return solo;
+    return {
+      x: (p.x + r.x) / 2,
+      y: (p.y + r.y) / 2,
+      anchorY,
+      zoom: Math.max(1, Math.min(START_CAM_MAX, pairZoom)),
     };
   }
 
@@ -908,7 +955,7 @@ export class Game {
     let pivotX = p.x, pivotY = p.y, anchorY = H * 0.62;
     this.camZoom = 1;
     if (blend > 0) {
-      const grid = this.gridFraming(W, H);
+      const grid = this.race.state === 'finished' ? this.finishFraming(W, H) : this.gridFraming(W, H);
       pivotX += (grid.x - p.x) * blend;
       pivotY += (grid.y - p.y) * blend;
       anchorY += (grid.anchorY - anchorY) * blend;

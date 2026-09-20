@@ -34,23 +34,47 @@
   .hud .nitroWrap{position:absolute;left:50%;transform:translateX(-50%);
     bottom:calc(env(safe-area-inset-bottom) + var(--ctrlH) + 14px);
     width:min(54vw,238px)}
-  .hud .nitroCells{display:flex;gap:5px}
-  .hud .nitroCell{flex:1;height:9px;border-radius:5px;background:rgba(255,255,255,.13);
-    box-shadow:inset 0 0 0 1px rgba(255,255,255,.14);overflow:hidden}
+  /* A glass gauge housing rather than bare bars floating on the road --
+     same top-lit-glass family as the buttons/pads, so the meter reads as
+     part of the instrument cluster instead of a stray HUD widget. */
+  .hud .nitroCells{display:flex;gap:6px;padding:5px 6px;border-radius:10px;
+    background:radial-gradient(120% 160% at 50% -30%, rgba(255,255,255,.10), rgba(255,255,255,.015) 60%),
+               rgba(10,13,17,.34);
+    border:1px solid rgba(255,255,255,.14);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.10),inset 0 -2px 5px rgba(0,0,0,.3);
+    backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
+  .hud .nitroCell{position:relative;flex:1;height:10px;border-radius:4px;
+    background:rgba(255,255,255,.08);
+    box-shadow:inset 0 1px 2px rgba(0,0,0,.5),inset 0 0 0 1px rgba(255,255,255,.10);
+    overflow:hidden}
   .hud .nitroCell i{display:block;height:100%;transform-origin:left center;transform:scaleX(0);
-    background:linear-gradient(90deg,#2f9ae8,#7fe6ff)}
-  .hud .nitroCell.full i{background:linear-gradient(90deg,#54c8ff,#c2f7ff);
-    box-shadow:0 0 12px rgba(120,220,255,.85)}
+    background:linear-gradient(90deg,#1f7fc4,#2f9ae8 45%,#7fe6ff)}
+  /* A fixed diagonal sheen over the fill -- reads as a glossy, lit bar
+     rather than a flat rectangle, the same trick the button glass uses,
+     just linear instead of radial since the cell is so thin. */
+  .hud .nitroCell i::after{content:'';position:absolute;inset:0;
+    background:linear-gradient(180deg,rgba(255,255,255,.55),rgba(255,255,255,0) 55%)}
+  .hud .nitroCell.full i{background:linear-gradient(90deg,#3fb2ff,#54c8ff 45%,#d3faff)}
+  .hud .nitroCell.full{box-shadow:inset 0 1px 2px rgba(0,0,0,.4),inset 0 0 0 1px rgba(150,225,255,.4),
+    0 0 10px rgba(120,220,255,.55);animation:nitroFullPulse 1.6s ease-in-out infinite}
+  @keyframes nitroFullPulse{
+    0%,100%{box-shadow:inset 0 1px 2px rgba(0,0,0,.4),inset 0 0 0 1px rgba(150,225,255,.4),0 0 8px rgba(120,220,255,.4)}
+    50%{box-shadow:inset 0 1px 2px rgba(0,0,0,.4),inset 0 0 0 1px rgba(190,240,255,.75),0 0 16px rgba(120,220,255,.85)}
+  }
   /* Burst meter: only up while a charge is actually running. Normalised to
      one charge and clamped, so a chained run simply holds full until the
      last charge starts draining. */
-  .hud .nitroBurst{height:4px;margin-top:4px;border-radius:3px;overflow:hidden;
-    background:rgba(255,255,255,.10);opacity:0;transition:opacity .12s ease}
+  .hud .nitroBurst{position:relative;height:5px;margin-top:5px;border-radius:3px;overflow:hidden;
+    background:rgba(255,255,255,.08);
+    box-shadow:inset 0 1px 2px rgba(0,0,0,.45),inset 0 0 0 1px rgba(255,255,255,.10);
+    opacity:0;transition:opacity .12s ease}
   .hud .nitroWrap.firing .nitroBurst{opacity:1}
   .hud .nitroBurst i{display:block;height:100%;transform-origin:left center;transform:scaleX(0);
-    background:linear-gradient(90deg,#ffb23a,#ffe9a8)}
+    background:linear-gradient(90deg,#d9820f,#ffb23a 45%,#ffe9a8)}
+  .hud .nitroBurst i::after{content:'';position:absolute;inset:0;
+    background:linear-gradient(180deg,rgba(255,255,255,.5),rgba(255,255,255,0) 55%)}
   .hud .nitroLabel{font-size:9px;opacity:.72;text-align:center;margin-top:4px;letter-spacing:.16em}
-  .hud .nitroWrap.firing .nitroLabel{opacity:1;color:#ffd489}
+  .hud .nitroWrap.firing .nitroLabel{opacity:1;color:#ffd489;text-shadow:0 0 8px rgba(255,180,60,.7)}
   .hud .note{position:absolute;left:14px;top:calc(env(safe-area-inset-top) + 46px);
     font-size:11px;opacity:.5;font-weight:600}
 
@@ -67,15 +91,18 @@
      quick, so it keeps its own short durations here while only the rise
      is slow -- one transition list covering both, or the press would ease
      over a third of a second. */
-  /* The HUD and the view button go with the pads. During the grid shot
-     the camera is closed right in on the two cars, and a lap counter, a
-     clock, a speed reading and a nitro gauge around them are all
-     answering questions the race has not asked yet. The stage picker
-     stays: it is the one control that is FOR the moment before a race,
-     and hiding it would trap the player in whichever stage loaded. */
-  .hud,#zoomBtn,#pauseBtn{transition:opacity .28s ease,transform .36s cubic-bezier(.16,1,.3,1)}
+  /* The HUD and every left-stack button go with the pads: during the grid
+     shot the camera is closed right in on the two cars, and a lap
+     counter, a clock, a speed reading, a nitro gauge and a row of controls
+     around them are all answering questions the race has not asked yet
+     (or, post-race, questions it has already finished answering). Stage
+     pick and sound used to stay up through both -- they no longer do; the
+     zoomed-in shot is supposed to be just the cars, full stop, and a
+     player who wants either control back has the same beat to wait
+     through as for the driving pads. */
+  .hud,.iconBtn{transition:opacity .28s ease,transform .36s cubic-bezier(.16,1,.3,1)}
   body.pre-race .hud{opacity:0;transition:none}
-  body.pre-race #zoomBtn,body.pre-race #pauseBtn{
+  body.pre-race .iconBtn{
     opacity:0;transform:translateX(-130%);transition:none;pointer-events:none}
   body.pre-race .controls{pointer-events:none}
   body.pre-race .controls .side{pointer-events:none}
@@ -94,9 +121,9 @@
      look at during that shot. Unlike pre-race this one IS seen leaving --
      the retraction is the point, mirroring the rise that brings it all
      back for the next start -- so it rides the transitions above instead
-     of suppressing them. #stagePick stays, same exception as pre-race. */
+     of suppressing them. */
   body.post-race .hud{opacity:0}
-  body.post-race #zoomBtn,body.post-race #pauseBtn{
+  body.post-race .iconBtn{
     opacity:0;transform:translateX(-130%);pointer-events:none}
   body.post-race .controls{pointer-events:none}
   body.post-race .controls .side{pointer-events:none}
@@ -302,55 +329,50 @@
   body.final-lap .hud #lap{color:#ffc24a;
     text-shadow:0 2px 5px rgba(0,0,0,.85),0 0 16px rgba(255,194,74,.85)}
 
-  #zoomBtn{
-    position:fixed;left:14px;top:124px;z-index:15;
-    width:auto;min-width:82px;height:38px;padding:0 12px;
-    border:1px solid rgba(255,255,255,.34);border-radius:12px;
-    background:rgba(8,10,16,.58);backdrop-filter:blur(6px);
-    color:#fff;font-size:12px;font-weight:900;letter-spacing:.05em;
+  /* Left-stack controls: VIEW, STAGE, PAUSE, SOUND. Icon-only circular
+     glass buttons now, in the same top-lit-gradient-over-a-dark-base
+     family as the driving pads below, instead of the small text pills
+     these used to be -- one control language for the whole screen rather
+     than two. VIEW and STAGE carry a live number (zoom level, stage
+     index) that the pill used to spell out in words; a small badge
+     pinned to the circle's corner keeps that reading at a glance without
+     falling back to a text button for just those two. */
+  .iconBtn{
+    position:fixed;left:14px;z-index:15;
+    width:46px;height:46px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    border:1px solid rgba(255,255,255,.30);
+    background:
+      radial-gradient(125% 100% at 50% -10%, rgba(255,255,255,.24), rgba(255,255,255,.04) 62%),
+      rgba(16,20,25,.5);
+    color:#fff;
+    box-shadow:0 6px 16px rgba(0,0,0,.36),inset 0 1px 0 rgba(255,255,255,.28),
+               inset 0 -2px 6px rgba(0,0,0,.24);
+    backdrop-filter:blur(8px) saturate(1.2);-webkit-backdrop-filter:blur(8px) saturate(1.2);
     touch-action:manipulation;-webkit-tap-highlight-color:transparent;
   }
-  #zoomBtn:active{transform:scale(.96);background:rgba(255,255,255,.18)}
-
-  #stagePick{
-    position:fixed;left:14px;top:170px;z-index:15;
-    width:auto;min-width:82px;height:38px;padding:0 12px;
-    border:1px solid rgba(255,255,255,.34);border-radius:12px;
-    background:rgba(8,10,16,.58);backdrop-filter:blur(6px);
-    color:#fff;font-size:12px;font-weight:900;letter-spacing:.05em;
-    touch-action:manipulation;-webkit-tap-highlight-color:transparent;
-  }
-  #stagePick:active{transform:scale(.96);background:rgba(255,255,255,.18)}
-
+  .iconBtn .icon{width:22px;height:22px;display:block;overflow:visible}
+  .iconBtn:active{transform:scale(.92);
+    background:
+      radial-gradient(125% 100% at 50% -10%, rgba(255,255,255,.4), rgba(255,255,255,.1) 62%),
+      rgba(40,48,56,.62);
+    border-color:rgba(255,255,255,.7)}
+  .iconBtn[disabled]{opacity:.4}
+  /* Bottom-right badge, for the two buttons whose state is a number
+     rather than an on/off. Sits half off the circle's own edge, the way
+     a notification count sits on an app icon. */
+  .iconBtn .badge{
+    position:absolute;right:-4px;bottom:-6px;min-width:20px;height:16px;padding:0 4px;
+    border-radius:999px;background:rgba(6,9,12,.92);border:1px solid rgba(255,255,255,.4);
+    font-size:9px;font-weight:900;line-height:14px;text-align:center;
+    font-variant-numeric:tabular-nums;color:#fff;pointer-events:none}
+  #zoomBtn{top:124px}
+  #stagePick{top:182px}
   /* Third in the left stack, under VIEW and STAGE. Rides the same
      pre-race hide as VIEW: there is nothing to pause during the grid
      shot, and the point of that shot is that it is only the two cars. */
-  #pauseBtn{
-    position:fixed;left:14px;top:216px;z-index:15;
-    width:auto;min-width:82px;height:38px;padding:0 12px;
-    border:1px solid rgba(255,255,255,.34);border-radius:12px;
-    background:rgba(8,10,16,.58);backdrop-filter:blur(6px);
-    color:#fff;font-size:12px;font-weight:900;letter-spacing:.05em;
-    touch-action:manipulation;-webkit-tap-highlight-color:transparent;
-  }
-  #pauseBtn:active{transform:scale(.96);background:rgba(255,255,255,.18)}
-
-  /* Fourth in the left stack, under PAUSE. Stays up through pre-race and
-     post-race, unlike VIEW/PAUSE -- it is a standing preference, not a
-     control the current shot has no use for, and the moments it hides
-     during (engine idling on the grid, the finish) are exactly when a
-     player is most likely to want to reach for it. Same reasoning
-     stagePick already gets its own exception for. */
-  #soundBtn{
-    position:fixed;left:14px;top:262px;z-index:15;
-    width:auto;min-width:82px;height:38px;padding:0 12px;
-    border:1px solid rgba(255,255,255,.34);border-radius:12px;
-    background:rgba(8,10,16,.58);backdrop-filter:blur(6px);
-    color:#fff;font-size:12px;font-weight:900;letter-spacing:.05em;
-    touch-action:manipulation;-webkit-tap-highlight-color:transparent;
-  }
-  #soundBtn:active{transform:scale(.96);background:rgba(255,255,255,.18)}
-  #soundBtn[disabled]{opacity:.4}
+  #pauseBtn{top:240px}
+  #soundBtn{top:298px}
 
   /* Above the stage picker (40), so opening one over the other can never
      leave the pause card buried. */
@@ -508,10 +530,18 @@
   <div class="side"><button id="left">◀</button><button id="right">▶</button></div>
   <div class="side"><button id="brake">BRAKE</button><button id="nitro">NITRO<span class="cnt" id="nitroCnt">×0</span></button></div>
 </div>
-<button id="zoomBtn" aria-label="camera zoom">VIEW 1/3</button>
-<button id="stagePick" aria-label="choose stage">STAGE 1/5</button>
-<button id="pauseBtn" aria-label="pause">PAUSE</button>
-<button id="soundBtn" aria-label="toggle sound">SOUND ON</button>
+<button id="zoomBtn" class="iconBtn" aria-label="camera zoom">
+  <svg class="icon" viewBox="0 0 24 24" fill="none"><circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" stroke-width="2"/><path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+  <span class="badge" id="zoomBadge">1/3</span>
+</button>
+<button id="stagePick" class="iconBtn" aria-label="choose stage">
+  <svg class="icon" viewBox="0 0 24 24"><path d="M6 3v18" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/><path d="M6 4.5h11.5l-2.3 3.25L17.5 11H6z" fill="currentColor"/></svg>
+  <span class="badge" id="stageBadge">1/5</span>
+</button>
+<button id="pauseBtn" class="iconBtn" aria-label="pause">
+  <svg class="icon" viewBox="0 0 24 24"><rect x="6" y="4" width="4.2" height="16" rx="1.3" fill="currentColor"/><rect x="13.8" y="4" width="4.2" height="16" rx="1.3" fill="currentColor"/></svg>
+</button>
+<button id="soundBtn" class="iconBtn" aria-label="toggle sound"></button>
 
 <div class="overlay" id="pauseOverlay" hidden>
   <div id="pauseCard">
@@ -620,14 +650,14 @@
       // being worked on.
       const STAGE_IDS=Object.keys(stages).map(Number).sort((a,b)=>a-b);
       const LAST_STAGE=STAGE_IDS[STAGE_IDS.length-1];
-      const zoomBtn=el('zoomBtn');
-      const zoomNames=['VIEW 1/3','VIEW 2/3','VIEW 3/3'];
-      zoomBtn.textContent=zoomNames[game.zoomLevel||0];
+      const zoomBtn=el('zoomBtn'),zoomBadge=el('zoomBadge');
+      const zoomCount=game.zoomLevels?.length||3;
+      zoomBadge.textContent=`${(game.zoomLevel||0)+1}/${zoomCount}`;
       zoomBtn.addEventListener('pointerdown',e=>{
         e.preventDefault();
         game.audio?.click();
         const level=game.cycleZoom();
-        zoomBtn.textContent=zoomNames[level];
+        zoomBadge.textContent=`${level+1}/${zoomCount}`;
       });
       const bind=(id,key)=>{const b=el(id);const on=e=>{e.preventDefault();game.input[key]=true;b.classList.add('pressed');try{b.setPointerCapture(e.pointerId)}catch{}};const off=e=>{e.preventDefault();game.input[key]=false;b.classList.remove('pressed')};b.addEventListener('pointerdown',on);b.addEventListener('pointerup',off);b.addEventListener('pointercancel',off);b.addEventListener('lostpointercapture',off)};
       bind('left','left');bind('right','right');bind('brake','brake');
@@ -777,8 +807,8 @@
         }
       });
       // --- stage picker ---
-      const stagePick=el('stagePick'),stageOverlay=el('stageOverlay'),stageRows=el('stageRows'),stageClose=el('stageClose');
-      const syncPickLabel=()=>{stagePick.textContent=`STAGE ${game.stageId}/${LAST_STAGE}`};
+      const stagePick=el('stagePick'),stageBadge=el('stageBadge'),stageOverlay=el('stageOverlay'),stageRows=el('stageRows'),stageClose=el('stageClose');
+      const syncPickLabel=()=>{stageBadge.textContent=`${game.stageId}/${LAST_STAGE}`};
       // Load a stage and put the whole shell back to its start-of-race
       // state. The picker, the result card's button and the pause card all
       // need exactly this, and used to carry their own copy of it.
@@ -866,15 +896,24 @@
 
       // --- sound toggle ---
       const soundBtn=el('soundBtn');
+      // Speaker with sound waves, and the same speaker with an X over the
+      // waves for muted/unavailable -- swapped wholesale rather than
+      // toggling two overlaid icons, since only one is ever shown.
+      const SOUND_ICON_ON='<svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M4 9.5v5h3.3L12 18V6L7.3 9.5H4z" fill="currentColor"/><path d="M15.8 9.2a4.2 4.2 0 010 5.6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M18.3 7a7.8 7.8 0 010 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity=".65"/></svg>';
+      const SOUND_ICON_OFF='<svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M4 9.5v5h3.3L12 18V6L7.3 9.5H4z" fill="currentColor"/><path d="M15.5 9.5l5 5M20.5 9.5l-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
       if(!game.audio){
         // Construction can fail (no Web Audio support) or never have been
         // attempted (audioCtx itself failed to construct) -- either way
         // there is nothing to toggle, so say so rather than leave a
         // button that looks live but does nothing.
-        soundBtn.textContent='NO AUDIO';
+        soundBtn.innerHTML=SOUND_ICON_OFF;
+        soundBtn.setAttribute('aria-label','sound unavailable');
         soundBtn.disabled=true;
       } else {
-        const syncSoundLabel=()=>{soundBtn.textContent=game.audio.muted?'SOUND OFF':'SOUND ON'};
+        const syncSoundLabel=()=>{
+          soundBtn.innerHTML=game.audio.muted?SOUND_ICON_OFF:SOUND_ICON_ON;
+          soundBtn.setAttribute('aria-label',game.audio.muted?'unmute sound':'mute sound');
+        };
         syncSoundLabel();
         soundBtn.addEventListener('pointerdown',e=>{
           e.preventDefault();
