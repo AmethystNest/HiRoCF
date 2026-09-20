@@ -6,6 +6,7 @@ import { buildProps, buildGroundPatches, buildSideStreets } from './render/props
 import { buildMiniMap } from './render/minimap.js';
 import { buildFinishFX } from './render/finishfx.js';
 import { buildBoostFlame } from './render/boostfx.js';
+import { buildContactFX } from './render/contactfx.js';
 import { LAYOUTS } from './track/layouts.js';
 import { PlayerCar } from './game/player.js';
 import { RivalCar } from './game/rival.js';
@@ -525,6 +526,13 @@ export class Game {
     this.driftGfx = new Graphics();
     this.actors.addChild(this.driftGfx);
 
+    // Off-road dust and wall-impact sparks -- player only (see
+    // contactfx.js). Dust belongs at road level like the drift marks;
+    // sparkView is added at the very end of this method instead, once both
+    // cars exist, so a spark burst draws OVER them rather than under.
+    this.contactFX = buildContactFX();
+    this.actors.addChild(this.contactFX.dustView);
+
     this.player = new PlayerCar(path, cfg);
     this.player.placeAtStart(-startBack, playerStartLateral);
     this.player.deckId = 0;
@@ -586,6 +594,10 @@ export class Game {
     this.rivalSprite.height = rivalDrawSize.h;
     if (cfg.rival.tint) this.rivalSprite.tint = cfg.rival.tint;
     this.actors.addChild(this.rivalSprite);
+
+    // Now that both cars exist, sparks draw over them -- see contactFX
+    // setup near driftGfx above.
+    this.actors.addChild(this.contactFX.sparkView);
 
     // Deck state has to be right from the grid, not only once the lights go
     // out: update() only syncs it while racing, so without this both cars
@@ -795,6 +807,7 @@ export class Game {
     this.updateDriftFX();
     this.boostFlame.update(p, this.worldScale, CAR_SIZE.player);
     this.rivalBoostFlame.update(this.rival, this.worldScale, this.rivalSize);
+    this.contactFX.update(p, dt, this.worldScale);
     this.finishFX.update(dt, W, H);
   }
 

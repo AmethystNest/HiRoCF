@@ -27,6 +27,12 @@ export class PlayerCar {
     this.nitroCharge = 0;
     this.shake = 0;
     this.wallStuckTime = 0;
+    // Contact state for the barrier -- see the impact/graze split in
+    // update(). _wallCooldown counts down while a contact event is still
+    // "recent"; wallImpact is public and true for exactly the frame a new
+    // event begins.
+    this._wallCooldown = 0;
+    this.wallImpact = false;
     this.driftTrail = [];
     // how far the sprite should currently tilt off "straight ahead" to show
     // the drift -- see update() and main.js's playerSprite.rotation. Needed
@@ -78,6 +84,8 @@ export class PlayerCar {
     this.boosting = false;
     this.boostTimer = 0;
     this.wallStuckTime = 0;
+    this._wallCooldown = 0;
+    this.wallImpact = false;
     this.driftTrail.length = 0;
     this.drifting = false;
     this.driftSlipAngle = 0;
@@ -240,15 +248,38 @@ export class PlayerCar {
     // --- barrier: push back in and re-aim rather than hard-stopping ---
     const after = this.nearestOnRoute(this.x, this.y);
     const wallTrigger = this.wallHalf + this.wallTriggerExtra;
-    if (after.dist > wallTrigger) {
+    const touchingWall = after.dist > wallTrigger;
+    // A frame-to-frame "was it touching last frame" test does NOT work
+    // for telling an impact from a graze: the position snap below pulls
+    // the car back to `safe`, which sits clearly inside wallTrigger, so a
+    // car still steering into the barrier spends a couple of frames back
+    // under the trigger before it crosses out again -- and each re-crossing
+    // then reads as a brand new impact, one every 3-4 frames, which is the
+    // exact repeated-crash behaviour this is meant to fix. A short time
+    // window bridges those gaps: contact within wallGraceWindow of the
+    // last one counts as the SAME ongoing contact.
+    this._wallCooldown = Math.max(0, this._wallCooldown - dt);
+    // True only on the frame a NEW contact event begins -- main.js reads
+    // this to fire a spark burst once per hit, not once per frame of a
+    // held one.
+    this.wallImpact = touchingWall && this._wallCooldown <= 0;
+    if (touchingWall) {
       const dx = this.x - after.x, dy = this.y - after.y;
       const d = Math.hypot(dx, dy) || 1;
       const safe = this.wallHalf - P.wallInset;
       this.x = after.x + (dx / d) * safe;
       this.y = after.y + (dy / d) * safe;
-      this.speed *= P.wallSpeedMul;
-      this.shake = Math.max(this.shake, 9);
+      // The full penalty is an IMPACT, and only happens on the frame
+      // contact begins. Steering stays pinned into the barrier easily
+      // (cornering wide, holding a slide), and the old check reapplied
+      // wallSpeedMul's ~38% cut on every one of the frames that produces,
+      // cratering the car's speed in under ten frames. A continuing graze
+      // bleeds off wallScrubMul's much smaller cut instead -- friction,
+      // not a second crash every tick.
+      this.speed *= this.wallImpact ? P.wallSpeedMul : P.wallScrubMul;
+      this.shake = Math.max(this.shake, this.wallImpact ? 9 : 3);
       this.wallStuckTime += dt;
+      this._wallCooldown = P.wallGraceWindow;
 
       let tangent = after.angle;
       if (Math.abs(wrapAngle(tangent + Math.PI - this.angle)) < Math.abs(wrapAngle(tangent - this.angle))) {

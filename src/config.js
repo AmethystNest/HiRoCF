@@ -51,6 +51,19 @@ export const PHYSICS = {
   speedTargetMinHold: 1.2,
   speedTargetSpreadHold: 2.4,
   wallSpeedMul: 0.62,
+  // Applied every frame AFTER the first while contact is still ongoing,
+  // instead of wallSpeedMul again -- a graze along the barrier is friction,
+  // not a second collision every single tick. wallSpeedMul still fires once,
+  // on the frame contact begins; see player.js.
+  wallScrubMul: 0.995,
+  // How long a contact stays "recent" for that impact/graze test. The
+  // position correction pulls the car back inside the trigger distance on
+  // every hit, so a car still steering into the barrier actually leaves
+  // contact for a couple of frames before crossing back out -- without a
+  // window bridging that gap, each re-crossing reads as a fresh impact
+  // again, every 3-4 frames, which is the exact repeated-crash behaviour
+  // wallScrubMul exists to fix.
+  wallGraceWindow: 0.4,
   wallAngleBlend: 0.28,
   wallInset: 10,
   wallStuckTime: 0.85,
