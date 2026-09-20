@@ -61,16 +61,28 @@ const SURFACE_PRESET_BY_STAGE = { 1: 'circuit', 2: 'city', 3: 'mountain', 4: 'hi
  * two sets of ribbons meet.
  */
 /**
- * Pre-race camera. START_CAM_ZOOM is how far in the camera sits while the
- * two cars are on the grid -- enough to read both of them and the paint
- * they are sitting on. It then pulls back to the racing framing between
- * countdown START_CAM_FROM and START_CAM_TO, finishing a fraction before
- * the lights go green (which is at 0.55) so the frame is settled by the
- * time the car can move.
+ * Pre-race camera. It closes in on the grid while the VS card and the
+ * lights are up, then pulls back to the racing framing between countdown
+ * START_CAM_FROM and START_CAM_TO, finishing a fraction before the lights
+ * go green (which is at 0.55) so the frame is settled by the time the car
+ * can move.
+ *
+ * How far in is SOLVED per stage rather than fixed, so both cars are in
+ * shot whatever is on the grid -- stage 4's rival is a box truck two and a
+ * half car lengths long, and a single number close enough to be worth
+ * doing on stage 1 cut the end off it. START_CAM_MAX only caps how close
+ * the solve may get.
  */
-const START_CAM_ZOOM = 1.85;
+const START_CAM_MAX = 2.4;
 const START_CAM_FROM = 1.75;
 const START_CAM_TO = 0.62;
+/**
+ * Where both cars have to fit, as fractions of the screen: clear of the
+ * side edges, below the countdown numeral, above the control pads. The
+ * player sits at 0.62 of the height (the camera anchor), so the room
+ * above it is the tight one.
+ */
+const START_CAM_BOX = { side: 0.04, top: 0.46, bottom: 0.90 };
 
 const SURFACE_SECTORS_BY_STAGE = {
   5: {
@@ -176,14 +188,71 @@ export class Game {
   startCameraZoom() {
     const race = this.race;
     if (!race) return 1;
-    if (race.state === 'vs') return START_CAM_ZOOM;
-    if (race.state !== 'countdown') return 1;
+    const wide = race.state === 'vs' ? 1 : race.state === 'countdown' ? null : 0;
+    if (wide === 0) return 1;
+    const close = this.gridFitZoom();
+    if (wide === 1) return close;
     const span = START_CAM_FROM - START_CAM_TO;
     const k = Math.max(0, Math.min(1, (START_CAM_FROM - race.countdown) / span));
     // ease-in-out, so the pull-back neither jerks off the mark nor
     // arrives with a bump
     const e = k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2;
-    return START_CAM_ZOOM + (1 - START_CAM_ZOOM) * e;
+    return close + (1 - close) * e;
+  }
+
+  /**
+   * Closest the camera may sit and still hold both cars inside
+   * START_CAM_BOX.
+   *
+   * The camera pins the player to a fixed screen point and rotates the
+   * world so the player points up, so the rival's place on screen is its
+   * offset from the player resolved into that frame: the component along
+   * the player's heading goes up the screen, the perpendicular one across
+   * it.
+   *
+   * Each car contributes the extent of its own oriented box in each of
+   * those two directions, not one radius for both. A car is half again as
+   * long as it is wide, and on a starting grid the two sit side by side
+   * with the long axis up the screen -- so the width is what has to fit
+   * across and the length is what has to fit up and down. Treating the
+   * length as a radius in both, which is the safe shortcut, inflates the
+   * across-the-screen demand by a third and gives back camera for nothing.
+   */
+  gridFitZoom() {
+    const p = this.player, r = this.rival;
+    if (!p || !r) return 1;
+    const { width: W, height: H } = this.app.screen;
+    const dx = r.x - p.x, dy = r.y - p.y;
+    const ca = Math.cos(p.angle), sa = Math.sin(p.angle);
+    const forward = dx * ca + dy * sa;
+    const across = dy * ca - dx * sa;
+
+    // Half-extents of an oriented box, in the camera's own axes.
+    const half = (size, angle) => {
+      const c = Math.abs(Math.cos(angle)), s2 = Math.abs(Math.sin(angle));
+      const w = size.w * this.worldScale * 0.5, h = size.h * this.worldScale * 0.5;
+      return { across: w * c + h * s2, up: w * s2 + h * c };
+    };
+    const me = half(CAR_SIZE.player, 0);
+    const them = half(this.rivalSize ?? CAR_SIZE.player, r.angle - p.angle);
+
+    const anchorY = H * 0.62;
+    const roomSide = W * (0.5 - START_CAM_BOX.side);
+    const roomUp = anchorY - H * START_CAM_BOX.top;
+    const roomDown = H * START_CAM_BOX.bottom - anchorY;
+    // Each entry is "screen room available" over "world units that have to
+    // fit in it", for one car against one edge. The smallest binds.
+    const fits = [
+      roomSide / me.across,
+      roomUp / me.up,
+      roomDown / me.up,
+      roomSide / (Math.abs(across) + them.across),
+      roomUp / Math.max(1e-3, forward + them.up),
+      roomDown / Math.max(1e-3, them.up - forward),
+    ];
+
+    const scale = Math.min(...fits);
+    return Math.max(1, Math.min(START_CAM_MAX, scale / this.zoom));
   }
 
   cycleZoom() {
