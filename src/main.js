@@ -87,6 +87,13 @@ const START_CAM_TO = 0.62;
 const START_CAM_BOX = { side: 0.04, top: 0.50, bottom: 0.88 };
 /** Clear air between the two cars on the starting grid, per side. */
 const GRID_MARGIN = 30;
+/**
+ * How solid the rival is left while it passes under a deck the player is
+ * not under. Not 0: the point is to say "this one is below the bridge",
+ * not to take the rival off the screen -- at a glance you still want to
+ * see where it is and which way it is pointing.
+ */
+const RIVAL_UNDER_ALPHA = 0.3;
 
 const SURFACE_SECTORS_BY_STAGE = {
   5: {
@@ -133,8 +140,13 @@ export class Game {
     // levels 1 and 2 progressively magnify it -- each is a multiplier on
     // `zoom`, which IS the world's on-screen scale (see world.scale.set
     // below), so a bigger number here is a closer view, not a further one.
+    // The middle step is the geometric mean of the two ends (sqrt(2.3) =
+    // 1.517), so the three views step by an equal RATIO -- 1.0 -> 1.52 ->
+    // 2.3 is x1.52 each time. Spacing them evenly by subtraction instead
+    // is what made the old middle feel wrong: 1.15 was a barely-there
+    // change from 1.00 and then the last press doubled the view.
     this.baseZoom = Math.max(0.28, Math.min(0.42, app.screen.width / 1080));
-    this.zoomLevels = [1.00, 1.15, 2.3];
+    this.zoomLevels = [1.00, 1.52, 2.3];
     this.zoomLevel = 0;
     this.zoom = this.baseZoom * this.zoomLevels[this.zoomLevel];
     // Presentation-only camera multiplier, applied to world.scale and to
@@ -559,6 +571,9 @@ export class Game {
     this.rivalShadow.height = rivalSize.h * 1.4 * s * rivalVisualScale.h;
     this.rivalShadow.alpha = 0.5;
     this.actors.addChild(this.rivalShadow);
+    // Full strength until something says otherwise; reset here so a stage
+    // loaded while the rival happened to be ghosted starts clean.
+    this._rivalGhost = 1;
 
     // Same effect as the player's, its own instance -- built once here so
     // it works on every stage, not just the one this was added for.
@@ -672,32 +687,38 @@ export class Game {
     }
     this.race.update(dt);
 
-    // Fade everything overhead while a car is underneath it, so it stays
-    // visible where the course crosses over itself. What fades, and how
-    // far, is set up in loadStage as this._deckFade.
+    // Fade everything overhead while the player is underneath it, so the
+    // car stays visible where the course crosses over itself. What fades,
+    // and how far, is set up in loadStage as this._deckFade.
     // Eased rather than switched, and faster going out than coming back:
     // arriving under a deck that is still fading is the case that loses the
     // car, while it re-appearing over a beat behind reads as natural.
     //
-    // Checked for the rival too, not just the player -- with only the
-    // player's position gating it, the rival passing underneath alone (the
-    // player elsewhere on the lap) left the deck fully opaque over it, so
-    // the rival visibly rode the bridge deck instead of disappearing under
-    // it. One shared boolean is correct here because a stage has exactly
-    // one deck's worth of fading layers in `_deckFade`; if a future course
-    // ever stacks two independent crossings this will need to fade them
-    // separately.
+    // The PLAYER only. The rival going under is handled by ghosting the
+    // rival instead (below) -- opening the deck for it would take the road
+    // out from under a player who is driving ON the bridge at the time.
     if (this._deckGrid && this._deckFade) {
-      const playerUnder = (p.zLevel ?? 0) < 2 && this.underDeck(p.x, p.y, p._routeHint ?? 0);
-      const rivalUnder = (this.rival.zLevel ?? 0) < 2
-        && this.underDeck(this.rival.x, this.rival.y, this.rival._routeHint ?? 0);
-      const under = playerUnder || rivalUnder;
+      const under = (p.zLevel ?? 0) < 2 && this.underDeck(p.x, p.y, p._routeHint ?? 0);
       const k = 1 - Math.exp(-dt * (under ? 16 : 7));
       for (const [layer, floor] of this._deckFade) {
         if (!layer) continue;
         const target = under ? floor : 1;
         layer.alpha += (target - layer.alpha) * k;
       }
+      // The rival is drawn in `actors`, which sits above the deck, so a
+      // rival passing UNDER the bridge is painted over it and reads as
+      // driving along the top of the crossing road. Ghosting it says
+      // "this one is below" in the one way a top-down camera has.
+      //
+      // Only while the deck above it is actually opaque: if the player is
+      // under there too the deck has already faded, both cars are on the
+      // same road, and a see-through rival would then be the lie.
+      const rivalUnder = (this.rival.zLevel ?? 0) < 2
+        && this.underDeck(this.rival.x, this.rival.y, this.rival._routeHint ?? 0);
+      const ghostTarget = rivalUnder && !under ? RIVAL_UNDER_ALPHA : 1;
+      this._rivalGhost += (ghostTarget - this._rivalGhost) * (1 - Math.exp(-dt * 14));
+    } else {
+      this._rivalGhost = 1;
     }
 
     // race.update() can flip state to 'finished' just now (checked fresh,
@@ -734,6 +755,10 @@ export class Game {
     this.rivalSprite.rotation = this.rival.angle + Math.PI / 2 + (this.rival.driftVisualAngle || 0);
     this.rivalShadow.position.set(this.rival.x + 6, this.rival.y + 8);
     this.rivalShadow.rotation = this.rivalSprite.rotation;
+    // The shadow goes with the car, or a hard shadow is left lying on the
+    // bridge deck with nothing casting it.
+    this.rivalSprite.alpha = this._rivalGhost;
+    this.rivalShadow.alpha = 0.5 * this._rivalGhost;
 
     // camera: player pinned to a fixed screen anchor, world rotated so the
     // car always points up the screen
