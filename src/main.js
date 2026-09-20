@@ -437,7 +437,19 @@ export class Game {
     // is also the size collision, start-grid spacing, and any decoration
     // meant to match car size (parked ambulance/tow-truck props) must use,
     // since that is the size the car actually occupies once placed in the world.
-    const s = 1 / this.zoom;
+    //
+    // Divides by baseZoom, NOT the live `this.zoom` -- worldScale is set
+    // once here and never touched again until the next loadStage, but VIEW
+    // (cycleZoom) changes `this.zoom` freely and persists the player's
+    // choice across a stage switch. Dividing by the live zoom baked this
+    // stage's cars, hulls, drift marks and contact FX to whatever VIEW
+    // level happened to be active at load, and world.scale (which DOES
+    // track the live zoom every frame) only renders the correct size again
+    // once VIEW is back at its load-time level -- every other level came
+    // out scaled by (current zoom / load-time zoom) instead of the
+    // intended (current zoom / baseZoom). baseZoom never changes after
+    // construction, so this is the one stable reference to bake against.
+    const s = 1 / this.baseZoom;
     this.worldScale = s;
 
     const props = buildProps(path, this.propSheet, this.tex.shadow_blob, {
@@ -674,7 +686,14 @@ export class Game {
             { w: CAR_SIZE.player.w * this.worldScale, h: CAR_SIZE.player.h * this.worldScale },
             { w: this.rivalSize.w * this.worldScale, h: this.rivalSize.h * this.worldScale },
           ],
+          dt,
         );
+      } else {
+        // Not called this frame -- without this, a carImpact left true
+        // from the exact frame the decks diverged would sit stale (still
+        // true) and contactFX would keep firing a fresh burst every frame
+        // until the decks matched again and resolveContacts ran to clear it.
+        p.carImpact = false;
       }
     } else if (state === 'finished') {
       // Race is over: clear any remaining drift state/visual yaw for BOTH cars,

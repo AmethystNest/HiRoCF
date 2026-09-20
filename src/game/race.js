@@ -189,7 +189,17 @@ export function autoDrivePostRace(car, path, dt, targetSpeed, laneOffset = 0) {
 }
 
 /** Push overlapping cars apart; side rubbing is cheap, head-on costs speed. */
-export function resolveContacts(cars, sizes, passes = 4) {
+export function resolveContacts(cars, sizes, dt = 1 / 60, passes = 4) {
+  // Per-car "was this one touched during this call" flag, for the impact
+  // rising edge below -- a car-car hit needs the same fresh-vs-continuing
+  // split as the wall does (see player.js's wallImpact/wallGraceWindow):
+  // the separation this loop applies pulls two overlapping cars just
+  // clear of each other every pass, so a player still steering into the
+  // rival leaves raw contact for a moment before the next overlap, and
+  // without a grace window each re-touch would fire as a brand new impact.
+  const touched = new Array(cars.length).fill(false);
+  for (const car of cars) if (car) car.carImpact = false;
+
   for (let pass = 0; pass < passes; pass++) {
     for (let i = 0; i < cars.length; i++) {
       for (let j = i + 1; j < cars.length; j++) {
@@ -209,6 +219,8 @@ export function resolveContacts(cars, sizes, passes = 4) {
           }
         }
         if (!best) continue;
+        touched[i] = true;
+        touched[j] = true;
 
         // Player has a small contact advantage. "Push power" is expressed
         // as how much of the separation the OTHER car receives: normally
@@ -285,6 +297,19 @@ export function resolveContacts(cars, sizes, passes = 4) {
           if (b.shake !== undefined) b.shake = Math.max(b.shake, 6 * bHit);
         }
       }
+    }
+  }
+
+  // Same impact/graze split as the wall: a touch within P.wallGraceWindow
+  // of this car's last one is the SAME ongoing contact (car.carImpact
+  // stays false), not a fresh one.
+  for (let i = 0; i < cars.length; i++) {
+    const car = cars[i];
+    if (!car) continue;
+    car._carContactCooldown = Math.max(0, (car._carContactCooldown ?? 0) - dt);
+    if (touched[i]) {
+      car.carImpact = car._carContactCooldown <= 0;
+      car._carContactCooldown = P.wallGraceWindow;
     }
   }
 }

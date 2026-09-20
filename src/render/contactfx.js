@@ -1,15 +1,17 @@
 /**
- * Player-only feedback for the two ways a car can leave the ideal line:
- * running onto the grass shoulder, and hitting the road's outer barrier.
- * Before this, both were numbers only -- a lower speed cap on grass, a
- * position snap and a camera shake at the wall -- with nothing at the car
- * itself to say what just happened.
+ * Player-only feedback for the three ways a car can leave the ideal line:
+ * running onto the grass shoulder, hitting the road's outer barrier, and
+ * hitting the rival. Before this, all three were numbers only -- a lower
+ * speed cap on grass, a position snap and a camera shake at the wall, a
+ * shove and a speed scrub on the rival -- with nothing at the car itself
+ * to say what just happened.
  *
  * Two independent particle systems, each in its own view so they can sit on
  * opposite sides of the car in the paint order (see main.js): dust spawns
  * continuously off `car.onGrass` and belongs at road level, under the car,
- * the same as the drift marks; sparks fire once per `car.wallImpact` and
- * belong ON TOP, over the car, the same as an impact ought to read.
+ * the same as the drift marks; sparks fire once per `car.wallImpact` or
+ * `car.carImpact` and belong ON TOP, over the car, the same as an impact
+ * ought to read.
  *
  * State (the live particle lists) lives in this module's closure rather
  * than on the car, matching finishfx.js's confetti/lines -- it is pure
@@ -20,8 +22,13 @@ import { Container, Graphics } from '../pixi.js';
 
 const DUST_LIFE = 0.62;
 const DUST_MAX = 48;
-const SPARK_LIFE = 0.32;
-const SPARK_COUNT = 12;
+// Short and fast -- a spark is a glint, not a lingering glow. The dust
+// puffs above are the slow, soft, fading shape; sparks have to read as the
+// opposite of that at a glance; blendMode add on sparkGfx does the rest
+// (see below), separating "bright glowing streak" from "flat brown smoke"
+// by more than just the numbers.
+const SPARK_LIFE = 0.24;
+const SPARK_COUNT = 16;
 
 export function buildContactFX() {
   const dustView = new Container();
@@ -30,6 +37,11 @@ export function buildContactFX() {
 
   const sparkView = new Container();
   const sparkGfx = new Graphics();
+  // Additive: overlapping sparks brighten instead of mixing into a flat
+  // wash, which is what a filled, normal-blend circle looked like -- soft
+  // and grey rather than a hot glint. This one change reads as "metal",
+  // same as boostfx.js's inner flame layers use it for "fire".
+  sparkGfx.blendMode = 'add';
   sparkView.addChild(sparkGfx);
 
   let dust = [];
@@ -48,7 +60,8 @@ export function buildContactFX() {
   }
 
   /**
-   * @param car  PlayerCar: x, y, angle, speed, onGrass, wallImpact
+   * @param car  PlayerCar: x, y, angle, speed, onGrass, wallImpact,
+   *             carImpact
    * @param dt
    * @param s    worldScale -- converts screen-pixel authoring sizes/speeds
    *             into world units, same convention as boostfx.js.
@@ -94,20 +107,24 @@ export function buildContactFX() {
       return true;
     });
 
-    // --- sparks: one burst per NEW wall impact, not per frame of contact --
-    // (car.wallImpact is already the rising edge -- see player.js) so no
-    // debouncing is needed here.
-    if (car.wallImpact) {
+    // --- sparks: one burst per NEW impact (wall or rival), not per frame
+    // of contact -- car.wallImpact/car.carImpact are already the rising
+    // edge (see player.js and race.js) so no debouncing is needed here.
+    if (car.wallImpact || car.carImpact) {
       for (let i = 0; i < SPARK_COUNT; i++) {
         const a = Math.random() * Math.PI * 2;
-        const spd = (90 + Math.random() * 170) * s;
+        // Sharp and fast -- a shooting glint, not a drifting puff. Drag
+        // below pulls this down hard within the first few frames, which is
+        // what makes it read as a snap rather than a throw.
+        const spd = (260 + Math.random() * 260) * s;
         sparks.push({
           x: car.x,
           y: car.y,
           vx: Math.cos(a) * spd,
           vy: Math.sin(a) * spd,
           age: 0,
-          size: (2 + Math.random() * 2) * s,
+          len: (9 + Math.random() * 9) * s,
+          width: (1.1 + Math.random() * 0.9) * s,
         });
       }
     }
@@ -118,11 +135,23 @@ export function buildContactFX() {
       if (p.age >= SPARK_LIFE) return false;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
-      p.vx *= 1 - Math.min(1, dt * 3.2);
-      p.vy *= 1 - Math.min(1, dt * 3.2);
+      // Heavy drag, no gravity: this is a top-down camera that rotates
+      // with the car, so a world-space "down" would fall sideways or
+      // upward depending on heading. A symmetric snap-to-a-stop reads
+      // right from every rotation instead.
+      const drag = 1 - Math.min(1, dt * 5.5);
+      p.vx *= drag;
+      p.vy *= drag;
       const t = p.age / SPARK_LIFE;
-      const color = t < 0.45 ? 0xfff4c8 : 0xff9a3c;
-      sparkGfx.circle(p.x, p.y, p.size * (1 - t * 0.5)).fill({ color, alpha: 1 - t });
+      const speed = Math.hypot(p.vx, p.vy) || 1;
+      // Drawn as a short streak trailing back along its own velocity --
+      // a line, not a dot -- and shrinking as it cools rather than
+      // growing, which is what a puff of smoke would do.
+      const len = p.len * (1 - t * 0.55);
+      const dx = (p.vx / speed) * len, dy = (p.vy / speed) * len;
+      const color = t < 0.35 ? 0xfffaf0 : 0xffb238;
+      sparkGfx.moveTo(p.x - dx, p.y - dy).lineTo(p.x, p.y)
+        .stroke({ width: p.width * (1 - t * 0.6), color, alpha: Math.max(0, 1 - t * 1.2), cap: 'round' });
       return true;
     });
   }
