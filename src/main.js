@@ -108,6 +108,16 @@ const FINISH_CAM_MIN_ZOOM = 1.3;
 /** Zoom used for that solo framing -- a deliberate fixed close-up on the
  *  car that just crossed the line, not a solve like the grid's. */
 const FINISH_CAM_SOLO_ZOOM = 2.0;
+/** The pair-fit zoom solve is handed off to the fixed solo framing over
+ *  this band, not at a single cutoff -- a hard "if" here used to pop
+ *  both the zoom and the pan target the instant the rival's distance
+ *  crossed FINISH_CAM_MIN_ZOOM, which is exactly the case a close
+ *  finish spends the most time hovering around (the trailing car is
+ *  still closing the gap after the leader crosses, so the fit solve
+ *  keeps sliding past the old cutoff and back). Blended, that same
+ *  drift just eases the shot from "both cars" to "the one that
+ *  finished" instead of snapping it. */
+const FINISH_CAM_BLEND_BAND = 0.5;
 /**
  * How solid the rival is left while it passes under a deck the player is
  * not under. Not 0: the point is to say "this one is below the bridge",
@@ -318,9 +328,8 @@ export class Game {
   finishFraming(W, H) {
     const p = this.player, r = this.rival;
     const anchorY = H * (START_CAM_BOX.top + START_CAM_BOX.bottom) / 2;
-    const solo = { x: p?.x ?? 0, y: p?.y ?? 0, anchorY, zoom: FINISH_CAM_SOLO_ZOOM };
-    if (!p) return solo;
-    if (!r) return solo;
+    if (!p) return { x: 0, y: 0, anchorY, zoom: FINISH_CAM_SOLO_ZOOM };
+    if (!r) return { x: p.x, y: p.y, anchorY, zoom: FINISH_CAM_SOLO_ZOOM };
 
     const carW = CAR_SIZE.player.w * this.worldScale;
     const carH = CAR_SIZE.player.h * this.worldScale;
@@ -329,17 +338,20 @@ export class Game {
     const needAcross = Math.abs(r.x - p.x) / 2 + carW / 2 + GRID_MARGIN;
     const needUp = Math.abs(r.y - p.y) / 2 + carH / 2 + GRID_MARGIN;
     const scale = Math.min(roomAcross / needAcross, roomUp / needUp);
-    const pairZoom = scale / this.zoom;
+    const pairZoom = Math.max(1, Math.min(START_CAM_MAX, scale / this.zoom));
 
-    // Worth widening for the rival only while the result is still a
-    // respectable close-up. Below that, fall back to the fixed solo shot
-    // rather than let the framing get looser the further behind they are.
-    if (pairZoom < FINISH_CAM_MIN_ZOOM) return solo;
+    // How much of the shot is "both cars" vs "the one that finished",
+    // as a continuous function of the fit zoom rather than a branch on
+    // it -- see FINISH_CAM_BLEND_BAND. 1 at/above MIN_ZOOM (pure pair),
+    // 0 at MIN_ZOOM - BAND or below (pure solo).
+    const pairT = easeInOutCubic(
+      Math.max(0, Math.min(1, (pairZoom - (FINISH_CAM_MIN_ZOOM - FINISH_CAM_BLEND_BAND)) / FINISH_CAM_BLEND_BAND)),
+    );
     return {
-      x: (p.x + r.x) / 2,
-      y: (p.y + r.y) / 2,
+      x: p.x + ((p.x + r.x) / 2 - p.x) * pairT,
+      y: p.y + ((p.y + r.y) / 2 - p.y) * pairT,
       anchorY,
-      zoom: Math.max(1, Math.min(START_CAM_MAX, pairZoom)),
+      zoom: FINISH_CAM_SOLO_ZOOM + (pairZoom - FINISH_CAM_SOLO_ZOOM) * pairT,
     };
   }
 

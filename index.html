@@ -209,8 +209,33 @@
   #vsCard{background:rgba(10,13,17,.82);border:1px solid rgba(255,255,255,.14);
     border-radius:20px;padding:26px 34px;backdrop-filter:blur(6px)}
   #vsCard .stage{font-size:13px;opacity:.7;letter-spacing:.14em;margin-bottom:6px}
-  #vsCard .vs{font-size:15px;color:#ff6a6a;letter-spacing:.2em;margin:10px 0}
   #vsCard .rival{font-size:26px}
+  /* VS crackles rather than sitting still -- a stepped (not eased)
+     flicker between its resting red and a hot white-cyan spark, twice
+     per cycle, with a small lightning bolt flashing on either side on
+     the same beat. steps(1,end) is the point: a real arc snaps between
+     states, it doesn't fade. */
+  #vsCard .vs{position:relative;font-size:15px;color:#ff6a6a;letter-spacing:.2em;margin:14px 0;
+    text-shadow:0 0 6px rgba(255,106,106,.85),0 0 18px rgba(255,70,70,.5);
+    animation:vsFlicker 2.2s steps(1,end) infinite}
+  @keyframes vsFlicker{
+    0%,17%,19%,20%,49%,51%,52%,100%{
+      color:#ff6a6a;text-shadow:0 0 6px rgba(255,106,106,.85),0 0 18px rgba(255,70,70,.5)}
+    18%,50%{
+      color:#fff;text-shadow:0 0 4px #fff,0 0 22px rgba(170,235,255,1),0 0 46px rgba(120,220,255,.9)}
+  }
+  #vsCard .vs::before,#vsCard .vs::after{
+    content:'';position:absolute;top:50%;width:16px;height:24px;
+    background:linear-gradient(160deg,#fff,#8fe8ff 55%,#3fa8ef);
+    clip-path:polygon(58% 0,18% 54%,44% 54%,8% 100%,82% 40%,50% 40%);
+    filter:drop-shadow(0 0 5px rgba(140,225,255,.9));
+    opacity:0;animation:vsBolt 2.2s steps(1,end) infinite}
+  #vsCard .vs::before{left:-26px;transform:translateY(-56%)}
+  #vsCard .vs::after{right:-26px;transform:translateY(-56%) scaleX(-1);animation-delay:.03s}
+  @keyframes vsBolt{
+    0%,17%,19%,20%,49%,51%,52%,100%{opacity:0}
+    18%,50%{opacity:1}
+  }
 
   /* --- start ---------------------------------------------------------
      A start-gantry light bar rather than three dots: five lamps fill
@@ -264,6 +289,12 @@
   @keyframes goFlash{from{opacity:.55}to{opacity:0}}
 
   /* --- result --------------------------------------------------------- */
+  /* Anchored to the top rather than centred like the other overlays: the
+     post-race camera (see finishFraming in main.js) zooms in on the car
+     that just crossed the line, sitting low in frame at the same anchor
+     the pre-race grid shot uses -- a centred card sat directly over it,
+     hiding the exact car the zoom was just built to show. */
+  #finishOverlay{align-items:flex-start;padding-top:max(54px,env(safe-area-inset-top) + 44px)}
   #finishCard{position:relative;border-radius:24px;padding:30px 30px 26px;min-width:min(78vw,300px);
     background:linear-gradient(180deg,rgba(18,23,29,.96),rgba(7,9,12,.97));
     border:1px solid rgba(255,255,255,.14);
@@ -284,7 +315,32 @@
   #finishCard h2{margin:0 0 4px;font-size:15px;letter-spacing:.14em;opacity:.62;font-weight:800}
   #finishCard .place{font-size:66px;font-weight:900;line-height:1;margin:6px 0 2px;
     letter-spacing:.06em;color:var(--accent);text-shadow:0 0 30px rgba(154,164,174,.22)}
-  #finishCard.win .place{text-shadow:0 0 40px rgba(255,214,74,.5)}
+  /* A win gets three quick electric surges on arrival -- WIN itself
+     snapping to white-hot and a bolt flashing on each side -- then
+     settles into the steady gold glow. Struck a handful of times and
+     done, not looping: this card sits on screen while the result is
+     read, and a glow that never stops arcing would fight that instead
+     of announcing it. A loss keeps the plain steel glow -- the cold,
+     closing-in grade the rest of this card already gives it is the
+     opposite of a celebratory spark. */
+  #finishCard.win .place{position:relative;text-shadow:0 0 40px rgba(255,214,74,.5);
+    animation:winFlicker 1.4s steps(1,end) 1}
+  @keyframes winFlicker{
+    0%,7%,10%,21%,24%,39%,42%,100%{color:var(--accent);text-shadow:0 0 40px rgba(255,214,74,.5)}
+    8%,22%,40%{color:#fff;text-shadow:0 0 6px #fff,0 0 30px rgba(255,232,150,1),0 0 70px rgba(255,214,74,.9)}
+  }
+  #finishCard.win .place::before,#finishCard.win .place::after{
+    content:'';position:absolute;top:52%;width:22px;height:32px;
+    background:linear-gradient(160deg,#fff,#ffe9a8 55%,#ffd64a);
+    clip-path:polygon(58% 0,18% 54%,44% 54%,8% 100%,82% 40%,50% 40%);
+    filter:drop-shadow(0 0 8px rgba(255,214,74,.9));
+    opacity:0;animation:winBolt 1.4s steps(1,end) 1}
+  #finishCard.win .place::before{left:-32px;transform:translateY(-58%)}
+  #finishCard.win .place::after{right:-32px;transform:translateY(-58%) scaleX(-1);animation-delay:.02s}
+  @keyframes winBolt{
+    0%,7%,10%,21%,24%,39%,42%,100%{opacity:0}
+    8%,22%,40%{opacity:1}
+  }
   #finishCard .rtWrap{display:flex;flex-direction:column;gap:3px;margin:12px 0 20px}
   #finishCard .rtLabel{font-size:9px;letter-spacing:.34em;text-indent:.34em;opacity:.5;font-weight:800}
   #finishCard .rt{font-size:26px;font-weight:900;font-variant-numeric:tabular-nums;letter-spacing:.02em}
@@ -788,6 +844,13 @@
           // is crossed it is answering a question nobody is asking, and it
           // fights the finish effect for the same edges.
           document.body.classList.remove('final-lap');
+          // Likewise the lap banner itself: crossing the line while "FINAL
+          // LAP" is still on screen (its own 2.2s timer can easily still be
+          // running) used to leave it up to fade out on its own schedule,
+          // ghosting behind the result card that lands at the same spot.
+          // The finish supersedes it outright.
+          lapPopupTimer=0;
+          lapPopup.classList.remove('show');
           finishDelay+=dt;
           // Held back until the finish effect (render/finishfx.js) has run
           // its banner and title and cleared out of the way.

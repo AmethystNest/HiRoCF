@@ -8,7 +8,8 @@
  * (DOM, see index.html) arrives 1.9s after the line and everything here has
  * to have said its piece and stepped back by then:
  *
- *   0.00  impact   -- flash, radial speed lines blown out from the centre
+ *   0.00  impact   -- flash, radial speed lines and a burst of lightning
+ *                     bolts blown out from the centre
  *   0.10  banner   -- a chequered band sweeps across and holds, waving
  *   0.15  title    -- FINISH slams down from above and settles
  *   1.30  clear    -- title and banner leave, vignette stays under the card
@@ -25,15 +26,37 @@ const clamp01 = (t) => (t < 0 ? 0 : t > 1 ? 1 : t);
 /** 0 before `from`, eased 0..1 across `dur`, 1 after. */
 const phase = (t, from, dur) => easeOut(clamp01((t - from) / dur));
 
+/**
+ * A jagged path from (x0,y0) to (x1,y1) -- straight-line displacement
+ * jittered perpendicular to its own direction, more so in the middle
+ * than at either end, which is what keeps a lightning bolt's start and
+ * finish looking chosen while the middle looks struck.
+ */
+function boltPath(x0, y0, x1, y1, segments, jitter) {
+  const pts = [[x0, y0]];
+  const dx = x1 - x0, dy = y1 - y0;
+  const nx = -dy, ny = dx;
+  const nlen = Math.hypot(nx, ny) || 1;
+  for (let i = 1; i < segments; i++) {
+    const t = i / segments;
+    const off = (Math.random() - 0.5) * jitter * (1 - Math.abs(t - 0.5) * 1.3);
+    pts.push([x0 + dx * t + (nx / nlen) * off, y0 + dy * t + (ny / nlen) * off]);
+  }
+  pts.push([x1, y1]);
+  return pts;
+}
+
 export function buildFinishFX() {
   const view = new Container();
   view.label = 'finishfx';
   view.visible = false;
 
   const under = new Graphics();      // grade + speed lines, behind everything
+  const bolts = new Graphics();      // lightning burst, over the grade, under the banner
   const banner = new Graphics();     // chequered flag, behind the title
   const over = new Graphics();       // confetti, in front of everything
   view.addChild(under);
+  view.addChild(bolts);
   view.addChild(banner);
 
   const titleMain = new Text({
@@ -62,6 +85,7 @@ export function buildFinishFX() {
   let timer = 0;
   let confetti = [];
   let lines = [];
+  let boltShapes = [];
 
   function trigger(place, screenW, screenH) {
     active = true;
@@ -82,6 +106,30 @@ export function buildFinishFX() {
         len: 120 + Math.random() * 420,
         w: 2 + Math.random() * (win ? 7 : 4),
       });
+    }
+
+    // Lightning, struck once with the same beat as the speed lines --
+    // fewer, cooler-toned forks for a loss than the bright branching
+    // burst a win gets, same grade split the rest of this effect draws
+    // in. Each origin is offset a little from dead centre so a handful
+    // of bolts struck at once do not read as one star pattern.
+    boltShapes = [];
+    const boltCount = win ? 7 : 3;
+    for (let i = 0; i < boltCount; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const dist = 260 + Math.random() * 360;
+      const x0 = (Math.random() - 0.5) * 80, y0 = (Math.random() - 0.5) * 60;
+      const x1 = x0 + Math.cos(ang) * dist, y1 = y0 + Math.sin(ang) * dist;
+      const pts = boltPath(x0, y0, x1, y1, 6, win ? 46 : 30);
+      let branch = null;
+      if (Math.random() < 0.7) {
+        const bi = 2 + ((Math.random() * (pts.length - 4)) | 0);
+        const [bx, by] = pts[bi];
+        const bAng = ang + (Math.random() - 0.5) * 1.4;
+        const bDist = dist * (0.25 + Math.random() * 0.3);
+        branch = boltPath(bx, by, bx + Math.cos(bAng) * bDist, by + Math.sin(bAng) * bDist, 3, 20);
+      }
+      boltShapes.push({ pts, branch, w: 1.6 + Math.random() * 1.6, delay: Math.random() * 0.05 });
     }
 
     if (!win) return;
@@ -106,7 +154,9 @@ export function buildFinishFX() {
     view.visible = false;
     confetti = [];
     lines = [];
+    boltShapes = [];
     under.clear();
+    bolts.clear();
     banner.clear();
     over.clear();
     titleMain.text = '';
@@ -119,6 +169,7 @@ export function buildFinishFX() {
     const t = timer;
     const cx = screenW / 2, cy = screenH / 2;
     under.clear();
+    bolts.clear();
     banner.clear();
     over.clear();
 
@@ -160,6 +211,38 @@ export function buildFinishFX() {
           cx + cosA * f, cy + sinA * f,
           cx + cosA * n - nx, cy + sinA * n - ny,
         ]).fill({ color: win ? 0xfff3c4 : 0x8e99a4, alpha: 0.5 * lineLife });
+      }
+    }
+
+    // --- lightning -----------------------------------------------------
+    // Struck once, same instant as the speed lines, and gone well before
+    // the banner arrives -- an accent on the impact, not a sustained
+    // effect. Each bolt is drawn twice, a wide soft glow pass then a
+    // thin bright core, the same two-pass trick the boost flame's and
+    // contact sparks' textures already lean on for "hot at the centre".
+    const boltLife = Math.max(0, 1 - t / 0.34);
+    if (boltLife > 0 && boltShapes.length) {
+      const core = win ? 0xf2ffff : 0xd7e6ee;
+      const glow = win ? 0x9fe8ff : 0x6f8fa8;
+      const punch = Math.max(0, 1 - t / 0.10);
+      const drawPath = (pts) => {
+        bolts.moveTo(cx + pts[0][0], cy + pts[0][1]);
+        for (let i = 1; i < pts.length; i++) bolts.lineTo(cx + pts[i][0], cy + pts[i][1]);
+      };
+      for (const b of boltShapes) {
+        const strike = clamp01((t - b.delay) / 0.05);
+        if (strike <= 0) continue;
+        const alpha = boltLife * strike;
+        drawPath(b.pts);
+        bolts.stroke({ width: b.w * 3.2, color: glow, alpha: alpha * 0.35 * (0.6 + punch * 0.4), cap: 'round', join: 'round' });
+        drawPath(b.pts);
+        bolts.stroke({ width: b.w, color: core, alpha: alpha * (0.75 + punch * 0.25), cap: 'round', join: 'round' });
+        if (b.branch) {
+          drawPath(b.branch);
+          bolts.stroke({ width: b.w * 2.4, color: glow, alpha: alpha * 0.28, cap: 'round', join: 'round' });
+          drawPath(b.branch);
+          bolts.stroke({ width: b.w * 0.75, color: core, alpha: alpha * 0.7, cap: 'round', join: 'round' });
+        }
       }
     }
 
