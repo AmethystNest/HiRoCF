@@ -60,6 +60,18 @@ const SURFACE_PRESET_BY_STAGE = { 1: 'circuit', 2: 'city', 3: 'mountain', 4: 'hi
  * points -- a butt joint leaves a one-index hairline of bare ground where
  * two sets of ribbons meet.
  */
+/**
+ * Pre-race camera. START_CAM_ZOOM is how far in the camera sits while the
+ * two cars are on the grid -- enough to read both of them and the paint
+ * they are sitting on. It then pulls back to the racing framing between
+ * countdown START_CAM_FROM and START_CAM_TO, finishing a fraction before
+ * the lights go green (which is at 0.55) so the frame is settled by the
+ * time the car can move.
+ */
+const START_CAM_ZOOM = 1.85;
+const START_CAM_FROM = 1.75;
+const START_CAM_TO = 0.62;
+
 const SURFACE_SECTORS_BY_STAGE = {
   5: {
     main: 'gt_highway',
@@ -107,6 +119,12 @@ export class Game {
     this.zoomLevels = [1.00, 1.15, 1.30];
     this.zoomLevel = 0;
     this.zoom = this.baseZoom * this.zoomLevels[this.zoomLevel];
+    // Presentation-only camera multiplier, applied to world.scale and to
+    // nothing else. Kept apart from `zoom` on purpose: `zoom` sets
+    // worldScale, which car sizes, the start grid and every prop placement
+    // are measured in, and those are decided once at loadStage. Moving the
+    // camera must not move them.
+    this.camZoom = 1;
     this.stageId = null;
 
     this.finishFX = buildFinishFX();
@@ -143,6 +161,29 @@ export class Game {
       }
     }
     return false;
+  }
+
+  /**
+   * Camera multiplier for the pre-race presentation: close in on the grid
+   * while the VS card and the lights are up, and be back at the racing
+   * framing before the lights go green.
+   *
+   * Driven straight off the countdown rather than eased toward a target,
+   * so it ARRIVES: an exponential approach would still be pulling back as
+   * the car left the line. The value is continuous across the vs ->
+   * countdown -> racing handover, so nothing has to blend it.
+   */
+  startCameraZoom() {
+    const race = this.race;
+    if (!race) return 1;
+    if (race.state === 'vs') return START_CAM_ZOOM;
+    if (race.state !== 'countdown') return 1;
+    const span = START_CAM_FROM - START_CAM_TO;
+    const k = Math.max(0, Math.min(1, (START_CAM_FROM - race.countdown) / span));
+    // ease-in-out, so the pull-back neither jerks off the mark nor
+    // arrives with a bump
+    const e = k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2;
+    return START_CAM_ZOOM + (1 - START_CAM_ZOOM) * e;
   }
 
   cycleZoom() {
@@ -618,7 +659,8 @@ export class Game {
     this.world.pivot.set(p.x, p.y);
     this.world.position.set(W / 2 + shakeX, H * 0.62 + shakeY);
     this.world.rotation = -(p.angle + Math.PI / 2);
-    this.world.scale.set(this.zoom);
+    this.camZoom = this.startCameraZoom();
+    this.world.scale.set(this.zoom * this.camZoom);
 
     this.cullProps(p.x, p.y, W, H);
     this.miniMap.update(W, p, this.rival);
@@ -642,7 +684,7 @@ export class Game {
   cullProps(px, py, W, H) {
     if (!this._propCull) return;
     // pivot sits at (W/2, H*0.62) on screen -- the long reach is upward
-    const reach = Math.hypot(W / 2, H * 0.62) / this.zoom;
+    const reach = Math.hypot(W / 2, H * 0.62) / (this.zoom * this.camZoom);
     for (let i = 0; i < this._propCull.length; i++) {
       const c = this._propCull[i];
       const lim = reach + c.r;

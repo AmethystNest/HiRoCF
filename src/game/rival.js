@@ -58,6 +58,17 @@ const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
  * `amount` says the car is still committed to it.
  */
 /**
+ * Most lateral travel the racing line may ask for per unit of forward
+ * travel -- about 24 degrees of crab. Set by sweeping it against what the
+ * car actually achieves: below this the apexes are visibly timid (at 0.18
+ * the body stopped 21 units short of the pavement edge), above it the
+ * transitions stop being trackable and the overshoot it exists to prevent
+ * comes back. Here the body arrives within 9 units of the edge through the
+ * tightest corner on the lap, and never crosses it.
+ */
+const MAX_LATERAL_SLOPE = 0.44;
+
+/**
  * Per-point lateral offset for a full out-in-out lap, solved once for the
  * whole path and cached on it.
  *
@@ -127,7 +138,7 @@ function getRacingLine(path, limit) {
   const pts = (dist) => Math.max(1, Math.round(dist / path.spacing));
   // ~0.16 rad over the 4-spacing window is about a 650-radius corner: at
   // that point and tighter the car is fully committed to the inside.
-  const FULL_TURN = 0.16;
+  const FULL_TURN = 0.13;
   const smoothTurn = blur(turn, pts(160));
   const apex = new Float32Array(n);
   for (let i = 0; i < n; i++) {
@@ -145,7 +156,39 @@ function getRacingLine(path, limit) {
     const v = apex[i] * (1 + OUT) - wide[i] * OUT;
     line[i] = v > limit ? limit : v < -limit ? -limit : v;
   }
-  const result = blur(line, pts(220));
+  const smoothed = blur(line, pts(220));
+
+  // Cap how fast the line may move across the road. Nothing so far knows
+  // anything about the car, and a blur of a saturating profile can leave a
+  // hairpin transition asking for 0.73 of lateral travel per unit of
+  // forward travel -- a 36-degree crab the car cannot hold. It chases it,
+  // misses, and arrives on the far side of the road: measured, the rival
+  // overshot a commanded 141 by reaching 169, hanging its body 22 units
+  // past the pavement. Limiting the slope instead of catching the overshoot
+  // afterwards keeps the line something the car can actually be ON.
+  //
+  // Swept forward then backward, repeatedly, because clamping one step
+  // pushes the violation into the next: each pass moves the excess a point
+  // further out and a few passes settle it. The tails wrap, so both
+  // directions have to be swept or a corner near the seam keeps one steep
+  // side.
+  const maxStep = MAX_LATERAL_SLOPE * path.spacing;
+  const limited = Float32Array.from(smoothed);
+  for (let pass = 0; pass < 6; pass++) {
+    for (let i = 0; i < n; i++) {
+      const j = wrap(i + 1);
+      const d = limited[j] - limited[i];
+      if (d > maxStep) limited[j] = limited[i] + maxStep;
+      else if (d < -maxStep) limited[j] = limited[i] - maxStep;
+    }
+    for (let i = n - 1; i >= 0; i--) {
+      const j = wrap(i - 1);
+      const d = limited[j] - limited[i];
+      if (d > maxStep) limited[j] = limited[i] + maxStep;
+      else if (d < -maxStep) limited[j] = limited[i] - maxStep;
+    }
+  }
+  const result = blur(limited, pts(120));
   path._racingLineCache[key] = result;
   return result;
 }
@@ -522,10 +565,13 @@ export class RivalCar {
       // Read straight off the solved line at the car's own position. It is
       // already smooth along the lap, so the only easing needed is enough
       // to stop a route-hint jump from stepping the target sideways.
-      const usable = this.roadHalf - (this.bodyHalf ?? 45) - 8;
-      const targetLine = warmingUp
-        ? 0
-        : this._perfectLine[here] * (usable / this._perfectLineLimit);
+      // 4, not the 8 a reactive line leaves: this one is solved and
+      // clamped, so the only thing the margin has to cover is the car
+      // arriving a fraction wide, and every unit of it is a unit of apex
+      // the car visibly gives away.
+      const usable = this.roadHalf - (this.bodyHalf ?? 45) - 4;
+      this._lineScale = usable / this._perfectLineLimit;
+      const targetLine = warmingUp ? 0 : this._perfectLine[here] * this._lineScale;
       const raceSmooth = 1 - Math.exp(-dt * 6.0);
       this._raceLine += (targetLine - this._raceLine) * raceSmooth;
     } else if (this.raceLineEnabled) {
@@ -638,6 +684,18 @@ export class RivalCar {
     }
 
     const lookAhead = 11;
+    // A solved line is known everywhere, so offset the aim point by the
+    // line's value AT THE AIM POINT rather than at the car. Using the
+    // car's own value steers toward a point 11 indices ahead while holding
+    // the offset from 11 indices behind it, which is a lag of exactly the
+    // lookahead distance -- the car was arriving at 112 of a commanded 137
+    // through every apex, and giving away 35 units of road it had been
+    // told to use. Nothing else reads the line this way because nothing
+    // else knows it in advance.
+    if (this._perfectLine && !warmingUp && this.contactRecoveryTimer <= 0) {
+      const ahead = this._perfectLine[path.wrap(here + lookAhead)] * this._lineScale;
+      aimLine = Math.max(-aimCap, Math.min(aimCap, ahead));
+    }
     const target = path.offsetPoint(here + lookAhead, aimLine);
     const desired = Math.atan2(target.y - this.y, target.x - this.x);
     const diff = wrapAngle(desired - this.angle);
