@@ -540,6 +540,13 @@ export class Game {
     // world scale does. Stage 4's box truck is wide enough that the old
     // car-sized default would have hung it over the edge while blocking.
     this.rival.bodyHalf = rivalWorldSize.w / 2;
+    // What the car LOOKS like it is, which is not the same number: a
+    // sprite whose photo fills its box differently from the player's is
+    // corrected by CAR_VISUAL_SCALE, and stage 5's is drawn at 55% of the
+    // box it collides with. The racing line has to use this one, or it
+    // keeps 42 units of clearance that nobody can see and the apexes look
+    // timid however hard they are actually being attacked.
+    this.rival.drawHalf = rivalDrawSize.w / 2;
     this.rival.placeAtStart(-rivalStartBack, rivalStartLateral);
     this.rival.deckId = 0;
     this.rival.zLevel = 0;
@@ -742,6 +749,10 @@ export class Game {
     // player -- they are not the same point while the grid is in shot.
     this.cullProps(pivotX, pivotY, W, H);
     this.miniMap.update(W, p, this.rival);
+    // The minimap is drawn into the stage, not the page, so it cannot ride
+    // the body class the rest of the HUD uses -- same schedule, same
+    // result: gone for the grid shot, back before the lights go green.
+    this.miniMap.view.alpha = 1 - blend;
     this.updateDriftFX();
     this.boostFlame.update(p, this.worldScale, CAR_SIZE.player);
     this.rivalBoostFlame.update(this.rival, this.worldScale, this.rivalSize);

@@ -427,6 +427,10 @@ export class RivalCar {
     // world scale. Without it the lean limit assumes a car; stage 4's
     // truck is wide enough that a car's limit would hang it off the road.
     this.bodyHalf = null;
+    // Half the car's DRAWN width, which CAR_VISUAL_SCALE can make much
+    // smaller than the collision width above. Set with bodyHalf in
+    // main.js once the world scale is known; only the racing line uses it.
+    this.drawHalf = null;
     this.weavePhase = 0;
     this.blockGapMax = 620;   // only blocks when the player is within this close behind
     this.weaveSpeed = 2.6;    // rad/s -- one full swerve cycle roughly every 2.4s
@@ -573,12 +577,12 @@ export class RivalCar {
       // Read straight off the solved line at the car's own position. It is
       // already smooth along the lap, so the only easing needed is enough
       // to stop a route-hint jump from stepping the target sideways.
-      // 3, not the 8 a reactive line leaves: this one is solved and
+      // 2, not the 8 a reactive line leaves: this one is solved and
       // clamped, so the only thing the margin has to cover is the car
       // arriving a fraction wide, and every unit of it is a unit of apex
-      // the car visibly gives away. Measured over two laps, the body's
-      // outer edge reaches 239 of the 240 available and never crosses.
-      const usable = this.roadHalf - (this.bodyHalf ?? 45) - 3;
+      // the car visibly gives away. Measured over two laps against the
+      // DRAWN body, it reaches 239 of the 240 available, never crosses.
+      const usable = this.roadHalf - (this.drawHalf ?? this.bodyHalf ?? 45) - 2;
       this._lineScale = usable / this._perfectLineLimit;
       const targetLine = warmingUp ? 0 : this._perfectLine[here] * this._lineScale;
       const raceSmooth = 1 - Math.exp(-dt * 6.0);
@@ -607,7 +611,7 @@ export class RivalCar {
     // part of it is hanging off the road. `bodyHalf` is only known once
     // the world scale is (see main.js); 45 is the car-sized default this
     // used before there was anything on the grid wider than a car.
-    const lineLimit = this.roadHalf - (this.bodyHalf ?? 45) - 8;
+    const lineLimit = this.roadHalf - (this.bodyHalf ?? 45) - 2;
 
     let steerLine = this._raceLine;
     if (this.blockEnabled && race?.player && race.gap != null && race.gap > 0) {

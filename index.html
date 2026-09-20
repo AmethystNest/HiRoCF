@@ -67,6 +67,15 @@
      quick, so it keeps its own short durations here while only the rise
      is slow -- one transition list covering both, or the press would ease
      over a third of a second. */
+  /* The HUD and the view button go with the pads. During the grid shot
+     the camera is closed right in on the two cars, and a lap counter, a
+     clock, a speed reading and a nitro gauge around them are all
+     answering questions the race has not asked yet. The stage picker
+     stays: it is the one control that is FOR the moment before a race,
+     and hiding it would trap the player in whichever stage loaded. */
+  .hud,#zoomBtn{transition:opacity .28s ease,transform .36s cubic-bezier(.16,1,.3,1)}
+  body.pre-race .hud{opacity:0;transition:none}
+  body.pre-race #zoomBtn{opacity:0;transform:translateX(-130%);transition:none;pointer-events:none}
   body.pre-race .controls{pointer-events:none}
   body.pre-race .controls .side{pointer-events:none}
   /* `transition:none` on the way IN is the point: the pads are simply not
