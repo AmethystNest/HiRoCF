@@ -85,6 +85,8 @@ const START_CAM_TO = 0.62;
  * against whichever side had less room.
  */
 const START_CAM_BOX = { side: 0.04, top: 0.50, bottom: 0.88 };
+/** Clear air between the two cars on the starting grid, per side. */
+const GRID_MARGIN = 30;
 
 const SURFACE_SECTORS_BY_STAGE = {
   5: {
@@ -211,34 +213,30 @@ export class Game {
    * half the spread from the middle and the box is used symmetrically --
    * on a two-car grid that is the difference between 1.5x and 2.3x.
    *
-   * Each car contributes the extent of its own ORIENTED box along each of
-   * the camera's axes, not one radius for both. A car is half again as
-   * long as it is wide, and on a grid the two sit side by side with the
-   * long axis up the screen -- so width is what has to fit across and
-   * length is what has to fit up and down.
+   * Both cars are measured as a STANDARD car, whatever is actually on the
+   * grid, so the framing is the same on every stage. The one rival that
+   * is not car-sized -- stage 4's box truck, two and a half lengths long
+   * -- would otherwise drag that stage down to 1.2x while the rest sat at
+   * 2.3x, and one consistent opening shot is worth more than keeping the
+   * truck's tail in frame. It is cropped on purpose.
+   *
+   * The extent is that of an ORIENTED box along each of the camera's
+   * axes, not one radius for both. A car is half again as long as it is
+   * wide, and on a grid the two sit side by side with the long axis up
+   * the screen -- so width is what has to fit across and length is what
+   * has to fit up and down.
    */
   gridFraming(W, H) {
     const p = this.player, r = this.rival;
     const idle = { x: p?.x ?? 0, y: p?.y ?? 0, anchorY: H * 0.62, zoom: 1 };
     if (!p || !r) return idle;
 
-    const dx = r.x - p.x, dy = r.y - p.y;
-    const ca = Math.cos(p.angle), sa = Math.sin(p.angle);
-    const forward = dx * ca + dy * sa;
-    const across = dy * ca - dx * sa;
-
-    const half = (size, angle) => {
-      const c = Math.abs(Math.cos(angle)), s2 = Math.abs(Math.sin(angle));
-      const w = size.w * this.worldScale * 0.5, h = size.h * this.worldScale * 0.5;
-      return { across: w * c + h * s2, up: w * s2 + h * c };
-    };
-    const me = half(CAR_SIZE.player, 0);
-    const them = half(this.rivalSize ?? CAR_SIZE.player, r.angle - p.angle);
-
-    // From the midpoint, each car sits half the spread out, plus its own
-    // extent. The bigger of the two is what has to fit.
-    const needAcross = Math.abs(across) / 2 + Math.max(me.across, them.across);
-    const needUp = Math.abs(forward) / 2 + Math.max(me.up, them.up);
+    // The grid this is framed for: two standard cars, side by side, level
+    // with each other. Not the cars actually on it -- see above.
+    const carW = CAR_SIZE.player.w * this.worldScale;
+    const carH = CAR_SIZE.player.h * this.worldScale;
+    const needAcross = (carW + GRID_MARGIN * 2) / 2 + carW / 2;
+    const needUp = carH / 2;
     const roomAcross = W * (0.5 - START_CAM_BOX.side);
     const roomUp = H * (START_CAM_BOX.bottom - START_CAM_BOX.top) / 2;
 
@@ -497,7 +495,7 @@ export class Game {
     // clear margin, so they never spawn overlapping regardless of zoom. Cars
     // line up behind the start/finish line, not on top of it (reference
     // build's startPose(back, lateral), back=360).
-    const gridMargin = 30;
+    const gridMargin = GRID_MARGIN;
     const startBack = 360;
     const playerStartLateral = playerWorldSize.w / 2 + gridMargin;
     const rivalStartLateral = -(rivalWorldSize.w / 2 + gridMargin);
