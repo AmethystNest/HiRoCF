@@ -7,6 +7,7 @@
  * or bouncing over the start line sideways.
  */
 import { RACE, PHYSICS as P } from '../config.js';
+import { setContact } from './contact.js';
 
 export class Progress {
   /**
@@ -198,7 +199,7 @@ export function resolveContacts(cars, sizes, dt = 1 / 60, passes = 4) {
   // rival leaves raw contact for a moment before the next overlap, and
   // without a grace window each re-touch would fire as a brand new impact.
   const touched = new Array(cars.length).fill(false);
-  for (const car of cars) if (car) car.carImpact = false;
+  const contactAt = new Array(cars.length).fill(null);
 
   for (let pass = 0; pass < passes; pass++) {
     for (let i = 0; i < cars.length; i++) {
@@ -214,13 +215,24 @@ export function resolveContacts(cars, sizes, dt = 1 / 60, passes = 4) {
             const d = Math.hypot(dx, dy) || 0.0001;
             const overlap = ac.r + bc.r - d;
             if (overlap > 0 && (!best || overlap > best.overlap)) {
-              best = { overlap, nx: dx / d, ny: dy / d };
+              // The touch point sits on the line between the two circle
+              // centres, ac.r along it -- that is where the panels are
+              // actually rubbing, and where the sparks belong.
+              best = {
+                overlap,
+                nx: dx / d,
+                ny: dy / d,
+                x: ac.x + (dx / d) * ac.r,
+                y: ac.y + (dy / d) * ac.r,
+              };
             }
           }
         }
         if (!best) continue;
         touched[i] = true;
         touched[j] = true;
+        contactAt[i] = best;
+        contactAt[j] = best;
 
         // Player has a small contact advantage. "Push power" is expressed
         // as how much of the separation the OTHER car receives: normally
@@ -307,9 +319,23 @@ export function resolveContacts(cars, sizes, dt = 1 / 60, passes = 4) {
     const car = cars[i];
     if (!car) continue;
     car._carContactCooldown = Math.max(0, (car._carContactCooldown ?? 0) - dt);
-    if (touched[i]) {
-      car.carImpact = car._carContactCooldown <= 0;
-      car._carContactCooldown = P.wallGraceWindow;
-    }
+    if (!touched[i]) continue;
+    const impact = car._carContactCooldown <= 0;
+    car._carContactCooldown = P.wallGraceWindow;
+    const hit = contactAt[i];
+    // `best.nx/ny` runs from the pair's lower index to its higher one, so
+    // it already points from this car into what it hit for the first of
+    // them and has to be flipped for the second -- contact.js expects it
+    // that way round. (With more than two cars this keeps only the last
+    // pair a car was in; there are two, so there is one pair.)
+    const flip = i === 0 ? 1 : -1;
+    setContact(car.contact, {
+      impact,
+      x: hit.x,
+      y: hit.y,
+      nx: hit.nx * flip,
+      ny: hit.ny * flip,
+      force: Math.min(1, Math.abs(car.speed ?? 0) / P.maxSpeed),
+    });
   }
 }

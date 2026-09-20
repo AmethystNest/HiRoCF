@@ -11,6 +11,7 @@ import { LAYOUTS } from './track/layouts.js';
 import { PlayerCar } from './game/player.js';
 import { RivalCar } from './game/rival.js';
 import { Race, resolveContacts, autoDrivePostRace } from './game/race.js';
+import { clearContact } from './game/contact.js';
 
 const BASE_PLAYER_PHYSICS = { ...PHYSICS };
 
@@ -538,12 +539,12 @@ export class Game {
     this.driftGfx = new Graphics();
     this.actors.addChild(this.driftGfx);
 
-    // Off-road dust and wall-impact sparks -- player only (see
-    // contactfx.js). Dust belongs at road level like the drift marks;
-    // sparkView is added at the very end of this method instead, once both
-    // cars exist, so a spark burst draws OVER them rather than under.
+    // Off-road dust, contact sparks and scrape smoke, for both cars (see
+    // contactfx.js). Dust and smoke belong at road level like the drift
+    // marks; overView is added at the very end of this method instead,
+    // once both cars exist, so sparks draw OVER them rather than under.
     this.contactFX = buildContactFX();
-    this.actors.addChild(this.contactFX.dustView);
+    this.actors.addChild(this.contactFX.underView);
 
     this.player = new PlayerCar(path, cfg);
     this.player.placeAtStart(-startBack, playerStartLateral);
@@ -609,7 +610,7 @@ export class Game {
 
     // Now that both cars exist, sparks draw over them -- see contactFX
     // setup near driftGfx above.
-    this.actors.addChild(this.contactFX.sparkView);
+    this.actors.addChild(this.contactFX.overView);
 
     // Deck state has to be right from the grid, not only once the lights go
     // out: update() only syncs it while racing, so without this both cars
@@ -650,6 +651,13 @@ export class Game {
     const state = this.race.state;
     const p = this.player;
 
+    // One place, before anything can write one: a contact record left over
+    // from last frame would otherwise be drawn again, and after the finish
+    // (where the cars are driven by autoDrivePostRace and resolveContacts
+    // never runs) it would stick permanently.
+    clearContact(p.contact);
+    clearContact(this.rival.contact);
+
     if (state === 'racing') {
       p.update(dt, this.input);
 
@@ -688,12 +696,6 @@ export class Game {
           ],
           dt,
         );
-      } else {
-        // Not called this frame -- without this, a carImpact left true
-        // from the exact frame the decks diverged would sit stale (still
-        // true) and contactFX would keep firing a fresh burst every frame
-        // until the decks matched again and resolveContacts ran to clear it.
-        p.carImpact = false;
       }
     } else if (state === 'finished') {
       // Race is over: clear any remaining drift state/visual yaw for BOTH cars,
@@ -826,7 +828,7 @@ export class Game {
     this.updateDriftFX();
     this.boostFlame.update(p, this.worldScale, CAR_SIZE.player);
     this.rivalBoostFlame.update(this.rival, this.worldScale, this.rivalSize);
-    this.contactFX.update(p, dt, this.worldScale);
+    this.contactFX.update([p, this.rival], dt, this.worldScale);
     this.finishFX.update(dt, W, H);
   }
 

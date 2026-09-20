@@ -6,6 +6,7 @@
  * identical.
  */
 import { PHYSICS as P, NITRO, DRIFT_MARK_LIFE } from '../config.js';
+import { makeContact, setContact } from './contact.js';
 
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
@@ -33,6 +34,8 @@ export class PlayerCar {
     // event begins.
     this._wallCooldown = 0;
     this.wallImpact = false;
+    /** Where and how hard this car last touched something -- see contact.js. */
+    this.contact = makeContact();
     this.driftTrail = [];
     // how far the sprite should currently tilt off "straight ahead" to show
     // the drift -- see update() and main.js's playerSprite.rotation. Needed
@@ -295,6 +298,27 @@ export class PlayerCar {
       }
     } else {
       this.wallStuckTime = Math.max(0, this.wallStuckTime - dt * 2.5);
+    }
+
+    // Effects only, and deliberately NOT gated on `touchingWall`. The snap
+    // above parks the car at `safe`, inside the trigger, so a car grinding
+    // along the barrier is only PAST the trigger on about one frame in
+    // four -- driving the sparks off that would strobe them. Riding at or
+    // beyond the snap radius is the honest "still rubbing" test, true on
+    // every frame of a grind and false as soon as the car steers off.
+    // The contact patch is the barrier face, not the middle of the roof,
+    // which is where a burst placed on the car itself appears to come from.
+    if (after.dist > this.wallHalf - P.wallInset - 2) {
+      const ox = this.x - after.x, oy = this.y - after.y;
+      const od = Math.hypot(ox, oy) || 1;
+      setContact(this.contact, {
+        impact: this.wallImpact,
+        x: after.x + (ox / od) * this.wallHalf,
+        y: after.y + (oy / od) * this.wallHalf,
+        nx: ox / od,
+        ny: oy / od,
+        force: Math.min(1, this.speed / P.maxSpeed),
+      });
     }
 
     this.shake = Math.max(0, this.shake - dt * 26);

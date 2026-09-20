@@ -7,6 +7,7 @@
  * config and are carried over from the Canvas build.
  */
 import { PHYSICS as P, DRIFT_MARK_LIFE } from '../config.js';
+import { makeContact, setContact } from './contact.js';
 
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
@@ -280,6 +281,12 @@ export class RivalCar {
     this.path = path;
     this.roadHalf = cfg.roadHalf;
     this.wallHalf = cfg.wallHalf;
+    /** Same two fields the player exposes purely so the effects layer can
+     *  treat both cars alike -- see contact.js and render/contactfx.js.
+     *  Neither is read by the AI itself. */
+    this.onGrass = false;
+    this.contact = makeContact();
+    this._wallCooldown = 0;
 
     this.maxSpeed = tuning.maxSpeed;
     this.holdOpeningStraight = tuning.holdOpeningStraight ?? false;
@@ -889,6 +896,29 @@ export class RivalCar {
       if (!(this.noBigCurveSlow && bigCurve >= 0.35)) this.speed *= 0.965;
     }
 
+    // Effects only -- the containment above is unchanged, and this sits
+    // outside it on a slightly lower threshold so a rival being eased back
+    // in keeps producing sparks while it is still out there rather than
+    // only on the frames the 9% pull happens to leave it past +35. Still
+    // 20 units OUTSIDE the road edge, so a racing line that runs the kerb
+    // (stage 5's holds roadHalf - drawHalf - 2) never trips it.
+    if (after.dist > this.roadHalf + 20) {
+      const dx = this.x - after.x, dy = this.y - after.y;
+      const d = Math.hypot(dx, dy) || 1;
+      this._wallCooldown = Math.max(0, this._wallCooldown - dt);
+      const impact = this._wallCooldown <= 0;
+      this._wallCooldown = P.wallGraceWindow;
+      setContact(this.contact, {
+        impact,
+        x: after.x + (dx / d) * this.roadHalf,
+        y: after.y + (dy / d) * this.roadHalf,
+        nx: dx / d,
+        ny: dy / d,
+        force: Math.min(1, this.speed / P.maxSpeed),
+      });
+    }
+
+    this.onGrass = after.dist > this.roadHalf;
     this.near = after;
   }
 }
