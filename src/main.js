@@ -939,11 +939,22 @@ export class Game {
       // Crossing the line cancels drift immediately, but DO NOT snap the
       // chassis angle to the track tangent. Post-race auto drive will
       // straighten it quickly and continuously over the following frames.
+      //
+      // Also clears whatever a contact frozen mid-hit left behind.
+      // player.update() is what decays shake and recomputes wallImpact
+      // each frame (see player.js), and autoDrivePostRace replaces it
+      // entirely from here on -- crossing the line while still touching
+      // a wall left both stuck at their impact-frame values forever
+      // (a permanently shaking camera, and the crash sound re-firing
+      // every frame, since wallImpact never goes back to false).
       for (const car of [p, this.rival]) {
         car.drifting = false;
         if ('driftSlipAngle' in car) car.driftSlipAngle = 0;
         if ('driftSign' in car) car.driftSign = 0;
         if ('_driftAmt' in car) car._driftAmt = 0;
+        if ('shake' in car) car.shake = 0;
+        car.wallImpact = false;
+        car.carImpact = false;
       }
 
       // Locked in here, on the one frame the line is crossed, and held
