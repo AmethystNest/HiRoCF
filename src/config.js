@@ -330,15 +330,61 @@ export const CAR_VISUAL_SCALE = {
  * its circles at 0.355w (0.35w for the long-vehicle row), so a hull is
  * only ~0.71 of the box it is given -- which leaves the player's own
  * un-corrected hull about 26% wider than the car in its photo, and these
- * two, once corrected, about 30% narrower than theirs. Those cancel: side
- * by side, contact now lands within 0.3% of where the two sprites actually
- * meet on both stages, measured against the rendered art. Correcting the
- * player as well overshot in the other direction and buried the two cars
- * in each other, which is why only these two are listed.
+ * two, once corrected, about 30% narrower than theirs. Those cancel, so
+ * the width stays near each one's measured fraction (0.47 and 0.46) and
+ * only nudges up from it. Correcting the player as well stacked the two
+ * corrections instead of cancelling them and buried the cars in each
+ * other, which is why only these two are listed.
+ *
+ * The LENGTH is what the burying that survived that was actually about,
+ * and it is why these run slightly PAST the drawn box. A hull is a chain
+ * of circles, i.e. a rectangle with corners rounded by its own half-width,
+ * while a car photographed from above stays near full width almost to the
+ * bumper. Line the chain up with the body and those round shoulders cut in
+ * exactly where a car comes alongside: matched against the rendered art
+ * over a sweep of longitudinal offsets, contact at half a car length of
+ * stagger landed 7% (stage 1) and 5% (stage 3) inside the sprites, and at
+ * a full car length 22% and 26% inside. Reaching the chain past the
+ * bumpers pushes those shoulders out of the way -- worst case anywhere
+ * alongside is now 1.7% and 0.2%, and the hull never leads the sprites by
+ * more than 5.3%. It is not free (the hull stands 22% and 15% past the
+ * bumpers) but it costs nothing where it would show, because at nose-to-
+ * tail offsets the player's own hull is shoulder-limited the same way.
+ *
+ * One dip survives, around a car's nose beside the other's flank, and it
+ * is not these numbers: the player's front circle is 0.285w where its
+ * middle is 0.355w, and that radius caps the pair no matter how the rival
+ * is sized. Closing it means touching the player's hull, which is out of
+ * scope here.
  */
 export const CAR_HULL_SCALE = {
-  devilz: { w: 0.47, h: 0.84 },
-  ae86: { w: 0.46, h: 0.92 },
+  devilz: { w: 0.48, h: 1.02 },
+  ae86: { w: 0.46, h: 1.06 },
+};
+
+/**
+ * Where each car sits inside its own photo, as a fraction of the drawn
+ * size, +x across the car and +y toward its tail. Applied to the collision
+ * hull only (see hullCircles), for the same two rivals and nothing else.
+ *
+ * A sprite is anchored at the middle of its CANVAS, so a car that is not
+ * centred in its frame is drawn off the point it collides at -- and since
+ * the two flanks are then different distances from that point, the error
+ * flips sign between them: one side of the car buries into whatever it
+ * touches by as much as the other side holds it off. Stage 1's rival sits
+ * 4.0 units toward one side of its frame and 11.1 forward, stage 3's 2.6
+ * and 5.1, which is what was left of the burying once the hull was the
+ * right size. Measured from each photo's own alpha bbox; prius, r8 and the
+ * truck come out centred to the pixel, so they have nothing here.
+ *
+ * The player's photo is off-centre too, by 3.4 units, and that is NOT
+ * corrected here -- it is not one of the two cars this pass is scoped to,
+ * and it is the same on every stage. It leaves about 2.5% between the two
+ * flanks, roughly a screen pixel at racing zoom.
+ */
+export const CAR_HULL_OFFSET = {
+  devilz: { x: 0.0213, y: -0.0449 },
+  ae86: { x: 0.0142, y: -0.0208 },
 };
 
 /** How long a drift tyre-mark point stays visible before fading out. */

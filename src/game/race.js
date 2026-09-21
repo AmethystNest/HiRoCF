@@ -128,8 +128,31 @@ export class Race {
  * for arcade contact, and cost far less than a polygon test.
  */
 export function hullCircles(car, size) {
-  const fx = Math.cos(car.angle), fy = Math.sin(car.angle);
+  // The angle the car is DRAWN at, not the one it is travelling at. A
+  // sliding car is drawn yawed off its heading by driftVisualAngle (see
+  // main.js, where both sprites take `angle + driftVisualAngle`), and a
+  // body this long swings a lot of width out when it does: stage 3's rival
+  // reaches 29 degrees of yaw and holds some for two thirds of the lap,
+  // which puts its drawn flank up to twice as far out as a hull built on
+  // the heading alone reaches. Contact then lands with the two cars
+  // visibly overlapping. Turning the hull with the sprite keeps the two
+  // in agreement whatever the car is doing.
+  const drawn = car.angle + (car.driftVisualAngle ?? 0);
+  const fx = Math.cos(drawn), fy = Math.sin(drawn);
   const w = size.w, h = size.h;
+
+  // Where the car actually sits inside its own photo. The sprite is
+  // anchored at the middle of its canvas, so a body that is not centred in
+  // its frame is DRAWN off the position it collides at -- and the error
+  // flips sign between the two flanks, so one side buries and the other
+  // leaves daylight. `ox`/`oy` (see CAR_HULL_OFFSET) move the hull onto the
+  // drawn body; they are texture-space, so they go through the same axes
+  // the sprite's own rotation gives it: +x across the car, +y toward its
+  // tail. Absent (a photo whose car is centred) they are 0 and this is the
+  // car's own position, exactly as before.
+  const ox = size.ox ?? 0, oy = size.oy ?? 0;
+  const cx = car.x - ox * fy - oy * fx;
+  const cy = car.y + ox * fx - oy * fy;
 
   // Three circles cover a car, whose body is only about 1.4 times longer
   // than it is wide. They do not cover a truck: at 3.5 times longer the
@@ -139,9 +162,9 @@ export function hullCircles(car, size) {
   // it is wide gets a row of circles instead, spaced so they overlap.
   if (h < w * 2) {
     return [
-      { x: car.x + fx * h * 0.27, y: car.y + fy * h * 0.27, r: w * 0.285 },
-      { x: car.x, y: car.y, r: w * 0.355 },
-      { x: car.x - fx * h * 0.27, y: car.y - fy * h * 0.27, r: w * 0.305 },
+      { x: cx + fx * h * 0.27, y: cy + fy * h * 0.27, r: w * 0.285 },
+      { x: cx, y: cy, r: w * 0.355 },
+      { x: cx - fx * h * 0.27, y: cy - fy * h * 0.27, r: w * 0.305 },
     ];
   }
   const r = w * 0.35;
@@ -150,7 +173,7 @@ export function hullCircles(car, size) {
   const out = [];
   for (let i = 0; i < count; i++) {
     const t = count === 1 ? 0 : (i / (count - 1)) * 2 - 1;   // -1 .. +1
-    out.push({ x: car.x + fx * reach * t, y: car.y + fy * reach * t, r });
+    out.push({ x: cx + fx * reach * t, y: cy + fy * reach * t, r });
   }
   return out;
 }

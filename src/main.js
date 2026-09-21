@@ -1,5 +1,5 @@
 import { Application, Assets, Container, Graphics, Sprite, Texture, Rectangle } from './pixi.js';
-import { STAGES, PHYSICS, CAR_SIZE, CAR_VISUAL_SCALE, CAR_HULL_SCALE, DRIFT_MARK_LIFE } from './config.js';
+import { STAGES, PHYSICS, CAR_SIZE, CAR_VISUAL_SCALE, CAR_HULL_SCALE, CAR_HULL_OFFSET, DRIFT_MARK_LIFE } from './config.js';
 import { STAGE_PATHS } from './track/stages.js';
 import { buildSurface, surfaceExtent, buildRampStructure, buildTunnelStructure, buildElevatedDeckShadow, elevatedRuns, deckRuns } from './render/surfaces.js';
 import { buildProps, buildGroundPatches, buildSideStreets } from './render/props.js';
@@ -695,9 +695,14 @@ export class Game {
     // wider than the car in it. Nothing else reads this -- the sprite,
     // drawHalf and the grid all stay on rivalDrawSize.
     const rivalHullScale = CAR_HULL_SCALE[cfg.rival.sprite] ?? {};
+    const rivalHullOffset = CAR_HULL_OFFSET[cfg.rival.sprite] ?? {};
     this.rivalHullSize = {
       w: rivalDrawSize.w * (rivalHullScale.w ?? 1),
       h: rivalDrawSize.h * (rivalHullScale.h ?? 1),
+      // onto the body's own centre rather than the canvas's -- see
+      // CAR_HULL_OFFSET
+      ox: rivalDrawSize.w * (rivalHullOffset.x ?? 0),
+      oy: rivalDrawSize.h * (rivalHullOffset.y ?? 0),
     };
     // Same correction, but in SCREEN-PIXEL units (not yet multiplied by
     // `s`) -- boostfx.js's `size` parameter is authored-pixel, same
