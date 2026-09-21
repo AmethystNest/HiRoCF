@@ -102,7 +102,7 @@ export const STAGES = {
     id: 1, name: 'STAGE 1', shortDesc: '初心者向け',
     courseName: 'コース・シンプルサーキット',
     courseDesc: '長い直線 / 緩やかなカーブ / 大コーナー',
-    rivalName: '悪魔のアイツ',
+    rivalName: '這い寄る悪魔',
     roadHalf: 300, wallHalf: 410,
     rival: { maxSpeed: 710, accel: 250, turn: 2.25, sprite: 'devilz', block: false, weave: false, raceLine: true, cornerSlow: 0.22, holdOpeningStraight: true, finalLapBoostOnly: true },
     bestKey: 'topdownRacer_stage1_best_ms',
@@ -122,7 +122,7 @@ export const STAGES = {
     id: 3, name: 'STAGE 3', shortDesc: '峠道',
     courseName: 'コース・いろは坂',
     courseDesc: 'ヘアピン8箇所 / つづら折りの登坂 / 渓谷ストレート',
-    rivalName: '峠の走り屋',
+    rivalName: 'ガムテープデスマッチ',
     roadHalf: 190, wallHalf: 260,
     playerPhysics: {
       // moveScale is deliberately NOT overridden here any more -- pace is
@@ -178,7 +178,7 @@ export const STAGES = {
     id: 4, name: 'STAGE 4', shortDesc: '高速道路ステージ',
     courseName: 'コース・高速ループ',
     courseDesc: '長い直線 / 高速コーナー / 最高速勝負',
-    rivalName: '高速の帝王',
+    rivalName: '最大の敵は己',
     roadHalf: 360, wallHalf: 420,
     playerPhysics: { wallInset: 3, wallSpeedMul: 0.82 },
     wallTriggerExtra: 6,
@@ -220,7 +220,7 @@ export const STAGES = {
     // has never existed -- it was written for a stage that, in practice,
     // was silently running stage 1's beginner circuit.
     courseDesc: '市街+トンネル+峠+高架 / 全部入り',
-    rivalName: 'ラスボス',
+    rivalName: 'グリーンヘル',
     roadHalf: 240, wallHalf: 320,
     // The last rival is deliberately NOT faster or dirtier than the player.
     // It has the player's own engine -- same accel, same top speed, no
@@ -231,10 +231,15 @@ export const STAGES = {
     // course than any of the tricks the earlier rivals use. Beating it
     // means driving a better line, not out-dragging it.
     //
-    // No tint: the others are tinted to recolour a shared car sprite, and
-    // this one has its own, which is white.
+    // Tinted a deep racing green over its own white photo -- `tint` is a
+    // straight multiply against the source pixels, so true black (the
+    // hood stripe, the spoiler, the window trim, the wheels) stays black
+    // regardless of the tint colour, and only the white body panels pick
+    // it up. Same mechanism CAR_SIZE.player's own headlight/fascia
+    // tinting above relies on, just applied to a whole rival sprite.
     rival: {
       maxSpeed: PHYSICS.maxSpeed, accel: PHYSICS.accel, turn: 2.85, sprite: 'r8',
+      tint: 0x2f8a55,
       // 0.34, not 0.30: with the line taken right to the pavement edge,
       // the last 4% of corner speed is the difference between holding it
       // and running a wheel over the paint on the way out. Measured over
