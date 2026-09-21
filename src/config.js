@@ -311,5 +311,28 @@ export const CAR_VISUAL_SCALE = {
   r8: { w: 0.55, h: 0.91 },
 };
 
+/**
+ * Collision-hull-only shrink, on top of whatever CAR_VISUAL_SCALE already
+ * did to the DRAWN size. hullCircles (see race.js) sizes its three circles
+ * straight off the box it's handed, on the assumption that the box IS the
+ * car -- true for prius/r8/truck0164 (CAR_VISUAL_SCALE above already pulls
+ * those in to their own alpha bbox, so their drawn size and their real
+ * silhouette are the same box), false for player/devilz/ae86, whose photos
+ * still carry the ~0.46-0.56 wide / 0.84-0.92 tall padding described above
+ * with no visual correction (their drawn size is deliberately untouched --
+ * it's what the other three were tuned to match). Feeding hullCircles the
+ * padded box there meant two cars could pass with visible daylight between
+ * the sprites and still register a hit. This scales the HULL PASSED TO
+ * resolveContacts only, straight off each one's own measured alpha bbox
+ * fraction -- sprite width/height, drawHalf, grid spacing etc. are all
+ * unaffected. Not present here (prius/r8/truck0164) = {w:1,h:1}, i.e. the
+ * hull stays exactly what CAR_VISUAL_SCALE/CAR_SIZE already produced.
+ */
+export const CAR_HULL_SCALE = {
+  player: { w: 0.56, h: 0.90 },
+  devilz: { w: 0.47, h: 0.84 },
+  ae86: { w: 0.46, h: 0.92 },
+};
+
 /** How long a drift tyre-mark point stays visible before fading out. */
 export const DRIFT_MARK_LIFE = 1.3;

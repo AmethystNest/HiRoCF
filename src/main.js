@@ -1,5 +1,5 @@
 import { Application, Assets, Container, Graphics, Sprite, Texture, Rectangle } from './pixi.js';
-import { STAGES, PHYSICS, CAR_SIZE, CAR_VISUAL_SCALE, DRIFT_MARK_LIFE } from './config.js';
+import { STAGES, PHYSICS, CAR_SIZE, CAR_VISUAL_SCALE, CAR_HULL_SCALE, DRIFT_MARK_LIFE } from './config.js';
 import { STAGE_PATHS } from './track/stages.js';
 import { buildSurface, surfaceExtent, buildRampStructure, buildTunnelStructure, buildElevatedDeckShadow, elevatedRuns, deckRuns } from './render/surfaces.js';
 import { buildProps, buildGroundPatches, buildSideStreets } from './render/props.js';
@@ -676,6 +676,12 @@ export class Game {
     const rivalSize = CAR_SIZE[cfg.rival.sprite] || CAR_SIZE.devilz;
     this.rivalSize = rivalSize;
     const playerWorldSize = { w: CAR_SIZE.player.w * s, h: CAR_SIZE.player.h * s };
+    // Collision-hull-only shrink (see CAR_HULL_SCALE) -- the player's own
+    // sprite is the reference every other car's drawn size was matched to,
+    // so it stays untouched; only the box handed to resolveContacts below
+    // is pulled in to the photo's real alpha bbox.
+    const playerHullScale = CAR_HULL_SCALE.player ?? { w: 1, h: 1 };
+    this.playerHullSize = { w: playerWorldSize.w * playerHullScale.w, h: playerWorldSize.h * playerHullScale.h };
     const rivalWorldSize = { w: rivalSize.w * s, h: rivalSize.h * s };
     // Cosmetic-only correction (see CAR_VISUAL_SCALE): rivalWorldSize/
     // rivalSize still drive start-grid spacing, which is fine to keep on
@@ -689,6 +695,13 @@ export class Game {
     const rivalVisualScale = CAR_VISUAL_SCALE[cfg.rival.sprite] ?? { w: 1, h: 1 };
     const rivalDrawSize = { w: rivalWorldSize.w * rivalVisualScale.w, h: rivalWorldSize.h * rivalVisualScale.h };
     this.rivalDrawSize = rivalDrawSize;
+    // Collision-hull-only, on top of the drawn size (see CAR_HULL_SCALE):
+    // devilz/ae86 still carry the same padding prius/r8 were corrected for
+    // above, just with no VISUAL correction -- their drawn size is the
+    // reference the others were tuned to match, so only resolveContacts's
+    // hull (below) gets tightened, not the sprite itself.
+    const rivalHullScale = CAR_HULL_SCALE[cfg.rival.sprite] ?? { w: 1, h: 1 };
+    this.rivalHullSize = { w: rivalDrawSize.w * rivalHullScale.w, h: rivalDrawSize.h * rivalHullScale.h };
     // Same correction, but in SCREEN-PIXEL units (not yet multiplied by
     // `s`) -- boostfx.js's `size` parameter is authored-pixel, same
     // contract as CAR_SIZE.player passed for the player below, and
@@ -866,12 +879,10 @@ export class Game {
       if ((p.deckId ?? 0) === (this.rival.deckId ?? 0)) {
         resolveContacts(
           [p, this.rival],
-          [
-            { w: CAR_SIZE.player.w * this.worldScale, h: CAR_SIZE.player.h * this.worldScale },
-            // rivalDrawSize, not rivalSize -- already in world units (see
-            // where it's built above), so no further * worldScale here.
-            this.rivalDrawSize,
-          ],
+          // playerHullSize/rivalHullSize, not the drawn CAR_SIZE/rivalDrawSize
+          // boxes -- already in world units (see where they're built above),
+          // so no further * worldScale here. See CAR_HULL_SCALE.
+          [this.playerHullSize, this.rivalHullSize],
           dt,
         );
       }
