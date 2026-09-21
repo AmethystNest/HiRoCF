@@ -907,9 +907,10 @@ export class Game {
       this.rival.driftVisualAngle += (0 - this.rival.driftVisualAngle) * (1 - Math.exp(-dt * 12.0));
 
       // After the finish, keep the two cars on separate sides of the road
-      // so they don't converge onto the same centreline and overlap.
-      autoDrivePostRace(p, this.path, dt, 410, -52);
-      autoDrivePostRace(this.rival, this.path, dt, 390, 52);
+      // so they don't converge onto the same centreline and overlap --
+      // see _postRaceLane, set once above at the moment of crossing.
+      autoDrivePostRace(p, this.path, dt, 410, this._postRaceLane.player);
+      autoDrivePostRace(this.rival, this.path, dt, 390, this._postRaceLane.rival);
     }
     this.race.update(dt);
 
@@ -974,6 +975,28 @@ export class Game {
       // Locked in here, on the one frame the line is crossed, and held
       // for the whole post-race shot -- see solveFinishZoom.
       this._finishZoom = this.solveFinishZoom(this.app.screen.width, this.app.screen.height);
+
+      // Also locked in here, for autoDrivePostRace below: which side of
+      // the centreline each car circulates on, and how far apart. Fixed
+      // left/right assignments (player always left, rival always right)
+      // sent whichever car was NOT already on its assigned side crossing
+      // through the other one's path to get there -- on a close finish
+      // that is exactly the moment the two cars are nearest, so the swap
+      // put them closer than the flat 52-unit target was ever supposed to
+      // allow, up to fully overlapping. Sending each car to whichever
+      // side it is ALREADY on needs no crossing at all. The gap itself
+      // used to be the same 52 regardless of the cars on the grid, which
+      // is not enough clearance once the rival is wider than a car (stage
+      // 4's truck draws 158 units across, on its own more than the old
+      // 104-unit total split) -- sized off the two sprites' own drawn
+      // widths instead, it now scales with whatever is actually racing.
+      const pNear = p.nearestOnRoute(p.x, p.y);
+      const pLat = this.path.lateralOf(p.x, p.y, pNear);
+      const rNear = this.rival.nearestOnRoute(this.rival.x, this.rival.y);
+      const rLat = this.path.lateralOf(this.rival.x, this.rival.y, rNear);
+      const sign = pLat >= rLat ? 1 : -1;
+      const halfGap = Math.max(52, (this.playerSprite.width + this.rivalSprite.width) / 2 + 20);
+      this._postRaceLane = { player: sign * halfGap, rival: -sign * halfGap };
 
       const place = this.race.positionOf(this.playerEntry);
       this.finishFX.trigger(place, this.app.screen.width, this.app.screen.height);
