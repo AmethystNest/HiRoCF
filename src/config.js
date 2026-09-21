@@ -204,9 +204,7 @@ export const STAGES = {
       // how much of a contact the OTHER vehicle absorbs (see
       // resolveContacts): at 9 against the player's 1 the truck takes about
       // 6% of the separation and keeps essentially all of its speed, while
-      // the player is the one that bounces and scrubs off pace. No `tint`
-      // here -- the others are tinted to recolour a shared car sprite, and
-      // tinting this one would just stain a white truck.
+      // the player is the one that bounces and scrubs off pace.
       mass: 9,
     },
     bestKey: 'topdownRacer_stage4_best_ms',
@@ -231,15 +229,13 @@ export const STAGES = {
     // course than any of the tricks the earlier rivals use. Beating it
     // means driving a better line, not out-dragging it.
     //
-    // Tinted a deep racing green over its own white photo -- `tint` is a
-    // straight multiply against the source pixels, so true black (the
-    // hood stripe, the spoiler, the window trim, the wheels) stays black
-    // regardless of the tint colour, and only the white body panels pick
-    // it up. Same mechanism CAR_SIZE.player's own headlight/fascia
-    // tinting above relies on, just applied to a whole rival sprite.
+    // Its own photo: a racing-green R8 with a black carbon roof, hood
+    // stripe and spoiler, and its own red tail-light accent -- shot and
+    // cropped to the car the same way the other rivals' photos are, so no
+    // tint/recolour step is needed (an earlier flat sprite.tint on a white
+    // photo dragged that red toward whatever the tint colour was).
     rival: {
       maxSpeed: PHYSICS.maxSpeed, accel: PHYSICS.accel, turn: 2.85, sprite: 'r8',
-      tint: 0x2f8a55,
       // 0.34, not 0.30: with the line taken right to the pavement edge,
       // the last 4% of corner speed is the difference between holding it
       // and running a wheel over the paint on the way out. Measured over
