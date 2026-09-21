@@ -312,24 +312,31 @@ export const CAR_VISUAL_SCALE = {
 };
 
 /**
- * Collision-hull-only shrink, on top of whatever CAR_VISUAL_SCALE already
- * did to the DRAWN size. hullCircles (see race.js) sizes its three circles
- * straight off the box it's handed, on the assumption that the box IS the
- * car -- true for prius/r8/truck0164 (CAR_VISUAL_SCALE above already pulls
- * those in to their own alpha bbox, so their drawn size and their real
- * silhouette are the same box), false for player/devilz/ae86, whose photos
- * still carry the ~0.46-0.56 wide / 0.84-0.92 tall padding described above
- * with no visual correction (their drawn size is deliberately untouched --
- * it's what the other three were tuned to match). Feeding hullCircles the
- * padded box there meant two cars could pass with visible daylight between
- * the sprites and still register a hit. This scales the HULL PASSED TO
- * resolveContacts only, straight off each one's own measured alpha bbox
- * fraction -- sprite width/height, drawHalf, grid spacing etc. are all
- * unaffected. Not present here (prius/r8/truck0164) = {w:1,h:1}, i.e. the
- * hull stays exactly what CAR_VISUAL_SCALE/CAR_SIZE already produced.
+ * Collision-hull-only correction for stage 1's and stage 3's rivals, and
+ * for nothing else: it is applied to the box handed to resolveContacts and
+ * to nothing else either, so sprite width/height, drawHalf and grid
+ * spacing all stay on the drawn size. Any car not listed is left exactly
+ * as CAR_SIZE / CAR_VISUAL_SCALE produced it.
+ *
+ * These two photos carry a lot of empty canvas beside the car -- the body
+ * covers 0.47 and 0.46 of its own frame's width against 0.84 and 0.92 of
+ * its height -- and neither got a CAR_VISUAL_SCALE correction, because
+ * that one also moves the DRAWN size and these two are part of the
+ * reference the others were matched to. The numbers below are those
+ * measured fractions.
+ *
+ * What makes a hit look right is the PAIR, not either hull alone: two cars
+ * touch when the sum of their half-widths is crossed. hullCircles sizes
+ * its circles at 0.355w (0.35w for the long-vehicle row), so a hull is
+ * only ~0.71 of the box it is given -- which leaves the player's own
+ * un-corrected hull about 26% wider than the car in its photo, and these
+ * two, once corrected, about 30% narrower than theirs. Those cancel: side
+ * by side, contact now lands within 0.3% of where the two sprites actually
+ * meet on both stages, measured against the rendered art. Correcting the
+ * player as well overshot in the other direction and buried the two cars
+ * in each other, which is why only these two are listed.
  */
 export const CAR_HULL_SCALE = {
-  player: { w: 0.56, h: 0.90 },
   devilz: { w: 0.47, h: 0.84 },
   ae86: { w: 0.46, h: 0.92 },
 };
