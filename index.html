@@ -217,38 +217,96 @@
      arrival and exit are part of the show. visibility rides the same
      transition, delayed on the way out so it only cuts once the fade
      has finished. */
+  /* --- display type -------------------------------------------------
+     One treatment shared by every headline word in the game (VS, the
+     countdown numerals, WIN/LOSE): heavy, raked over to the left, and
+     filled with a brushed-metal gradient instead of a flat colour, with
+     a highlight that sweeps across it once as it arrives.
+
+     Filled via background-clip:text, so `color` no longer paints these
+     glyphs -- anything that wants to flash one has to animate `filter`
+     (see vsSurge) rather than `color`, and the shadow has to be a
+     drop-shadow filter rather than a text-shadow, which would draw
+     behind the box instead of behind the letters. */
+  .chrome{
+    font-weight:900;letter-spacing:-.03em;
+    background-image:
+      linear-gradient(104deg,transparent 39%,rgba(255,255,255,.92) 47%,transparent 55%),
+      linear-gradient(176deg,#fff 4%,#eef4fb 26%,#9fb2c6 50%,#fff 63%,#c6d5e6 85%,#8497ab 100%);
+    background-size:260% 100%,100% 100%;
+    background-position:170% 0,0 0;
+    background-repeat:no-repeat;
+    -webkit-background-clip:text;background-clip:text;
+    color:transparent;-webkit-text-fill-color:transparent;
+    filter:drop-shadow(0 3px 0 rgba(0,0,0,.55)) drop-shadow(0 0 20px rgba(150,195,245,.3));
+  }
+  /* the sweep. Held at its start by `backwards` through the delay, so
+     the highlight arrives with the word rather than before it. */
+  @keyframes chromeSheen{
+    from{background-position:-70% 0,0 0}
+    to{background-position:170% 0,0 0}
+  }
+  /* Raked, but only for Latin: skewing CJK (the rival's name) reads as
+     a rendering fault rather than as speed.
+     The rake has to live on the SAME element as the gradient, never on
+     a child of it: background-clip:text does not reach through a
+     transformed descendant, and putting the skew on an inner span made
+     both VS and the countdown numerals vanish entirely (the fill was
+     clipped to text the browser no longer considered part of that
+     element's own box). */
+  .rake{display:inline-block;transform:skewX(-9deg)}
+
   #vsOverlay{opacity:0;visibility:hidden;
-    transition:opacity .34s ease,visibility 0s linear .34s}
+    transition:opacity .3s ease,visibility 0s linear .3s}
+  /* The card waits for the lightning. The strike goes off the moment the
+     state flips to 'vs' (see main.js) and peaks inside ~0.1s; the text
+     starts arriving at 0.26s and settles through the tail of it, so the
+     order reads strike -> title rather than both at once. */
   #vsOverlay.vis{opacity:1;visibility:visible;
-    transition:opacity .3s ease,visibility 0s}
+    transition:opacity .46s ease .26s,visibility 0s}
   #vsCard{background:rgba(10,13,17,.82);border:1px solid rgba(255,255,255,.14);
     border-radius:20px;padding:26px 34px;backdrop-filter:blur(6px);
-    transform:scale(.94);transition:transform .34s cubic-bezier(.16,1,.3,1)}
-  #vsOverlay.vis #vsCard{transform:none}
-  #vsCard .stage{font-size:13px;opacity:.7;letter-spacing:.14em;margin-bottom:6px}
-  #vsCard .rival{font-size:26px}
-  /* VS crackles rather than sitting still -- a stepped (not eased)
-     flicker between its resting red and a hot white-cyan spark, twice
-     per cycle, with a small lightning bolt flashing on either side on
-     the same beat. steps(1,end) is the point: a real arc snaps between
-     states, it doesn't fade. */
-  #vsCard .vs{position:relative;font-size:15px;color:#ff6a6a;letter-spacing:.2em;margin:14px 0;
-    text-shadow:0 0 6px rgba(255,106,106,.85),0 0 18px rgba(255,70,70,.5);
-    animation:vsFlicker 2.2s steps(1,end) infinite}
-  @keyframes vsFlicker{
+    transform:scale(.9);transition:transform .52s cubic-bezier(.16,1,.3,1)}
+  #vsOverlay.vis #vsCard{transform:none;transition-delay:.26s}
+  /* label, with a hairline under it -- a caption on the name below,
+     rather than another line of text competing with it */
+  #vsCard .stage{font-size:11px;opacity:.55;letter-spacing:.42em;text-indent:.42em;
+    font-weight:800;padding-bottom:9px;margin-bottom:11px;position:relative}
+  #vsCard .stage::after{content:'';position:absolute;left:50%;bottom:0;transform:translateX(-50%);
+    width:46px;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.5),transparent)}
+  #vsCard .rival{font-size:29px;font-weight:900;letter-spacing:.01em;
+    background-image:linear-gradient(176deg,#fff 10%,#dde7f2 46%,#9fb2c6 74%,#eaf2fb 100%);
+    -webkit-background-clip:text;background-clip:text;
+    color:transparent;-webkit-text-fill-color:transparent;
+    filter:drop-shadow(0 2px 0 rgba(0,0,0,.5))}
+  /* VS is the card's headline now, not a caption between two lines:
+     chrome-filled, raked, and crackling. The flicker drives `filter`
+     because the gradient fill owns `color` -- see .chrome. */
+  #vsCard .vs{position:relative;font-size:34px;line-height:1;margin:13px 0 2px;
+    letter-spacing:.06em;font-weight:900;transform:skewX(-9deg);
+    background-image:
+      linear-gradient(104deg,transparent 39%,rgba(255,255,255,.95) 47%,transparent 55%),
+      linear-gradient(176deg,#fff 4%,#ffd9d4 22%,#ff5a4a 50%,#fff 62%,#ff7a68 84%,#b8241a 100%);
+    background-size:260% 100%,100% 100%;background-position:170% 0,0 0;background-repeat:no-repeat;
+    -webkit-background-clip:text;background-clip:text;
+    color:transparent;-webkit-text-fill-color:transparent;
+    filter:drop-shadow(0 3px 0 rgba(0,0,0,.55)) drop-shadow(0 0 16px rgba(255,80,66,.5));
+    animation:chromeSheen 1s ease-out .3s backwards,vsSurge 2.2s steps(1,end) 1.1s infinite}
+  @keyframes vsSurge{
     0%,17%,19%,20%,49%,51%,52%,100%{
-      color:#ff6a6a;text-shadow:0 0 6px rgba(255,106,106,.85),0 0 18px rgba(255,70,70,.5)}
+      filter:drop-shadow(0 3px 0 rgba(0,0,0,.55)) drop-shadow(0 0 16px rgba(255,80,66,.5))}
     18%,50%{
-      color:#fff;text-shadow:0 0 4px #fff,0 0 22px rgba(170,235,255,1),0 0 46px rgba(120,220,255,.9)}
+      filter:brightness(2.1) saturate(.4) drop-shadow(0 0 10px rgba(255,255,255,.95))
+             drop-shadow(0 0 34px rgba(170,235,255,.9))}
   }
   #vsCard .vs::before,#vsCard .vs::after{
-    content:'';position:absolute;top:50%;width:16px;height:24px;
+    content:'';position:absolute;top:50%;width:18px;height:27px;
     background:linear-gradient(160deg,#fff,#8fe8ff 55%,#3fa8ef);
     clip-path:polygon(58% 0,18% 54%,44% 54%,8% 100%,82% 40%,50% 40%);
     filter:drop-shadow(0 0 5px rgba(140,225,255,.9));
-    opacity:0;animation:vsBolt 2.2s steps(1,end) infinite}
-  #vsCard .vs::before{left:-26px;transform:translateY(-56%)}
-  #vsCard .vs::after{right:-26px;transform:translateY(-56%) scaleX(-1);animation-delay:.03s}
+    opacity:0;animation:vsBolt 2.2s steps(1,end) 1.1s infinite}
+  #vsCard .vs::before{left:-32px;transform:translateY(-56%)}
+  #vsCard .vs::after{right:-32px;transform:translateY(-56%) scaleX(-1);animation-delay:1.13s}
   @keyframes vsBolt{
     0%,17%,19%,20%,49%,51%,52%,100%{opacity:0}
     18%,50%{opacity:1}
@@ -279,23 +337,47 @@
     background:radial-gradient(circle at 38% 32%, #b6ffc6, #16c93f 66%);
     box-shadow:0 0 26px rgba(61,220,90,.95),0 0 60px rgba(61,220,90,.5),
                inset 0 0 0 1px rgba(255,255,255,.3)}
+  /* The numerals get the same chrome as the rest of the headline type
+     (see .chrome) -- raked, brushed-metal, with the sheen re-swept per
+     numeral by the punch below. GO! swaps the metal for a hot green. */
   #startSignal .count{font-size:min(23vw,122px);line-height:1;font-weight:900;
-    letter-spacing:-.04em;font-variant-numeric:tabular-nums;
-    text-shadow:0 6px 0 rgba(0,0,0,.55),0 0 40px rgba(255,255,255,.28)}
-  #startSignal .count.go{color:#5cf07c;
-    text-shadow:0 6px 0 rgba(0,0,0,.55),0 0 46px rgba(92,240,124,.85)}
-  /* re-triggered per numeral by removing and re-adding the class */
-  #startSignal .count.punch span{display:inline-block;animation:countPunch .42s cubic-bezier(.16,1,.3,1)}
+    letter-spacing:-.045em;font-variant-numeric:tabular-nums}
+  /* On the SPAN, not on .count: the span is what carries the rake and
+     the punch transform, and the fill has to sit on the transformed
+     element itself -- see .rake. */
+  #startSignal .count span{
+    background-image:
+      linear-gradient(104deg,transparent 39%,rgba(255,255,255,.95) 47%,transparent 55%),
+      linear-gradient(176deg,#fff 4%,#eef4fb 26%,#9fb2c6 50%,#fff 63%,#c6d5e6 85%,#8497ab 100%);
+    background-size:260% 100%,100% 100%;background-position:170% 0,0 0;background-repeat:no-repeat;
+    -webkit-background-clip:text;background-clip:text;
+    color:transparent;-webkit-text-fill-color:transparent;
+    filter:drop-shadow(0 5px 0 rgba(0,0,0,.6)) drop-shadow(0 0 34px rgba(170,210,255,.4))}
+  #startSignal .count.go span{
+    background-image:
+      linear-gradient(104deg,transparent 39%,rgba(255,255,255,.95) 47%,transparent 55%),
+      linear-gradient(176deg,#f4fff7 4%,#a7ffbe 26%,#16c93f 52%,#eafff0 65%,#5cf07c 87%,#0c7d27 100%);
+    filter:drop-shadow(0 5px 0 rgba(0,0,0,.6)) drop-shadow(0 0 40px rgba(92,240,124,.8))}
+  /* re-triggered per numeral by removing and re-adding the class. The
+     sheen rides the parent (that is where the gradient lives) while the
+     punch rides the glyph itself -- and the punch has to carry the rake
+     in every keyframe, or animating `transform` would drop the skew
+     .rake set and the numeral would stand up straight mid-count. */
+  #startSignal .count.punch span{display:inline-block;
+    animation:countPunch .42s cubic-bezier(.16,1,.3,1),chromeSheen .62s ease-out}
   @keyframes countPunch{
-    0%{transform:scale(2.1);opacity:0;filter:blur(6px)}
-    55%{opacity:1;filter:blur(0)}
-    100%{transform:scale(1);opacity:1}
+    0%{transform:skewX(-9deg) scale(2.1);opacity:0;filter:blur(6px)}
+    55%{transform:skewX(-9deg) scale(1.14);opacity:1;filter:blur(0)}
+    100%{transform:skewX(-9deg) scale(1);opacity:1}
   }
   /* fixed height: the cue empties on GO, and without this the numeral
      jumps up the screen at the exact moment it should be holding still */
-  #startSignal .cue:not(:empty){font-size:min(3.4vw,15px);letter-spacing:.42em;
-    text-indent:.42em;font-weight:800;padding:6px 16px;border-radius:999px;
-    background:rgba(6,9,12,.66);border:1px solid rgba(255,255,255,.12);
+  #startSignal .cue:not(:empty){font-size:min(3.2vw,13px);letter-spacing:.56em;
+    text-indent:.56em;font-weight:800;padding:7px 20px;border-radius:999px;
+    color:#cfe0ee;
+    background:linear-gradient(180deg,rgba(14,19,26,.82),rgba(6,9,12,.86));
+    border:1px solid rgba(255,255,255,.16);
+    box-shadow:0 6px 18px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.14);
     backdrop-filter:blur(4px)}
   /* reserved even when empty, so clearing the text on GO does not shunt
      the numeral up the screen at the moment it should be holding still */
@@ -332,8 +414,12 @@
     background:linear-gradient(180deg,rgba(18,23,29,.96),rgba(7,9,12,.97));
     border:1px solid rgba(255,255,255,.14);
     box-shadow:0 26px 70px rgba(0,0,0,.66),inset 0 1px 0 rgba(255,255,255,.14);
-    animation:cardIn .5s cubic-bezier(.16,1,.3,1)}
-  @keyframes cardIn{from{opacity:0;transform:translateY(34px) scale(.94)}to{opacity:1;transform:none}}
+    /* Waits out the lightning. strikeResultBolts() fires on the frame
+       this card is unhidden, so the delay is what puts the strike
+       first and the result second; `backwards` holds the card at
+       opacity 0 through it instead of showing it early. */
+    animation:cardIn .54s cubic-bezier(.16,1,.3,1) .26s backwards}
+  @keyframes cardIn{from{opacity:0;transform:translateY(30px) scale(.93)}to{opacity:1;transform:none}}
   /* the accent is the result: gold for a win, steel for anything else */
   #finishCard{--accent:#9aa4ae;--accent2:#5d666f}
   #finishCard.win{--accent:#ffd64a;--accent2:#c9932a}
@@ -342,43 +428,67 @@
     -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
     -webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
     mask-composite:exclude;pointer-events:none}
-  #finishCard .ribbon{display:inline-block;font-size:10px;letter-spacing:.34em;text-indent:.34em;
-    padding:5px 12px;border-radius:999px;color:#05070a;background:var(--accent);
+  #finishCard .ribbon{display:inline-block;font-size:9px;letter-spacing:.44em;text-indent:.44em;
+    padding:5px 14px;border-radius:999px;color:#05070a;
+    background:linear-gradient(180deg,#fff,var(--accent) 60%,var(--accent2));
+    box-shadow:0 2px 10px rgba(0,0,0,.4);
     font-weight:900;margin-bottom:clamp(5px,1.4vh,12px)}
-  #finishCard h2{margin:0 0 4px;font-size:clamp(12px,1.8vh,15px);letter-spacing:.14em;opacity:.62;font-weight:800}
+  #finishCard h2{margin:0 0 4px;font-size:clamp(10px,1.6vh,12px);letter-spacing:.44em;
+    text-indent:.44em;opacity:.5;font-weight:800}
+  /* The result word, in the same chrome as VS and the countdown: raked,
+     brushed, sheen swept across it as it lands -- steel for a loss, and
+     the same treatment in gold for a win. */
   #finishCard .place{font-size:clamp(34px,7.6vh,66px);font-weight:900;line-height:1;
-    margin:clamp(2px,.7vh,6px) 0 2px;
-    letter-spacing:.06em;color:var(--accent);text-shadow:0 0 30px rgba(154,164,174,.22)}
-  /* A win gets three quick electric surges on arrival -- WIN itself
+    margin:clamp(2px,.7vh,6px) 0 2px;letter-spacing:-.01em;
+    transform:skewX(-9deg);
+    background-image:
+      linear-gradient(104deg,transparent 39%,rgba(255,255,255,.95) 47%,transparent 55%),
+      linear-gradient(176deg,#fff 4%,#e4ecf4 25%,#8e9daf 50%,#fff 63%,#b9c7d6 86%,#6f7d8d 100%);
+    background-size:260% 100%,100% 100%;background-position:170% 0,0 0;background-repeat:no-repeat;
+    -webkit-background-clip:text;background-clip:text;
+    color:transparent;-webkit-text-fill-color:transparent;
+    filter:drop-shadow(0 3px 0 rgba(0,0,0,.5)) drop-shadow(0 0 24px rgba(154,164,174,.3));
+    animation:chromeSheen .9s ease-out .42s backwards}
+  /* A win gets three quick electric surges after the sheen -- the word
      snapping to white-hot and a bolt flashing on each side -- then
-     settles into the steady gold glow. Struck a handful of times and
-     done, not looping: this card sits on screen while the result is
-     read, and a glow that never stops arcing would fight that instead
-     of announcing it. A loss keeps the plain steel glow -- the cold,
-     closing-in grade the rest of this card already gives it is the
-     opposite of a celebratory spark. */
-  #finishCard.win .place{position:relative;text-shadow:0 0 40px rgba(255,214,74,.5);
-    animation:winFlicker 1.4s steps(1,end) 1}
-  @keyframes winFlicker{
-    0%,7%,10%,21%,24%,39%,42%,100%{color:var(--accent);text-shadow:0 0 40px rgba(255,214,74,.5)}
-    8%,22%,40%{color:#fff;text-shadow:0 0 6px #fff,0 0 30px rgba(255,232,150,1),0 0 70px rgba(255,214,74,.9)}
+     settles into its gold. Struck a handful of times and done, not
+     looping: the card sits on screen while the result is read, and a
+     glow that never stops arcing would fight that instead of
+     announcing it. A loss keeps the cold steel, which is the grade the
+     rest of this card already gives it. Both animations wait out the
+     card's own entrance delay, or the surge would fire at a word that
+     is not on screen yet. */
+  #finishCard.win .place{position:relative;
+    background-image:
+      linear-gradient(104deg,transparent 39%,rgba(255,255,255,.98) 47%,transparent 55%),
+      linear-gradient(176deg,#fff8de 4%,#ffe488 24%,#d39c27 50%,#fffaea 62%,#ffd64a 85%,#9e6d13 100%);
+    filter:drop-shadow(0 3px 0 rgba(0,0,0,.5)) drop-shadow(0 0 30px rgba(255,214,74,.45));
+    animation:chromeSheen .9s ease-out .42s backwards,winSurge 1.5s steps(1,end) 1.1s 1}
+  @keyframes winSurge{
+    0%,7%,10%,21%,24%,39%,42%,100%{
+      filter:drop-shadow(0 3px 0 rgba(0,0,0,.5)) drop-shadow(0 0 30px rgba(255,214,74,.45))}
+    8%,22%,40%{
+      filter:brightness(1.9) saturate(.5) drop-shadow(0 0 10px rgba(255,255,255,.95))
+             drop-shadow(0 0 44px rgba(255,214,74,.95))}
   }
   #finishCard.win .place::before,#finishCard.win .place::after{
     content:'';position:absolute;top:52%;width:22px;height:32px;
     background:linear-gradient(160deg,#fff,#ffe9a8 55%,#ffd64a);
     clip-path:polygon(58% 0,18% 54%,44% 54%,8% 100%,82% 40%,50% 40%);
     filter:drop-shadow(0 0 8px rgba(255,214,74,.9));
-    opacity:0;animation:winBolt 1.4s steps(1,end) 1}
+    opacity:0;animation:winBolt 1.5s steps(1,end) 1.1s 1}
   #finishCard.win .place::before{left:-32px;transform:translateY(-58%)}
-  #finishCard.win .place::after{right:-32px;transform:translateY(-58%) scaleX(-1);animation-delay:.02s}
+  #finishCard.win .place::after{right:-32px;transform:translateY(-58%) scaleX(-1);animation-delay:1.12s}
   @keyframes winBolt{
     0%,7%,10%,21%,24%,39%,42%,100%{opacity:0}
     8%,22%,40%{opacity:1}
   }
   #finishCard .rtWrap{display:flex;flex-direction:column;gap:3px;
     margin:clamp(6px,1.4vh,12px) 0 clamp(10px,2.3vh,20px)}
-  #finishCard .rtLabel{font-size:9px;letter-spacing:.34em;text-indent:.34em;opacity:.5;font-weight:800}
-  #finishCard .rt{font-size:clamp(18px,3vh,26px);font-weight:900;font-variant-numeric:tabular-nums;letter-spacing:.02em}
+  #finishCard .rtLabel{font-size:8px;letter-spacing:.5em;text-indent:.5em;opacity:.42;font-weight:800}
+  /* the clock, as a clock: tabular, tight, and lit rather than plain white */
+  #finishCard .rt{font-size:clamp(18px,3vh,26px);font-weight:900;font-variant-numeric:tabular-nums;
+    letter-spacing:.01em;color:#eef5fb;text-shadow:0 0 16px rgba(160,200,245,.4)}
   #finishCard button{pointer-events:auto;width:100%;height:clamp(40px,6.2vh,54px);border-radius:16px;
     border:1px solid rgba(255,255,255,.2);color:#fff;font-size:clamp(13px,1.8vh,15px);font-weight:900;
     letter-spacing:.1em;
@@ -687,7 +797,7 @@
       <div class="lamp" id="sig4"></div>
       <div class="lamp" id="sig5"></div>
     </div>
-    <div class="count" id="startCount"><span id="startCountText">3</span></div>
+    <div class="count" id="startCount"><span class="rake" id="startCountText">3</span></div>
     <div class="cue" id="startCue">GET READY</div>
   </div>
 </div>

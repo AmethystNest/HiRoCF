@@ -18,8 +18,44 @@
  * confetti off the banner, or cold and closing-in with the screen pinched
  * to a letterbox.
  */
-import { Container, Graphics, Text } from '../pixi.js';
+import { Container, FillGradient, Graphics, Text } from '../pixi.js';
 import { boltPath } from './boltfx.js';
+
+/**
+ * The brushed-metal fill the page's headline type uses in CSS (see
+ * .chrome in index.html), rebuilt for canvas text so FINISH belongs to
+ * the same family as VS, the countdown numerals and WIN/LOSE rather
+ * than being the one flat-white word in the game.
+ *
+ * textureSpace 'local' maps the stops across the text's own box, so the
+ * band sits in the same place whatever the word or the font size.
+ */
+function chromeFill(stops) {
+  return new FillGradient({
+    type: 'linear',
+    start: { x: 0, y: 0 },
+    end: { x: 0, y: 1 },
+    colorStops: stops,
+    textureSpace: 'local',
+  });
+}
+
+const CHROME_STEEL = [
+  { offset: 0.00, color: '#ffffff' },
+  { offset: 0.26, color: '#eef4fb' },
+  { offset: 0.50, color: '#9fb2c6' },
+  { offset: 0.63, color: '#ffffff' },
+  { offset: 0.86, color: '#c6d5e6' },
+  { offset: 1.00, color: '#8497ab' },
+];
+const CHROME_GOLD = [
+  { offset: 0.00, color: '#fff8de' },
+  { offset: 0.24, color: '#ffe488' },
+  { offset: 0.50, color: '#d39c27' },
+  { offset: 0.62, color: '#fffaea' },
+  { offset: 0.85, color: '#ffd64a' },
+  { offset: 1.00, color: '#9e6d13' },
+];
 
 /** Cubic ease-out: fast arrival, soft landing. Used by every entrance. */
 const easeOut = (t) => 1 - (1 - t) ** 3;
@@ -40,20 +76,26 @@ export function buildFinishFX() {
   view.addChild(bolts);
   view.addChild(banner);
 
+  const steelFill = chromeFill(CHROME_STEEL);
+  const goldFill = chromeFill(CHROME_GOLD);
+
   const titleMain = new Text({
     text: '', style: {
-      fontFamily: 'Arial, sans-serif', fontWeight: '900', fontSize: 72,
-      fill: 0xffffff, letterSpacing: 4,
-      stroke: { color: 0x05070a, width: 9, join: 'round' },
+      fontFamily: 'Arial, sans-serif', fontWeight: '900', fontSize: 74,
+      fill: steelFill, letterSpacing: 2,
+      stroke: { color: 0x05070a, width: 10, join: 'round' },
+      dropShadow: { color: 0x000000, alpha: 0.55, blur: 4, distance: 5, angle: Math.PI / 2 },
     },
   });
   titleMain.anchor.set(0.5);
+  // Raked over to the left, same -9deg the CSS headline type uses.
+  titleMain.skew.x = -0.157;
   view.addChild(titleMain);
 
   const titleSub = new Text({
     text: '', style: {
-      fontFamily: 'Arial, sans-serif', fontWeight: '900', fontSize: 17,
-      fill: 0xffe470, letterSpacing: 7,
+      fontFamily: 'Arial, sans-serif', fontWeight: '900', fontSize: 14,
+      fill: 0xffe470, letterSpacing: 11,
       stroke: { color: 0x05070a, width: 4, join: 'round' },
     },
   });
@@ -74,6 +116,10 @@ export function buildFinishFX() {
     timer = 0;
     win = place === 1;
     confetti = [];
+    // Set here rather than per frame: a gradient fill is a texture, and
+    // rebuilding one 60 times a second to say the same thing would be
+    // paying for the look over and over.
+    titleMain.style.fill = win ? goldFill : steelFill;
 
     // Speed lines are struck once at the moment of crossing and then only
     // travel outward -- re-rolling them per frame reads as static noise
@@ -286,7 +332,6 @@ export function buildFinishFX() {
     // card that follows carry the result. A win/lose word here would just
     // say twice what the card says once.
     if (titleMain.text !== 'FINISH') titleMain.text = 'FINISH';
-    titleMain.style.fill = win ? 0xffffff : 0xaeb6bd;
     titleMain.scale.set((3.2 - 2.2 * slam) * (1 + overshoot));
     titleMain.alpha = slam * fade;
     titleMain.position.set(cx, screenH * 0.42 - 150 * (1 - slam));
