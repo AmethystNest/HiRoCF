@@ -113,6 +113,27 @@ const FINISH_CAM_MIN_ZOOM = 1.3;
  *  car that just crossed the line, not a solve like the grid's. */
 const FINISH_CAM_SOLO_ZOOM = 2.0;
 /**
+ * The share of the screen HEIGHT, from the top, that the result card
+ * owns after the line. The finish camera keeps the car out of it by
+ * centring in what is left and shrinking the zoom until the car fits
+ * there -- so the card can never sit on top of the very car the zoom
+ * exists to show.
+ *
+ * index.html's #finishCard sizes itself in vh so it stays inside this
+ * share at any screen height. The two numbers have to agree: this is
+ * the one place the split is written down for the camera side.
+ *
+ * It has to be a fraction, not a pixel budget: the card is ~310px tall
+ * at 860px of viewport, which is a third of a tall phone but two
+ * thirds of an in-app browser with a URL bar, and a fixed anchor at
+ * 0.69H put the car straight under the card on everything shorter than
+ * about 700px.
+ */
+const FINISH_CARD_BAND = 0.46;
+/** How much of the band left over for the car the car may actually
+ *  fill, so it is framed in that space rather than jammed into it. */
+const FINISH_CAR_FILL = 0.72;
+/**
  * How solid the rival is left while it passes under a deck the player is
  * not under. Not 0: the point is to say "this one is below the bridge",
  * not to take the rival off the screen -- at a glance you still want to
@@ -340,9 +361,44 @@ export class Game {
     const needAcross = Math.abs(r.x - p.x) + carW / 2 + GRID_MARGIN;
     const needUp = Math.abs(r.y - p.y) + carH / 2 + GRID_MARGIN;
     const pairZoom = Math.min(roomAcross / needAcross, roomUp / needUp) / this.zoom;
-    return pairZoom >= FINISH_CAM_MIN_ZOOM
+    const want = pairZoom >= FINISH_CAM_MIN_ZOOM
       ? Math.min(START_CAM_MAX, pairZoom)
       : FINISH_CAM_SOLO_ZOOM;
+    return Math.min(want, this.finishZoomCeiling(H));
+  }
+
+  /**
+   * The most the finish camera may zoom in and still fit the car in the
+   * strip the result card leaves it. The car draws CAR_SIZE.player.h
+   * tall at camZoom 1 and the default VIEW level, and scales linearly
+   * with both -- so this inverts that against the strip's height.
+   *
+   * Never below 1: at 1 the framing is the ordinary racing zoom, and
+   * pulling back further to make room for a card would be losing the
+   * car to save the card.
+   */
+  finishZoomCeiling(H) {
+    const strip = H * (1 - FINISH_CARD_BAND) * FINISH_CAR_FILL;
+    const levelScale = this.zoom / this.baseZoom;
+    return Math.max(1, strip / (CAR_SIZE.player.h * levelScale));
+  }
+
+  /**
+   * Lightning across the result card, called by index.html at the
+   * moment it reveals that card (1.9s after the line -- that delay, and
+   * the win/lose grade, are the page's to know, not this class's).
+   * Graded to match the card it strikes over: gold for a win, cold
+   * steel for anything else.
+   */
+  strikeResultBolts(win) {
+    this.sideBolts.strike(this.app.screen.width, this.app.screen.height, {
+      perSide: win ? 4 : 2,
+      reach: win ? 0.56 : 0.44,
+      focusY: FINISH_CARD_BAND / 2,
+      life: win ? 0.54 : 0.42,
+      core: win ? 0xfffaf0 : 0xdce8ef,
+      glow: win ? 0xffd64a : 0x7d94a6,
+    });
   }
 
   /**
@@ -361,7 +417,9 @@ export class Game {
     return {
       x: p?.x ?? 0,
       y: p?.y ?? 0,
-      anchorY: H * (START_CAM_BOX.top + START_CAM_BOX.bottom) / 2,
+      // Centred in the strip below the result card's band, NOT at the
+      // grid shot's anchor -- see FINISH_CARD_BAND.
+      anchorY: H * (FINISH_CARD_BAND + (1 - FINISH_CARD_BAND) / 2),
       zoom: this._finishZoom,
     };
   }
@@ -894,24 +952,20 @@ export class Game {
 
       const place = this.race.positionOf(this.playerEntry);
       this.finishFX.trigger(place, this.app.screen.width, this.app.screen.height);
-      // Graded like the rest of the finish: gold and wide for a win,
-      // cold steel and shorter for anything else.
-      const won = place === 1;
-      this.sideBolts.strike(this.app.screen.width, this.app.screen.height, {
-        perSide: won ? 4 : 2,
-        reach: won ? 0.56 : 0.42,
-        focusY: 0.42,
-        life: won ? 0.52 : 0.4,
-        core: won ? 0xfffaf0 : 0xdce8ef,
-        glow: won ? 0xffd64a : 0x7d94a6,
-      });
     }
-    // The lights going green gets the same strike, cool-toned -- the
-    // two moments the whole screen is about one event.
-    if (this.race.state === 'racing' && this._prevRaceState === 'countdown') {
+    // The side lightning belongs to the two CARDS, not to the two race
+    // events: it strikes across the VS card as the matchup is announced
+    // (here -- the race is built in 'vs', so null -> 'vs' is the card
+    // arriving) and across the result card as the win/lose lands (from
+    // index.html, which owns that card's 1.9s delay -- see
+    // strikeResultBolts).
+    if (this.race.state === 'vs' && this._prevRaceState !== 'vs') {
       this.sideBolts.strike(this.app.screen.width, this.app.screen.height, {
-        perSide: 3, reach: 0.5, focusY: 0.44, life: 0.42,
-        core: 0xf4ffff, glow: 0x86e4ff,
+        // Tight around the card rather than across the whole screen, and
+        // red-hot: the VS card's own accent, arriving with the rival's
+        // name rather than with the green light.
+        perSide: 4, reach: 0.54, focusY: 0.5, life: 0.5,
+        core: 0xfff2f2, glow: 0xff5a4a,
       });
     }
     this._prevRaceState = this.race.state;

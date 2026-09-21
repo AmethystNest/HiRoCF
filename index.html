@@ -318,11 +318,17 @@
   /* --- result --------------------------------------------------------- */
   /* Anchored to the top rather than centred like the other overlays: the
      post-race camera (see finishFraming in main.js) zooms in on the car
-     that just crossed the line, sitting low in frame at the same anchor
-     the pre-race grid shot uses -- a centred card sat directly over it,
-     hiding the exact car the zoom was just built to show. */
-  #finishOverlay{align-items:flex-start;padding-top:max(54px,env(safe-area-inset-top) + 44px)}
-  #finishCard{position:relative;border-radius:24px;padding:30px 30px 26px;min-width:min(78vw,300px);
+     that just crossed the line, and a centred card sat directly over
+     the very car that zoom exists to show.
+     EVERY vertical metric below is vh-driven for the same reason. The
+     card used to be ~310px tall whatever the screen -- fine on a 860px
+     viewport, two thirds of an in-app browser with a URL bar, where it
+     covered the car again. Sized in vh it keeps to the top
+     FINISH_CARD_BAND (0.46) of the screen at any height, which is the
+     budget main.js frames the car below. */
+  #finishOverlay{align-items:flex-start;padding-top:clamp(12px,5.6vh,54px)}
+  #finishCard{position:relative;border-radius:24px;min-width:min(78vw,300px);
+    padding:clamp(14px,3.2vh,30px) clamp(18px,3.2vh,30px) clamp(12px,2.8vh,26px);
     background:linear-gradient(180deg,rgba(18,23,29,.96),rgba(7,9,12,.97));
     border:1px solid rgba(255,255,255,.14);
     box-shadow:0 26px 70px rgba(0,0,0,.66),inset 0 1px 0 rgba(255,255,255,.14);
@@ -338,9 +344,10 @@
     mask-composite:exclude;pointer-events:none}
   #finishCard .ribbon{display:inline-block;font-size:10px;letter-spacing:.34em;text-indent:.34em;
     padding:5px 12px;border-radius:999px;color:#05070a;background:var(--accent);
-    font-weight:900;margin-bottom:12px}
-  #finishCard h2{margin:0 0 4px;font-size:15px;letter-spacing:.14em;opacity:.62;font-weight:800}
-  #finishCard .place{font-size:66px;font-weight:900;line-height:1;margin:6px 0 2px;
+    font-weight:900;margin-bottom:clamp(5px,1.4vh,12px)}
+  #finishCard h2{margin:0 0 4px;font-size:clamp(12px,1.8vh,15px);letter-spacing:.14em;opacity:.62;font-weight:800}
+  #finishCard .place{font-size:clamp(34px,7.6vh,66px);font-weight:900;line-height:1;
+    margin:clamp(2px,.7vh,6px) 0 2px;
     letter-spacing:.06em;color:var(--accent);text-shadow:0 0 30px rgba(154,164,174,.22)}
   /* A win gets three quick electric surges on arrival -- WIN itself
      snapping to white-hot and a bolt flashing on each side -- then
@@ -368,16 +375,33 @@
     0%,7%,10%,21%,24%,39%,42%,100%{opacity:0}
     8%,22%,40%{opacity:1}
   }
-  #finishCard .rtWrap{display:flex;flex-direction:column;gap:3px;margin:12px 0 20px}
+  #finishCard .rtWrap{display:flex;flex-direction:column;gap:3px;
+    margin:clamp(6px,1.4vh,12px) 0 clamp(10px,2.3vh,20px)}
   #finishCard .rtLabel{font-size:9px;letter-spacing:.34em;text-indent:.34em;opacity:.5;font-weight:800}
-  #finishCard .rt{font-size:26px;font-weight:900;font-variant-numeric:tabular-nums;letter-spacing:.02em}
-  #finishCard button{pointer-events:auto;width:100%;height:54px;border-radius:16px;
-    border:1px solid rgba(255,255,255,.2);color:#fff;font-size:15px;font-weight:900;
+  #finishCard .rt{font-size:clamp(18px,3vh,26px);font-weight:900;font-variant-numeric:tabular-nums;letter-spacing:.02em}
+  #finishCard button{pointer-events:auto;width:100%;height:clamp(40px,6.2vh,54px);border-radius:16px;
+    border:1px solid rgba(255,255,255,.2);color:#fff;font-size:clamp(13px,1.8vh,15px);font-weight:900;
     letter-spacing:.1em;
     background:radial-gradient(130% 100% at 50% -20%,rgba(255,255,255,.24),rgba(255,255,255,.04) 64%),
                rgba(24,30,38,.9);
     box-shadow:0 10px 24px rgba(0,0,0,.44),inset 0 1px 0 rgba(255,255,255,.26)}
   #finishCard button:active{transform:scale(.97);border-color:rgba(255,255,255,.7)}
+  /* Landscape phones. Even at its clamp floors the portrait card is
+     ~197px, which is over half of a 360px-tall viewport and back on top
+     of the car. Here the stage line and the RACE TIME caption go (the
+     card's heading and the time's own digits already say both), and
+     what is left is tightened until the card fits the band main.js
+     frames the car below. */
+  @media (max-height:430px){
+    #finishCard{padding:9px 16px 9px;border-radius:18px}
+    #finishCard h2{display:none}
+    #finishCard .rtLabel{display:none}
+    #finishCard .ribbon{margin-bottom:3px;font-size:9px;padding:3px 9px}
+    #finishCard .place{font-size:26px;margin:1px 0 0}
+    #finishCard .rtWrap{margin:3px 0 7px}
+    #finishCard .rt{font-size:17px}
+    #finishCard button{height:33px;font-size:12px;border-radius:12px}
+  }
 
   /* --- lap banner ------------------------------------------------------
      A checkpoint is a quiet white flash. The final lap is not: it sweeps
@@ -893,6 +917,9 @@
             finishTime.textContent=fmtTime(game.playerEntry.progress.finishTime??race.time);
             stageBtn.textContent=(won&&game.stageId<LAST_STAGE)?'NEXT STAGE':(won?'RETRY FINAL STAGE':'RETRY');
             finishOverlay.hidden=false;
+            // Side lightning lands WITH the card, not back at the line
+            // -- the strike is what announces the result.
+            game.strikeResultBolts(won);
           }
         }
       });
