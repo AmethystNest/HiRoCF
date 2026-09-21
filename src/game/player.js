@@ -149,7 +149,10 @@ export class PlayerCar {
     this.speedTargetTimer -= dt;
     if (this.speedTargetTimer <= 0) this.rollSpeedTarget();
 
-    const targetMax = onGrass ? P.grassMax : Math.min(P.maxSpeed, this.speedTarget);
+    // Leaving the pavement costs nothing: the only thing that still slows a
+    // car down is hitting the barrier. `onGrass` survives for the dust
+    // thrown up off the verge (see contactfx), not as a speed penalty.
+    const targetMax = Math.min(P.maxSpeed, this.speedTarget);
 
     if (input.brake) {
       this.speed -= P.brake * 1.30 * dt;

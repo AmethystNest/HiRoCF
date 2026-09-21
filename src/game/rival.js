@@ -68,6 +68,15 @@ const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const MAX_LATERAL_SLOPE = 0.40;
 
 /**
+ * Clear air a wall-line rival's bodywork keeps between itself and the
+ * barrier at the apex. Small enough to read as "right up against it",
+ * wide enough that tracking error on the way in doesn't turn the line
+ * itself into a scrape -- the containment and its sparks start at the
+ * barrier, 6 units further out.
+ */
+const WALL_LINE_GAP = 6;
+
+/**
  * Per-point lateral offset for a full out-in-out lap, solved once for the
  * whole path and cached on it.
  *
@@ -341,9 +350,11 @@ export class RivalCar {
     // it arrives still at full speed and gets dragged round by the
     // containment below instead of driving the corner.
     this.cornerLookAhead = tuning.cornerLookAhead ?? 32;
-    // Stage 3 special: on long/big corners only, attack almost to the
-    // inside course-out limit and carry speed without corner braking.
-    this.bigCurveEdgeAttack = tuning.bigCurveEdgeAttack ?? false;
+    // Running wide costs nothing any more (there is no off-pavement speed
+    // penalty left on any car), so a stage may tell its rival to take the
+    // apex out to the BARRIER rather than stopping at the pavement edge:
+    // the verge is just more road to cut across now. See `edgeLimit`.
+    this.wallLine = tuning.wallLine ?? false;
     this.noBigCurveSlow = tuning.noBigCurveSlow ?? false;
     // minimum arc length (world units) for a corner to count as "big", plus
     // how far the commitment ramp reaches in from each end of it and back
@@ -382,7 +393,7 @@ export class RivalCar {
     // the world scale is (see bodyHalf). Rescaling preserves the shape;
     // clamping it instead would flatten both the apex and the two "out"
     // halves, which is the whole of the line.
-    this._perfectLineLimit = cfg.roadHalf - 40;
+    this._perfectLineLimit = (this.wallLine ? cfg.wallHalf : cfg.roadHalf) - 40;
     this._perfectLine = tuning.perfectLine
       ? getRacingLine(path, this._perfectLineLimit)
       : null;
@@ -580,6 +591,14 @@ export class RivalCar {
     // inside the original corner. Eased toward with a time-based blend (not
     // snapped every frame) so the target doesn't jitter with per-point
     // noise. Per-stage (raceLineEnabled) -- see constructor.
+    // Furthest the MIDDLE of the car may be commanded from the centreline.
+    // Normally the pavement edge less the car's own half-width; on a
+    // wall-line stage the barrier instead, held WALL_LINE_GAP short of it
+    // so running the apex is not the same thing as scraping (the
+    // containment below starts at the barrier itself).
+    const carHalf = this.drawHalf ?? this.bodyHalf ?? 45;
+    const edgeLimit = (this.wallLine ? this.wallHalf - WALL_LINE_GAP : this.roadHalf - 2) - carHalf;
+
     if (this._perfectLine) {
       // Read straight off the solved line at the car's own position. It is
       // already smooth along the lap, so the only easing needed is enough
@@ -589,15 +608,14 @@ export class RivalCar {
       // arriving a fraction wide, and every unit of it is a unit of apex
       // the car visibly gives away. Measured over two laps against the
       // DRAWN body, it reaches 239 of the 240 available, never crosses.
-      const usable = this.roadHalf - (this.drawHalf ?? this.bodyHalf ?? 45) - 2;
-      this._lineScale = usable / this._perfectLineLimit;
+      this._lineScale = edgeLimit / this._perfectLineLimit;
       const targetLine = warmingUp ? 0 : this._perfectLine[here] * this._lineScale;
       const raceSmooth = 1 - Math.exp(-dt * 6.0);
       this._raceLine += (targetLine - this._raceLine) * raceSmooth;
     } else if (this.raceLineEnabled) {
-      // Normal rivals leave margin. Stage 3's special big-corner attack
-      // deliberately uses almost all available inside road width.
-      const insideLimit = this.bigCurveEdgeAttack ? (this.roadHalf - 1.5) : (this.roadHalf - 40);
+      // Normal rivals leave margin. A wall-line stage instead leans on the
+      // full corridor, so the apex is taken against the barrier.
+      const insideLimit = this.wallLine ? edgeLimit : this.roadHalf - 40;
       const lean = warmingUp ? 0 : bigCurve;
       const runSign = this._longCurveSign ? this._longCurveSign[here] : 0;
       const targetLine = runSign * insideLimit * lean;
@@ -688,9 +706,7 @@ export class RivalCar {
     // could ask for a point beyond roadHalf, off the road entirely, which
     // is a nonsensical target no matter how well-intentioned the
     // compensation is.
-    const aimCap = this.bigCurveEdgeAttack && bigCurve > 0.35
-      ? this.roadHalf - 0.75
-      : this.roadHalf - 20;
+    const aimCap = this.wallLine ? edgeLimit : this.roadHalf - 20;
     let aimLine = Math.max(-aimCap, Math.min(aimCap, steerLine + Math.sign(steerLine) * driftAimBias));
 
     // After body contact, don't immediately yank back to the programmed
@@ -888,21 +904,28 @@ export class RivalCar {
     }
 
     // --- soft containment so it never beaches itself on a barrier ---
+    // Measured against the BARRIER, not the pavement edge: leaving the road
+    // costs nothing now, and on a wall-line stage the apex is out here on
+    // purpose. What is still not allowed is driving through the wall, so
+    // the pull starts where the car's own body reaches it -- which also
+    // stops a wide car (stage 1's is 186 units across) hanging its flank
+    // past the barrier while its middle is still inside the old trigger.
     const after = this.nearestOnRoute(this.x, this.y);
-    if (after.dist > this.roadHalf + 35) {
+    const bodyAtWall = this.wallHalf - (this.drawHalf ?? this.bodyHalf ?? 45);
+    if (after.dist > bodyAtWall) {
       this.x += (after.x - this.x) * 0.09;
       this.y += (after.y - this.y) * 0.09;
       this.angle += wrapAngle(after.angle - this.angle) * 0.10;
-      if (!(this.noBigCurveSlow && bigCurve >= 0.35)) this.speed *= 0.965;
+      this.speed *= 0.965;
     }
 
-    // Effects only -- the containment above is unchanged, and this sits
-    // outside it on a slightly lower threshold so a rival being eased back
-    // in keeps producing sparks while it is still out there rather than
-    // only on the frames the 9% pull happens to leave it past +35. Still
-    // 20 units OUTSIDE the road edge, so a racing line that runs the kerb
-    // (stage 5's holds roadHalf - drawHalf - 2) never trips it.
-    if (after.dist > this.roadHalf + 20) {
+    // Effects only, and on the same barrier test: the pull above parks the
+    // car just inside it, so a rival grinding along the wall is only PAST
+    // the trigger on some frames -- 2 units of slack keeps the sparks
+    // running for the whole scrape instead of strobing. A racing line that
+    // runs the apex stays WALL_LINE_GAP short of this, so driving the line
+    // never sparks.
+    if (after.dist > bodyAtWall - 2) {
       const dx = this.x - after.x, dy = this.y - after.y;
       const d = Math.hypot(dx, dy) || 1;
       this._wallCooldown = Math.max(0, this._wallCooldown - dt);
@@ -910,8 +933,8 @@ export class RivalCar {
       this._wallCooldown = P.wallGraceWindow;
       setContact(this.contact, {
         impact,
-        x: after.x + (dx / d) * this.roadHalf,
-        y: after.y + (dy / d) * this.roadHalf,
+        x: after.x + (dx / d) * this.wallHalf,
+        y: after.y + (dy / d) * this.wallHalf,
         nx: dx / d,
         ny: dy / d,
         force: Math.min(1, this.speed / P.maxSpeed),

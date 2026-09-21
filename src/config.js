@@ -9,7 +9,6 @@ export const PHYSICS = {
   coast: 28,
   turnLow: 2.95,
   turnHigh: 0.68,
-  grassMax: 280,
   // World units travelled per unit of `speed`. This is the actual pace of
   // the game; `hudSpeedFactor` below is only the number on the dial, so the
   // two are tuned separately (the HUD still reads ~350 at full speed).
@@ -161,6 +160,11 @@ export const STAGES = {
     rival: {
       maxSpeed: 715, accel: 210, turn: 3.35, sprite: 'ae86',
       drift: 0.62, driftVisualBoost: 0.5,
+      // Takes its hairpin apexes out to the guardrail rather than the
+      // pavement edge -- there is no off-road penalty left to pay for it,
+      // and on switchbacks this narrow the extra bite is most of what
+      // makes the AE86 look like it is being driven.
+      wallLine: true,
       block: false, cornerSlow: 0.52, raceLine: true, driftDelay: 4.0,
       cornerLookAhead: 46,   // ~1200 units: a hairpin here needs a real braking zone
       // The per-lap "big curve boost" is off on this stage. It fires on the
@@ -236,14 +240,14 @@ export const STAGES = {
     // photo dragged that red toward whatever the tint colour was).
     rival: {
       maxSpeed: PHYSICS.maxSpeed, accel: PHYSICS.accel, turn: 2.85, sprite: 'r8',
-      // 0.34, not 0.30: with the line taken right to the pavement edge,
-      // the last 4% of corner speed is the difference between holding it
-      // and running a wheel over the paint on the way out. Measured over
-      // two laps -- at 0.30 the body crossed on 39 frames and reached 9
-      // units past; at 0.34 it touches 240 of 240 and never crosses, for
-      // the same lap time.
+      // 0.34, not 0.30: it is the last 4% of corner speed that lets the car
+      // hold the line it is given rather than washing out to the far side
+      // of it. Measured over two laps when the line still stopped at the
+      // pavement -- at 0.30 the body overran the commanded line on 39
+      // frames, at 0.34 on none, for the same lap time. Now the line runs
+      // to the barrier (wallLine), so overrunning it means a scrape.
       cornerSlow: 0.34, cornerLookAhead: 40,
-      raceLine: true, perfectLine: true, lineAim: 13,
+      raceLine: true, perfectLine: true, lineAim: 13, wallLine: true,
       block: false, weave: false, drift: 0, finalLapBoostOnly: true,
     },
     bestKey: 'topdownRacer_stage5_best_ms',
