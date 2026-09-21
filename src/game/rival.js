@@ -706,7 +706,15 @@ export class RivalCar {
     // could ask for a point beyond roadHalf, off the road entirely, which
     // is a nonsensical target no matter how well-intentioned the
     // compensation is.
-    const aimCap = this.wallLine ? edgeLimit : this.roadHalf - 20;
+    //
+    // On a wall-line stage the barrier is that limit, not the line: capping
+    // the aim at the line's OWN value threw the drift compensation away
+    // exactly where it was needed. Measured on stage 3, the line asked for
+    // 161 and the bias wanted 200, the cap cut it back to 161 -- and a car
+    // held sideways at 28 degrees through a hairpin then tracked 14 units
+    // shy of the line it had been given, leaving the apex it was built for
+    // a car's width off the rail. The bias exists to be spent here.
+    const aimCap = this.wallLine ? this.wallHalf - WALL_LINE_GAP : this.roadHalf - 20;
     let aimLine = Math.max(-aimCap, Math.min(aimCap, steerLine + Math.sign(steerLine) * driftAimBias));
 
     // After body contact, don't immediately yank back to the programmed
