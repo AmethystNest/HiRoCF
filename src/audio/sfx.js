@@ -188,6 +188,157 @@ export function buildAudio(ctx) {
    * fraction of the player's, so it reads as present without competing
    * with the car actually being driven.
    */
+  /**
+   * The player's engine: a 5.0 V8 through an 8-speed box, built to match a
+   * reference recording of one (a GT7 capture of an RC F pulling from 140
+   * km/h) rather than tuned by ear. Nothing of the recording is shipped --
+   * it was analysed, and these are the numbers that came out of it.
+   *
+   * What the analysis said, and what each part of this is for:
+   *
+   * - A four-stroke repeats once every TWO crank revolutions, so its real
+   *   fundamental is the HALF order, rpm/120, and every half order is a
+   *   true harmonic of it. The reference shows that plainly: at 3,360 rpm
+   *   its 1.5 order stands at 0.89 of the strongest partial and its 2.5 at
+   *   0.40. That off-beat half-order family IS the cross-plane V8 burble,
+   *   and it is the one thing a sawtooth (integer orders only, which is
+   *   what the rival still runs) cannot produce at all. The oscillator
+   *   below therefore runs at rpm/120 with a PeriodicWave whose harmonic
+   *   index k is order k/2 -- one node for the whole order stack.
+   *
+   * - Its spectrum peaks in 80-160 Hz at every engine speed, which cannot
+   *   be a harmonic (those move with rpm) and is the exhaust/body
+   *   resonance. That is the 135 Hz peaking filter, and it is what makes
+   *   whichever order happens to land on it dominate -- exactly what the
+   *   reference does, where order 2 leads at 3,000 rpm and order 1 leads
+   *   at 6,900 rpm without the engine changing.
+   *
+   * - Above that it falls about 6 dB per octave to 2.5 kHz and then
+   *   steeply: the source slope, the second shelf at 350 Hz and the
+   *   low-pass together. Roughly half the total energy is broadband
+   *   rather than tonal (measured tonal share 0.42-0.65), which is the
+   *   noise layer.
+   *
+   * Fitted by coordinate descent against the recording's own octave-band
+   * shape at 4,100 / 5,800 / 6,700 rpm; the residual is 2.3-3.5 dB per
+   * band, against 8+ dB for the sawtooth pair this replaced.
+   */
+  const V8_SLOPE = 0.6;        // source falls as order^-0.6 before filtering
+  const V8_HALF_ORDER = 0.65;  // half orders, relative to the integer ones
+  const V8_IDLE_RPM = 850;
+  const V8_REDLINE_RPM = 7000;
+  /**
+   * Top speed of each of the 8 gears, as a fraction of PHYSICS.maxSpeed.
+   * The steps narrow as they climb (1.67, 1.40, 1.31, 1.26, 1.22, 1.20,
+   * 1.18), which is both what a real box does and what the reference
+   * measures: its three clean upshifts drop 7,020 -> 5,910, 6,900 ->
+   * 5,640 and 7,020 -> 5,970 rpm, i.e. ratios of 1.19, 1.22 and 1.18.
+   * Landing rpm here comes out 5,720-5,950 for the same shifts.
+   */
+  const V8_GEAR_TOP = [0.15, 0.25, 0.35, 0.46, 0.58, 0.71, 0.85, 1.0];
+  /** Torque cut on an upshift: how long, and how far the note drops. */
+  const V8_SHIFT_TIME = 0.11;
+  const V8_SHIFT_DUCK = 0.42;
+
+  let v8WaveCache = null;
+  function v8Wave() {
+    if (v8WaveCache) return v8WaveCache;
+    const N = 2 * 24 + 1;                 // orders up to the 12th, in halves
+    const real = new Float32Array(N);
+    const imag = new Float32Array(N);
+    for (let k = 1; k < N; k++) {
+      const order = k / 2;
+      let a = Math.pow(order, -V8_SLOPE);
+      if (!Number.isInteger(order)) a *= V8_HALF_ORDER;
+      if (order === 1) a *= 1.15;         // crank order, the one that carries
+      if (order === 4) a *= 1.8;          // firing order of a V8: 8 cyl / 2
+      imag[k] = a;
+    }
+    v8WaveCache = ctx.createPeriodicWave(real, imag);
+    return v8WaveCache;
+  }
+
+  /** @param baseGain same contract as makeEngine's. */
+  function makeV8Engine(baseGain) {
+    const osc = ctx.createOscillator();
+    osc.setPeriodicWave(v8Wave());
+    osc.frequency.value = V8_IDLE_RPM / 120;
+
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass'; hp.frequency.value = 75; hp.Q.value = 0.7;
+    const body = ctx.createBiquadFilter();
+    body.type = 'peaking'; body.frequency.value = 135; body.Q.value = 0.7; body.gain.value = 7;
+    const mid = ctx.createBiquadFilter();
+    mid.type = 'peaking'; mid.frequency.value = 350; mid.Q.value = 0.8; mid.gain.value = 3;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 900; lp.Q.value = 0.4;
+    const toneGain = ctx.createGain();
+    toneGain.gain.value = 0;
+    osc.connect(hp); hp.connect(body); body.connect(mid); mid.connect(lp); lp.connect(toneGain);
+
+    // Induction/turbulence: the half of the energy that is not tonal.
+    const noise = ctx.createBufferSource();
+    noise.buffer = noiseBuffer; noise.loop = true;
+    const nf = ctx.createBiquadFilter();
+    nf.type = 'bandpass'; nf.frequency.value = 900; nf.Q.value = 0.7;
+    const noiseGain = ctx.createGain();
+    noiseGain.gain.value = 0;
+    noise.connect(nf); nf.connect(noiseGain);
+
+    toneGain.connect(master);
+    noiseGain.connect(master);
+    osc.start();
+    noise.start();
+
+    let gear = 0;
+    let shiftUntil = 0;
+    let stopped = false;
+
+    return {
+      /** Same signature as makeEngine's: speed 0..maxSpeed, nitro flag. */
+      update(speed, boosting, maxSpeed) {
+        if (stopped) return;
+        const t = ctx.currentTime;
+        const sf = Math.max(0, Math.min(1, speed / Math.max(1, maxSpeed)));
+
+        // One step per call: at 60fps nothing can cross two gears in a frame,
+        // and the 0.93 on the way back down is the hysteresis that stops it
+        // hunting when the car sits exactly on a shift point.
+        if (gear < 7 && sf > V8_GEAR_TOP[gear]) { gear++; shiftUntil = t + V8_SHIFT_TIME; }
+        else if (gear > 0 && sf < V8_GEAR_TOP[gear - 1] * 0.93) gear--;
+
+        const rpm = Math.min(
+          V8_REDLINE_RPM,
+          V8_IDLE_RPM + (V8_REDLINE_RPM - V8_IDLE_RPM) * Math.min(1, sf / V8_GEAR_TOP[gear]),
+        ) * (boosting ? 1.04 : 1);
+        const shifting = t < shiftUntil;
+        // Through the cut the note has to fall as fast as the clutch opens,
+        // or the drop reads as the engine bogging rather than as a shift.
+        const glide = shifting ? 0.025 : 0.05;
+
+        osc.frequency.setTargetAtTime(rpm / 120, t, glide);
+        const load = 0.35 + 0.65 * sf;
+        lp.frequency.setTargetAtTime(500 + rpm * 0.10 + (boosting ? 500 : 0), t, 0.08);
+        nf.frequency.setTargetAtTime(800 + rpm * 0.10, t, 0.08);
+        const duck = shifting ? V8_SHIFT_DUCK : 1;
+        toneGain.gain.setTargetAtTime(baseGain * load * duck * (boosting ? 1.2 : 1), t, glide);
+        // 0.10 of the tone, which is where the fit put it: the recording's
+        // energy above 5 kHz sits 34 dB under its peak, and a noise layer
+        // any louder than this buries that roll-off in hiss.
+        noiseGain.gain.setTargetAtTime(baseGain * 0.10 * load * duck, t, 0.06);
+      },
+      silence() {
+        const t = ctx.currentTime;
+        toneGain.gain.setTargetAtTime(0, t, 0.08);
+        noiseGain.gain.setTargetAtTime(0, t, 0.08);
+      },
+      stop() {
+        stopped = true;
+        try { osc.stop(); noise.stop(); } catch { /* already stopped */ }
+      },
+    };
+  }
+
   function makeEngine(baseGain) {
     const osc1 = ctx.createOscillator();
     osc1.type = 'sawtooth';
@@ -239,6 +390,6 @@ export function buildAudio(ctx) {
     get muted() { return muted; },
     setMuted,
     click, countBeep, go, whoosh, crash, scrape, lapChime, finalLap, fanfare,
-    makeEngine,
+    makeEngine, makeV8Engine,
   };
 }
