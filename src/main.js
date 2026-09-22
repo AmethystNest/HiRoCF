@@ -1031,7 +1031,9 @@ export class Game {
     // moving through 'vs'/'finished'. No-ops entirely if audio was never
     // set up (this.audio null -- see the Game constructor).
     if (this.audio) {
-      this.playerEngine.update(p.speed, p.boosting, PHYSICS.maxSpeed);
+      // The brake pad is the only throttle signal the game has: the car
+      // is on power whenever it is not held. See makeV8Engine's overrun.
+      this.playerEngine.update(p.speed, p.boosting, PHYSICS.maxSpeed, this.input.brake ? 0 : 1);
       this.rivalEngine.update(this.rival.speed, this.rival.boosting, PHYSICS.maxSpeed);
 
       // Nitro: fires once per press, on the rising edge of `boosting` --

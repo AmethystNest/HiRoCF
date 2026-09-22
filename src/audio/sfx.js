@@ -208,13 +208,13 @@ export function buildAudio(ctx) {
    *
    * - Its spectrum peaks in 80-160 Hz at every engine speed, which cannot
    *   be a harmonic (those move with rpm) and is the exhaust/body
-   *   resonance. That is the 135 Hz peaking filter, and it is what makes
+   *   resonance. That is the 150 Hz peaking filter, and it is what makes
    *   whichever order happens to land on it dominate -- exactly what the
    *   reference does, where order 2 leads at 3,000 rpm and order 1 leads
    *   at 6,900 rpm without the engine changing.
    *
    * - Above that it falls about 6 dB per octave to 2.5 kHz and then
-   *   steeply: the source slope, the second shelf at 350 Hz and the
+   *   steeply: the source slope, the second shelf at 300 Hz and the
    *   low-pass together. Roughly half the total energy is broadband
    *   rather than tonal (measured tonal share 0.42-0.65), which is the
    *   noise layer.
@@ -223,19 +223,23 @@ export function buildAudio(ctx) {
    * shape at 4,100 / 5,800 / 6,700 rpm; the residual is 2.3-3.5 dB per
    * band, against 8+ dB for the sawtooth pair this replaced.
    */
-  const V8_SLOPE = 0.6;        // source falls as order^-0.6 before filtering
+  const V8_SLOPE = 0.5;        // source falls as order^-0.5 before filtering
   const V8_HALF_ORDER = 0.65;  // half orders, relative to the integer ones
   const V8_IDLE_RPM = 850;
   const V8_REDLINE_RPM = 7000;
   /**
-   * Top speed of each of the 8 gears, as a fraction of PHYSICS.maxSpeed.
-   * The steps narrow as they climb (1.67, 1.40, 1.31, 1.26, 1.22, 1.20,
-   * 1.18), which is both what a real box does and what the reference
-   * measures: its three clean upshifts drop 7,020 -> 5,910, 6,900 ->
-   * 5,640 and 7,020 -> 5,970 rpm, i.e. ratios of 1.19, 1.22 and 1.18.
-   * Landing rpm here comes out 5,720-5,950 for the same shifts.
+   * The real RC F 8-speed ratio set. Top speed in a gear is inversely
+   * proportional to its ratio, so 8th's ratio over gear g's is the
+   * fraction of the car's own top speed that g reaches -- which is all
+   * this needs, since the game gives speed rather than wheel rpm.
+   *
+   * The resulting steps (1.69, 1.46, 1.27, 1.19, 1.23, 1.21, 1.20) put
+   * each upshift's landing rpm at 4,140-5,850 off a 7,000 limiter; the
+   * reference's three clean upshifts measured 7,020 -> 5,910, 6,900 ->
+   * 5,640 and 7,020 -> 5,970, i.e. the top-gear end of exactly that.
    */
-  const V8_GEAR_TOP = [0.15, 0.25, 0.35, 0.46, 0.58, 0.71, 0.85, 1.0];
+  const V8_GEAR_RATIOS = [4.596, 2.724, 1.863, 1.464, 1.231, 1.0, 0.824, 0.685];
+  const V8_GEAR_TOP = V8_GEAR_RATIOS.map((r) => V8_GEAR_RATIOS[V8_GEAR_RATIOS.length - 1] / r);
   /** Torque cut on an upshift: how long, and how far the note drops. */
   const V8_SHIFT_TIME = 0.11;
   const V8_SHIFT_DUCK = 0.42;
@@ -264,17 +268,25 @@ export function buildAudio(ctx) {
     osc.setPeriodicWave(v8Wave());
     osc.frequency.value = V8_IDLE_RPM / 120;
 
+    // 48, not 75: the recording carries its 40-80 Hz octave only 8.4-8.9 dB
+    // under its peak and cutting at 75 left this 2-5 dB short of that, so
+    // the bottom end was both thinner than the reference and thinner than
+    // asked for. It still cuts, because the half order is 7 Hz at idle and
+    // 29 Hz at the limiter -- inaudible either way, and nothing but wasted
+    // headroom on a phone speaker.
     const hp = ctx.createBiquadFilter();
-    hp.type = 'highpass'; hp.frequency.value = 75; hp.Q.value = 0.7;
+    hp.type = 'highpass'; hp.frequency.value = 48; hp.Q.value = 0.7;
+    const low = ctx.createBiquadFilter();
+    low.type = 'lowshelf'; low.frequency.value = 120; low.gain.value = 5;
     const body = ctx.createBiquadFilter();
-    body.type = 'peaking'; body.frequency.value = 135; body.Q.value = 0.7; body.gain.value = 7;
+    body.type = 'peaking'; body.frequency.value = 150; body.Q.value = 0.7; body.gain.value = 7;
     const mid = ctx.createBiquadFilter();
-    mid.type = 'peaking'; mid.frequency.value = 350; mid.Q.value = 0.8; mid.gain.value = 3;
+    mid.type = 'peaking'; mid.frequency.value = 300; mid.Q.value = 0.8; mid.gain.value = 3;
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass'; lp.frequency.value = 900; lp.Q.value = 0.4;
     const toneGain = ctx.createGain();
     toneGain.gain.value = 0;
-    osc.connect(hp); hp.connect(body); body.connect(mid); mid.connect(lp); lp.connect(toneGain);
+    osc.connect(hp); hp.connect(low); low.connect(body); body.connect(mid); mid.connect(lp); lp.connect(toneGain);
 
     // Induction/turbulence: the half of the energy that is not tonal.
     const noise = ctx.createBufferSource();
@@ -293,10 +305,22 @@ export function buildAudio(ctx) {
     let gear = 0;
     let shiftUntil = 0;
     let stopped = false;
+    let wobble = 0;
+    let onThrottle = 1;
 
     return {
-      /** Same signature as makeEngine's: speed 0..maxSpeed, nitro flag. */
-      update(speed, boosting, maxSpeed) {
+      /**
+       * @param speed     0..maxSpeed
+       * @param boosting  nitro burning
+       * @param maxSpeed  PHYSICS.maxSpeed
+       * @param throttle  1 on power, 0 on the brake. An engine on overrun
+       *                  is quieter and duller than the same engine at the
+       *                  same rpm pulling, and nothing else in here can
+       *                  tell the two apart: rpm is derived from road
+       *                  speed, which barely moves in the instant the
+       *                  driver lifts.
+       */
+      update(speed, boosting, maxSpeed, throttle = 1) {
         if (stopped) return;
         const t = ctx.currentTime;
         const sf = Math.max(0, Math.min(1, speed / Math.max(1, maxSpeed)));
@@ -316,16 +340,34 @@ export function buildAudio(ctx) {
         // or the drop reads as the engine bogging rather than as a shift.
         const glide = shifting ? 0.025 : 0.05;
 
+        // Combustion is never perfectly even, and a PeriodicWave is: held
+        // at an exact frequency this reads as a siren rather than an
+        // engine. A slow random walk of a few cents is what a real one
+        // wanders by, and it is the cheapest realism in here -- no extra
+        // nodes, just the detune the oscillator already has.
+        wobble = wobble * 0.86 + (Math.random() - 0.5) * 0.4;
+        osc.detune.setTargetAtTime(wobble * 22, t, 0.03);
         osc.frequency.setTargetAtTime(rpm / 120, t, glide);
-        const load = 0.35 + 0.65 * sf;
-        lp.frequency.setTargetAtTime(500 + rpm * 0.10 + (boosting ? 500 : 0), t, 0.08);
-        nf.frequency.setTargetAtTime(800 + rpm * 0.10, t, 0.08);
+
+        // Eased rather than switched: a driver's foot is not a gate, and a
+        // hard step in level on every brake tap is more obviously fake
+        // than no overrun at all.
+        onThrottle += (throttle - onThrottle) * 0.18;
+        const load = (0.35 + 0.65 * sf) * (0.55 + 0.45 * onThrottle);
         const duck = shifting ? V8_SHIFT_DUCK : 1;
+        lp.frequency.setTargetAtTime(
+          (700 + rpm * 0.08 + (boosting ? 500 : 0)) * (0.62 + 0.38 * onThrottle), t, 0.08,
+        );
+        nf.frequency.setTargetAtTime(800 + rpm * 0.10, t, 0.08);
         toneGain.gain.setTargetAtTime(baseGain * load * duck * (boosting ? 1.2 : 1), t, glide);
         // 0.10 of the tone, which is where the fit put it: the recording's
         // energy above 5 kHz sits 34 dB under its peak, and a noise layer
-        // any louder than this buries that roll-off in hiss.
-        noiseGain.gain.setTargetAtTime(baseGain * 0.10 * load * duck, t, 0.06);
+        // any louder than this buries that roll-off in hiss. Its own small
+        // wander keeps the induction from sitting as a steady hiss behind
+        // an engine that is moving.
+        noiseGain.gain.setTargetAtTime(
+          baseGain * 0.10 * load * duck * (1 + wobble * 0.25), t, 0.06,
+        );
       },
       silence() {
         const t = ctx.currentTime;

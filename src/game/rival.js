@@ -836,8 +836,23 @@ export class RivalCar {
       this.speed += 430 * dt;
       this.speed = Math.min(this.maxSpeed * 1.18, this.speed);
     } else {
-      if (this.speed < targetSpeed) this.speed += this.launchAccelAt(this.speed) * dt;
-      else if (!fullBigCurveAttack) this.speed -= 430 * speedFactor * dt;
+      if (this.speed < targetSpeed) {
+        // The same top-end taper the player has (see PHYSICS.accelGapSpan /
+        // accelScaleMin), measured against this car's OWN top speed exactly
+        // as the player's is against maxSpeed -- not against targetSpeed,
+        // which corner braking pulls down to just above the current speed
+        // and which would therefore read as the car going slack mid-corner
+        // instead of as it running out of road speed.
+        //
+        // Without it the two cars were on different models, and that only
+        // showed when the accel figures came down together: the player's
+        // taper took another 73% off its last few km/h while the rival had
+        // none to take, so a scaling meant to slow both down equally put
+        // stage 3's rival 10.3s a lap ahead where it had been 4.7s.
+        const gap = this.maxSpeed - this.speed;
+        const taper = Math.max(P.accelScaleMin, Math.min(1, gap / P.accelGapSpan));
+        this.speed += this.launchAccelAt(this.speed) * taper * dt;
+      } else if (!fullBigCurveAttack) this.speed -= 430 * speedFactor * dt;
       this.speed = Math.max(0, Math.min(this.maxSpeed, this.speed));
     }
 

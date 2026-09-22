@@ -3,7 +3,16 @@
  * The implementation around them is new; these numbers are not to drift.
  */
 export const PHYSICS = {
-  accel: 210,
+  // 210 -> 90, with accelGapSpan/accelScaleMin below widening the taper:
+  // measured, the car went 0-100 km/h on the dial in 0.9s and sat at 99%
+  // of top speed after 4.5s, which left nothing to build toward and gave
+  // the 8-speed box (see makeV8Engine) barely half a second per gear. Now
+  // 2.1s to 100 and 12.9s to 99% of top -- the last 40 km/h alone takes
+  // 4.2s of it. Top speed itself is unchanged; only the road to it is.
+  // Braking is deliberately NOT scaled with this: a car that stops harder
+  // than it accelerates is both what a real one does and what keeps the
+  // corners playable at these rates.
+  accel: 90,
   maxSpeed: 760,
   brake: 430,
   coast: 28,
@@ -38,8 +47,8 @@ export const PHYSICS = {
   // derived / incidental values from the same build
   launchBoostBelow: 220,
   launchBoostMul: 1.16,
-  accelGapSpan: 180,
-  accelScaleMin: 0.25,
+  accelGapSpan: 260,
+  accelScaleMin: 0.16,
   steerScaleAtTop: 0.46,
   steerScaleExp: 1.35,
   turnCurveExp: 1.55,
@@ -103,7 +112,7 @@ export const STAGES = {
     courseDesc: '長い直線 / 緩やかなカーブ / 大コーナー',
     rivalName: '這い寄る悪魔',
     roadHalf: 300, wallHalf: 410,
-    rival: { maxSpeed: 710, accel: 250, turn: 2.25, sprite: 'devilz', block: false, weave: false, raceLine: true, cornerSlow: 0.22, holdOpeningStraight: true, finalLapBoostOnly: true },
+    rival: { maxSpeed: 710, accel: 107, turn: 2.25, sprite: 'devilz', block: false, weave: false, raceLine: true, cornerSlow: 0.22, holdOpeningStraight: true, finalLapBoostOnly: true },
     bestKey: 'topdownRacer_stage1_best_ms',
   },
   2: {
@@ -114,7 +123,7 @@ export const STAGES = {
     roadHalf: 230, wallHalf: 320,
     playerPhysics: { wallInset: 2 },
     wallTriggerExtra: 18,
-    rival: { maxSpeed: 650, accel: 280, turn: 3.05, sprite: 'prius' },
+    rival: { maxSpeed: 650, accel: 120, turn: 3.05, sprite: 'prius' },
     bestKey: 'topdownRacer_stage2_best_ms',
   },
   3: {
@@ -140,7 +149,7 @@ export const STAGES = {
       driftMinSpeed: 365,
       launchBoostBelow: 300,
       launchBoostMul: 1.28,
-      accelScaleMin: 0.18,
+      accelScaleMin: 0.115,
       steerScaleExp: 1.18,
       turnCurveExp: 1.28,
       wallSpeedMul: 0.78,
@@ -158,7 +167,7 @@ export const STAGES = {
     // Now it actually brakes for the hairpin and drifts through it at a
     // speed its own steering rate can hold.
     rival: {
-      maxSpeed: 715, accel: 210, turn: 3.35, sprite: 'ae86',
+      maxSpeed: 715, accel: 90, turn: 3.35, sprite: 'ae86',
       drift: 0.62, driftVisualBoost: 0.5,
       // Takes its hairpin apexes out to the guardrail rather than the
       // pavement edge -- there is no off-road penalty left to pay for it,
@@ -187,7 +196,7 @@ export const STAGES = {
     playerPhysics: { wallInset: 3, wallSpeedMul: 0.82 },
     wallTriggerExtra: 6,
     rival: {
-      maxSpeed: 815, accel: 260, turn: 1.95, sprite: 'truck0164',
+      maxSpeed: 815, accel: 111, turn: 1.95, sprite: 'truck0164',
       // The one rival specified as slow away and fast flat out: 815
       // against the player's 760 at the top end, and a launch rate of 120
       // against the player's 244 off the line (see rival.js launchAccel).
@@ -196,7 +205,7 @@ export const STAGES = {
       // stage sets launchAccel, and no other rival's maxSpeed is above
       // the player's. Corner speed is held at the old 790 * (1 - 0.10)
       // = 711 by re-deriving cornerSlow from the raised maxSpeed.
-      cornerSlow: 0.205, cornerLookAhead: 24, launchAccel: 120, block: false, weave: false,
+      cornerSlow: 0.205, cornerLookAhead: 24, launchAccel: 51, block: false, weave: false,
       // Shuts the door on a car coming alongside, and only then -- `block`
       // stays off, because that one weaves about for as long as the rival
       // leads, which on a truck would read as a driver who cannot hold a
