@@ -1169,9 +1169,9 @@ export function buildAudio(ctx) {
         else if (quietSince < 0) quietSince = t;
         if (quietSince >= 0 && t - quietSince > 0.6) { nextAt = 0; return; }
 
-        // 1.35-1.5x the recording: its tone at 1.36 kHz lands at 1.8-2.0
-        // kHz, rising with slip. (Asked for twice: higher.)
-        const want = 1.35 + 0.15 * s;
+        // 1.5-1.7x the recording: its tone at 1.36 kHz lands at 2.0-2.3
+        // kHz, rising with slip. (Asked for three times: higher.)
+        const want = 1.5 + 0.2 * s;
         // A new slide starts from the recording's bite, at its own pitch.
         if (nextAt === 0) { pos = 0; rate = want; }
         if (nextAt < t) nextAt = t + 0.005;

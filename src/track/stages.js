@@ -85,20 +85,49 @@ class Turtle {
   }
 }
 
+// Stage 1 layout, as turtle ops. Exported (with its parameters) so the
+// shape can be tuned and measured without a build.
+export const S1 = {
+  corner: 520,       // the circuit's 90-degree corners, as before
+  kink: 650,         // the two right-handers into and out of the big curve
+  big: 1000,         // THE big curve: 180 degrees at this radius
+  straightOut: 6700, // start line to turn 1
+  straightIn: 2300,  // last corner to the start line
+  eastSide: 4400,    // turn 1 to turn 2, a right-hand S
+  topEast: 3200,     // turn 2 to the first kink
+  bigLegs: 2400,     // kink to the big curve, and back out to the other
+};
+
+function stage1Layout(A, B, dry) {
+  const c = S1;
+  const t = new Turtle(0, 0, 0, dry);
+  t.fwd(c.straightOut);
+  t.turn(c.corner, -90);           // turn 1 -- north
+  t.waveFwd(c.eastSide, 145);      //   right-hand S
+  t.turn(c.corner, -90);           // turn 2 -- west
+  t.waveFwd(c.topEast, 110);
+  t.turn(c.kink, 90);              // right -- north, out to the big curve
+  t.fwd(c.bigLegs);
+  t.turn(c.big, -180);             // the big curve -- back south
+  t.fwd(c.bigLegs);
+  t.turn(c.kink, 90);              // right -- west again
+  t.waveFwd(A, -170);              //   FREE #1: the long back straight
+  t.turn(c.corner, -90);           // turn 3 -- south
+  t.waveFwd(B, -135);              //   FREE #2: left-hand S down the west side
+  t.turn(c.corner, -90);           // final corner -- east
+  t.fwd(c.straightIn);             // into the start line
+  return t;
+}
+
 export function buildStage1Path() {
-  const L = -3400, R = 3400, T = -1500, B = 1500, CR = 520, TOP_MID = 350;
-  return new PathBuilder()
-    .line(-1700, B, R - CR, B, 64)
-    .arc(R - CR, B - CR, CR, Math.PI / 2, 0, 18)
-    .wave(R, B - CR, R, T + CR, 60, 145, 1)
-    .arc(R - CR, T + CR, CR, 0, -Math.PI / 2, 18)
-    .wave(R - CR, T, TOP_MID, T, 58, 150, 1)
-    .bulge(TOP_MID, T, L + CR, T, 72, 430)
-    .arc(L + CR, T + CR, CR, -Math.PI / 2, -Math.PI, 18)
-    .wave(L, T + CR, L, B - CR, 60, -135, 1)
-    .arc(L + CR, B - CR, CR, Math.PI, Math.PI / 2, 18)
-    .line(L + CR, B, -1700, B, 22)
-    .build(SPACING);
+  const at = (a, b) => stage1Layout(a, b, true);
+  const p00 = at(0, 0), p10 = at(1000, 0), p01 = at(0, 1000);
+  const ax = (p10.x - p00.x) / 1000, ay = (p10.y - p00.y) / 1000;
+  const bx = (p01.x - p00.x) / 1000, by = (p01.y - p00.y) / 1000;
+  const det = ax * by - ay * bx;
+  const A = (-p00.x * by + p00.y * bx) / det;
+  const B = (ax * -p00.y + ay * p00.x) / det;
+  return stage1Layout(A, B, false).build(SPACING);
 }
 
 /**

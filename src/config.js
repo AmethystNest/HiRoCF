@@ -218,7 +218,11 @@ export const STAGES = {
     // 710 -> 689 (-3%): the player's lap here went 17.1 -> 18.0s with the
     // accel change and this rival's only 17.1 -> 17.5s, which turned a
     // dead-even stage into a 0.5s deficit. Measured back to 18.0s.
-    rival: { maxSpeed: 689, accel: 107, turn: 2.25, sprite: 'devilz', block: false, weave: false, raceLine: true, cornerSlow: 0.22, holdOpeningStraight: true, finalLapBoostOnly: true },
+    // 689 -> 665 (-3.5%) with the lap doubled (18,960 -> 36,800 units, one
+    // big 180-degree curve added): on the line-follow bot the rival's lap
+    // went from 0.929 of the player's to 0.900, the new corners suiting it
+    // better; 665 measures 0.926, back where the stage was.
+    rival: { maxSpeed: 665, accel: 107, turn: 2.25, sprite: 'devilz', block: false, weave: false, raceLine: true, cornerSlow: 0.22, holdOpeningStraight: true, finalLapBoostOnly: true },
     bestKey: 'topdownRacer_stage1_best_ms',
   },
   2: {

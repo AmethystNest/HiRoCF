@@ -29,8 +29,9 @@
  *  LUFS after make-bgm.mjs evens them out), which on its own would bury
  *  the engine. At 0.3 a track's body measured -23 dBFS RMS in game against
  *  the player's engine at -13 to -15, under it far enough to be lost on a
- *  phone speaker; 0.45 puts it about -19.5, a few dB under the car. */
-const BGM_LEVEL = 0.45;
+ *  phone speaker; 0.45 put it about -19.5, which played as too loud
+ *  across the board. 0.32 (-3 dB) puts it about -22.5. */
+const BGM_LEVEL = 0.32;
 const FADE_IN = 0.35;
 
 export function makeBgm(ctx, bus, el) {

@@ -75,16 +75,26 @@ export const LAYOUTS = {
   1: {
     // Stage 1 runs counter-clockwise from the start/finish on the bottom
     // straight. side +1 is the outside of the loop, -1 the infield.
+    // Fractions below are read back off the built path (see S1 and
+    // stage1Layout in track/stages.js) -- the lap is 36,800 units, about
+    // twice the 18,960 it was, with one big 180-degree curve at the top of
+    // a spur off the top straight.
     sections: [
-      { from: 0.00, to: 0.24, theme: 'grandstand' },  // pit straight
-      { from: 0.24, to: 0.30, theme: 'runoff' },      // turn 1
-      { from: 0.30, to: 0.39, theme: 'forest' },      // right-hand S
-      { from: 0.39, to: 0.44, theme: 'runoff' },      // turn 2
-      { from: 0.44, to: 0.57, theme: 'paddock' },     // top straight
-      { from: 0.57, to: 0.74, theme: 'open' },        // big sweeper
-      { from: 0.74, to: 0.80, theme: 'runoff' },      // turn 3
-      { from: 0.80, to: 0.92, theme: 'forest' },      // left-hand S
-      { from: 0.92, to: 1.00, theme: 'runoff' },      // final corner
+      { from: 0.000, to: 0.181, theme: 'grandstand' },  // pit straight
+      { from: 0.181, to: 0.215, theme: 'runoff' },      // turn 1
+      { from: 0.215, to: 0.324, theme: 'forest' },      // right-hand S
+      { from: 0.324, to: 0.356, theme: 'runoff' },      // turn 2
+      { from: 0.356, to: 0.433, theme: 'paddock' },     // top straight
+      { from: 0.433, to: 0.470, theme: 'runoff' },      // kink out to the spur
+      { from: 0.470, to: 0.526, theme: 'open' },        // up the spur
+      { from: 0.526, to: 0.611, theme: 'runoff' },      // the big curve
+      { from: 0.611, to: 0.676, theme: 'open' },        // back down the spur
+      { from: 0.676, to: 0.712, theme: 'runoff' },      // kink back in
+      { from: 0.712, to: 0.773, theme: 'paddock' },     // back straight
+      { from: 0.773, to: 0.805, theme: 'runoff' },      // turn 3
+      { from: 0.805, to: 0.915, theme: 'forest' },      // left-hand S
+      { from: 0.915, to: 0.945, theme: 'runoff' },      // final corner
+      { from: 0.945, to: 1.000, theme: 'grandstand' },  // into the line
     ],
     landmarks: [
       // start / finish -- the painted chequer on the road surface (built in
@@ -92,36 +102,45 @@ export const LAYOUTS = {
       // here too, but the source art is a solid flat banner with no gap
       // under the arch, so it just sat on the road looking like the car
       // was driving over a mat rather than passing under a structure.
-      { name: 'podium_stage', at: 0.021, side: -1, lateral: 35 },
-      { name: 'marshal_hut', at: 0.012, side: -1, lateral: 20 },
+      //
+      // Everything on the pit straight keeps the distance from the line it
+      // had on the 18,960-unit lap (old fraction x 0.515); the straight is
+      // longer now, so one more grandstand and hoarding carry on past them.
+      { name: 'podium_stage', at: 0.0108, side: -1, lateral: 35 },
+      { name: 'marshal_hut', at: 0.0062, side: -1, lateral: 20 },
 
       // pit wall down the inside of the main straight
-      { name: 'pitwall_barrier', at: 0.040, side: -1, lateral: 10 },
-      { name: 'pitwall_barrier', at: 0.068, side: -1, lateral: 10 },
-      { name: 'pitwall_barrier', at: 0.096, side: -1, lateral: 10 },
-      { name: 'pitwall_barrier', at: 0.124, side: -1, lateral: 10 },
-      { name: 'pit_tent_red', at: 0.052, side: -1, lateral: 45 },
-      { name: 'pit_tent_blue', at: 0.082, side: -1, lateral: 45 },
-      { name: 'pit_tent_red', at: 0.112, side: -1, lateral: 45 },
-      { name: 'tow_vehicle', at: 0.148, side: -1, lateral: 40 },
-      { name: 'ambulance', at: 0.168, side: -1, lateral: 40 },
+      { name: 'pitwall_barrier', at: 0.0206, side: -1, lateral: 10 },
+      { name: 'pitwall_barrier', at: 0.0350, side: -1, lateral: 10 },
+      { name: 'pitwall_barrier', at: 0.0494, side: -1, lateral: 10 },
+      { name: 'pitwall_barrier', at: 0.0638, side: -1, lateral: 10 },
+      { name: 'pit_tent_red', at: 0.0268, side: -1, lateral: 45 },
+      { name: 'pit_tent_blue', at: 0.0422, side: -1, lateral: 45 },
+      { name: 'pit_tent_red', at: 0.0577, side: -1, lateral: 45 },
+      { name: 'tow_vehicle', at: 0.0762, side: -1, lateral: 40 },
+      { name: 'ambulance', at: 0.0865, side: -1, lateral: 40 },
 
       // main grandstands on the outside of the pit straight
-      { name: 'grandstand', at: 0.055, side: 1, lateral: -236, scale: 1.1 },
-      { name: 'grandstand', at: 0.105, side: 1, lateral: -236, scale: 1.1 },
-      { name: 'grandstand', at: 0.155, side: 1, lateral: -236, scale: 1.1 },
-      { name: 'broadcast_camera_tower', at: 0.031, side: 1, lateral: 40 },
-      { name: 'racing_billboard', at: 0.078, side: 1, lateral: 28 },
-      { name: 'racing_billboard', at: 0.132, side: 1, lateral: 28 },
+      { name: 'grandstand', at: 0.0283, side: 1, lateral: -236, scale: 1.1 },
+      { name: 'grandstand', at: 0.0541, side: 1, lateral: -236, scale: 1.1 },
+      { name: 'grandstand', at: 0.0798, side: 1, lateral: -236, scale: 1.1 },
+      { name: 'grandstand', at: 0.1055, side: 1, lateral: -236, scale: 1.1 },
+      { name: 'broadcast_camera_tower', at: 0.0160, side: 1, lateral: 40 },
+      { name: 'racing_billboard', at: 0.0402, side: 1, lateral: 28 },
+      { name: 'racing_billboard', at: 0.0680, side: 1, lateral: 28 },
+      { name: 'racing_billboard', at: 0.1320, side: 1, lateral: 28 },
 
       // (timing gantry at the top straight dropped for the same reason as
       // the start gantry above)
-      { name: 'marshal_tower', at: 0.470, side: 1, lateral: 45 },
-      { name: 'marshal_tower', at: 0.285, side: 1, lateral: 45 },
-      { name: 'marshal_tower', at: 0.770, side: -1, lateral: 45 },
+      { name: 'marshal_tower', at: 0.212, side: 1, lateral: 45 },
+      { name: 'marshal_tower', at: 0.400, side: 1, lateral: 45 },
+      { name: 'marshal_tower', at: 0.568, side: 1, lateral: 45 },   // outside of the big curve
+      { name: 'broadcast_camera_tower', at: 0.535, side: 1, lateral: 40 },
+      { name: 'marshal_tower', at: 0.790, side: -1, lateral: 45 },
     ],
-    // large soft ground patches that stop the infield reading as flat lawn
-    patches: { count: 90, textures: ['patch_dirt', 'patch_dry', 'patch_dark'] },
+    // large soft ground patches that stop the infield reading as flat
+    // lawn -- doubled with the lap, so the density stays what it was
+    patches: { count: 180, textures: ['patch_dirt', 'patch_dry', 'patch_dark'] },
   },
 
   2: {
