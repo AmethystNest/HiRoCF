@@ -366,6 +366,15 @@ export const STAGES = {
     courseDesc: '市街+トンネル+峠+高架 / 全部入り',
     rivalName: 'グリーンヘル',
     roadHalf: 240, wallHalf: 320,
+    // The one wide stretch: from where the pass meets the expressway to the
+    // run-in to the pit straight, the road is half as wide again (half-width
+    // 240 -> 360) -- three lanes an expressway can actually be raced three
+    // abreast on. It widens over ~1,070 units as the pass merges in and
+    // narrows back over ~1,150 before the circuit's grandstands, whose
+    // placement is measured against the narrow road. Knots are
+    // [lap fraction, half-width], eased between (see widthProfile in main.js);
+    // the collision wall, the drawing and prop placement all follow it.
+    widthProfile: [[0.519, 240], [0.531, 360], [0.978, 360], [0.991, 240]],
     // The last rival is deliberately NOT faster or dirtier than the player.
     // It has the player's own engine -- same accel, same top speed, no
     // launch ramp -- it never drifts, and it never blocks or weaves. The

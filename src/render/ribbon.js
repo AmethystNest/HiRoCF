@@ -74,10 +74,14 @@ function selectSamples(edge, n, tol = 1.5, maxStep = 48) {
  *   uInner / uOuter           : texture U at each edge (>1 tiles across the strip)
  *   vPerWorldUnit             : texture repeats per world unit along the track
  *   dense                     : keep a vertex pair at every centreline point
+ *   absoluteV                 : a partial ribbon's V counts from index 0 of
+ *                               the lap instead of from its own first point,
+ *                               so two partial ribbons of the same material
+ *                               that meet (or overlap, cross-fading) line up
  */
 export function ribbonGeometry(path, {
   innerOffset, outerOffset, uInner = 0, uOuter = 1, vPerWorldUnit = 1 / 512,
-  fromIndex = null, spanIndices = null, dense = false,
+  fromIndex = null, spanIndices = null, dense = false, absoluteV = false,
 }) {
   // A partial ribbon (a decal such as the start line) covers a span of the
   // loop; a full one wraps and must close seamlessly.
@@ -113,14 +117,15 @@ export function ribbonGeometry(path, {
   // snap V to a whole number of repeats so a closed loop has no seam
   const spanLen = n * path.spacing;
   const vTotal = partial
-    ? Math.max(1, spanLen * vPerWorldUnit)
+    ? (absoluteV ? spanLen * vPerWorldUnit : Math.max(1, spanLen * vPerWorldUnit))
     : Math.max(1, Math.round(path.length * vPerWorldUnit));
+  const vStart = partial && absoluteV ? base * path.spacing * vPerWorldUnit : 0;
 
   for (let s = 0; s <= segs; s++) {
     // `off` is the distance along the span in centreline points, so V stays
     // true arc length however unevenly the samples are spaced.
     const off = samples ? samples[s] : s;
-    const v = (off / n) * vTotal;
+    const v = vStart + (off / n) * vTotal;
 
     positions[s * 4 + 0] = edge[off * 4 + 0];
     positions[s * 4 + 1] = edge[off * 4 + 1];

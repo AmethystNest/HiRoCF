@@ -510,8 +510,31 @@ export class RivalCar {
 
   /** The barrier the course actually shows at route point `index` (see
    *  main.js's `barrier`); cfg.wallHalf only where none was handed over. */
-  barrierAt(index) {
-    return this.barrier ? this.barrier[index] : this.wallHalf;
+  barrierAt(index, side = 0) {
+    if (!this.barrier) return this.wallHalf;
+    const bs = this.barrierSide;
+    if (!bs) return this.barrier[index];
+    // side 0: the tighter of the two -- what a line limit, which has to
+    // hold on either side of the road, can count on.
+    if (side === 0) return Math.min(bs.pos[index], bs.neg[index]);
+    return side > 0 ? bs.pos[index] : bs.neg[index];
+  }
+
+  /**
+   * The barrier a line held from here on can count on: on a stage whose
+   * walls differ by side (main.js's barrierSide -- the squeezed inside of
+   * stage 5's hairpins, the narrowing into its pit straight) the tightest
+   * over the next few hundred units, not just this point's. The car is a
+   * body, not a point, and at speed it needs room to move across: held to
+   * `here` alone it went into the narrowing before the pit straight still
+   * lined up for the wide road (~780 units ahead is what it takes to be
+   * across in time). Elsewhere exactly barrierAt(here).
+   */
+  lineBarrier(here) {
+    if (!this.barrierSide) return this.barrierAt(here);
+    let m = Infinity;
+    for (let k = -2; k <= 30; k++) m = Math.min(m, this.barrierAt(this.path.wrap(here + k), 0));
+    return m;
   }
 
   nearestOnRoute(x, y) {
@@ -625,7 +648,7 @@ export class RivalCar {
     // so running the apex is not the same thing as scraping (the
     // containment below starts at the barrier itself).
     const carHalf = this.drawHalf ?? this.bodyHalf ?? 45;
-    const edgeLimit = (this.wallLine ? this.barrierAt(here) - WALL_LINE_GAP : this.roadHalf - 2) - carHalf;
+    const edgeLimit = (this.wallLine ? this.lineBarrier(here) - WALL_LINE_GAP : this.roadHalf - 2) - carHalf;
 
     if (this._perfectLine) {
       // Read straight off the solved line at the car's own position. It is
@@ -742,7 +765,7 @@ export class RivalCar {
     // held sideways at 28 degrees through a hairpin then tracked 14 units
     // shy of the line it had been given, leaving the apex it was built for
     // a car's width off the rail. The bias exists to be spent here.
-    const aimCap = this.wallLine ? this.barrierAt(here) - WALL_LINE_GAP : this.roadHalf - 20;
+    const aimCap = this.wallLine ? this.lineBarrier(here) - WALL_LINE_GAP : this.roadHalf - 20;
     let aimLine = Math.max(-aimCap, Math.min(aimCap, steerLine + Math.sign(steerLine) * driftAimBias));
 
     // After body contact, don't immediately yank back to the programmed
@@ -969,7 +992,7 @@ export class RivalCar {
       hw: this.drawHalf ?? this.bodyHalf ?? 45, hl: (this.drawHalf ?? 45) * 2, ox: 0, oy: 0,
     };
     const hit = bodyPastBarrier(
-      this, this.path, (i) => this.barrierAt(i), body, after.index, this.wallHalf * 4,
+      this, this.path, (i, side) => this.barrierAt(i, side), body, after.index, this.wallHalf * 4,
     );
     const over = hit.over;
     // Pushed back out by exactly how far it went in, so it comes to rest
@@ -1024,7 +1047,7 @@ export class RivalCar {
       });
     }
 
-    this.onGrass = after.dist > this.roadHalf;
+    this.onGrass = after.dist > (this.halfWidth ? this.halfWidth[after.index] : this.roadHalf);
     this.near = after;
   }
 }

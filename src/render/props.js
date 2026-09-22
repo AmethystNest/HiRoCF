@@ -341,6 +341,7 @@ function pick(rng, entries) {
  */
 export function buildProps(path, sheet, shadowTex, {
   edge, preset = 'circuit', seed = 1, layout = null, worldScale = 1, wallHalf = null,
+  widen = null,
 }) {
   const rng = mulberry32(seed * 7919 + 13);
   const layer = new Container();
@@ -404,7 +405,9 @@ export function buildProps(path, sheet, shadowTex, {
     if (!info || !tx) return false;
 
     const idx = path.indexAtDistance(dist);
-    const p = path.offsetPoint(idx, side * lateral);
+    // Where the road is wider than the stage's own roadHalf (`widen`),
+    // everything measured from its edge stands that much further out.
+    const p = path.offsetPoint(idx, side * (lateral + (widen && !opts.fromCentre ? widen(path.wrap(idx)) : 0)));
 
     const scale = opts.scale ?? 1;
     // Parked ambulance/tow-truck decorations should read as the same size
@@ -447,7 +450,8 @@ export function buildProps(path, sheet, shadowTex, {
     if (playerReach != null) {
       const nearestLane = path.nearest(p.x, p.y);
       const reachPad = opts.reachPad ?? Math.max(w, h) / 2;
-      if (nearestLane.dist < playerReach + reachPad) return false;
+      const extra = widen ? widen(nearestLane.index) : 0;
+      if (nearestLane.dist < playerReach + extra + reachPad) return false;
     }
 
     const holder = new Container();
@@ -531,7 +535,7 @@ export function buildProps(path, sheet, shadowTex, {
       : lm.at * path.length;
     add(lm.name, dist, lm.side, lateral, {
       scale: lm.scale, shadowAlpha: lm.shadowAlpha, pad: lm.pad,
-      force: lm.force, reachPad: lm.reachPad,
+      force: lm.force, reachPad: lm.reachPad, fromCentre: lm.fromCentre,
     });
   }
 
@@ -770,15 +774,16 @@ export function buildProps(path, sheet, shadowTex, {
  * a scatter of large, irregular, semi-transparent patches is what gives the
  * ground large-scale variation.
  */
-export function buildGroundPatches(path, tex, { edge, seed = 1, count = 90, names }) {
+export function buildGroundPatches(path, tex, { edge, seed = 1, count = 90, names, widen = null }) {
   const rng = mulberry32(seed * 104729 + 7);
   const layer = new Container();
   layer.label = 'patches';
   for (let i = 0; i < count; i++) {
     const d = rng() * path.length;
     const side = rng() < 0.5 ? 1 : -1;
-    const lateral = edge + 10 + rng() * 260;
-    const p = path.offsetPoint(path.indexAtDistance(d), side * lateral);
+    const k = path.indexAtDistance(d);
+    const lateral = edge + 10 + rng() * 260 + (widen ? widen(path.wrap(k)) : 0);
+    const p = path.offsetPoint(k, side * lateral);
     const name = names[(rng() * names.length) | 0];
     const sp = new Sprite(tex[name]);
     sp.anchor.set(0.5);

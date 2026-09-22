@@ -298,11 +298,41 @@ export const SURFACE_PRESETS = {
 /**
  * @param {TrackPath} path
  * @param {object} tex loaded texture map keyed by base name
- * @param {object} cfg { roadHalf, wallHalf, preset }
+ * @param {object} cfg { roadHalf, wallHalf, preset, ... }
+ *
+ * `roadHalf` and `wallHalf` may be numbers or functions of route index: a
+ * stage whose road changes width (stage 5's expressway) passes functions,
+ * and everything laid out from the road edge follows.
+ *
+ * `sector` ({ from, span, fadeIn, fadeOut }, route indices) is the whole
+ * stretch this preset owns on a mixed stage; `range` may be one piece of it
+ * (a sector is cut into ground and deck pieces). Where two sectors meet
+ * they overlap by the incoming one's `fadeIn` (= the outgoing one's
+ * `fadeOut`), and across that overlap:
+ *   - the boundary bands (kerb, shoulder, verge, rock cut...) of the one
+ *     going narrow down to the road edge while the other's widen out of it,
+ *     so a footpath runs out into a gravel shoulder instead of stopping on
+ *     a line;
+ *   - the incoming road surface and ground are laid over the outgoing ones
+ *     in steps of rising opacity -- a cross-fade, since a mesh has one alpha;
+ *   - paint, walls and rails change over at the midpoint, where a real road
+ *     changes them, and a guardrail flares out to its terminal.
+ * Without a `sector`, none of this happens and the output is as before.
+ *
+ * `fold` ({ pos, neg } per route index, see foldLimits) caps how far out anything may be
+ * drawn on the INSIDE of a bend: on the pass's hairpins (apex radius
+ * 420-465) the shoulder and guardrail reached 400 from the centreline, so
+ * the inner rail ran round a loop of radius 20-60 and was drawn as a spike
+ * pointing into the corner. Where the cap bites, everything beyond the road
+ * edge on that side is squeezed in proportionally (insideSqueeze) -- the
+ * rail stays the outermost thing, just closer to the road, the way a real
+ * hairpin's inside rail is -- and main.js moves the wall on that side with
+ * it.
  */
 export function buildSurface(path, tex, {
   roadHalf, wallHalf, preset = 'circuit', range = null, ground = true, terrainLayer = null,
-  noTerrain = false, skipJunctionAt = null,
+  noTerrain = false, skipJunctionAt = null, sector = null, fold = null,
+  baseHalf = typeof roadHalf === 'number' ? roadHalf : null,
 }) {
   const P = SURFACE_PRESETS[preset] || SURFACE_PRESETS.circuit;
   const layer = new Container();
@@ -332,10 +362,61 @@ export function buildSurface(path, tex, {
   const R = range ? { fromIndex: range.fromIndex, spanIndices: range.spanIndices } : {};
   const base = range ? range.fromIndex : 0;
   const span = range ? range.spanIndices : path.count;
+
+  const RH = typeof roadHalf === 'function' ? roadHalf : () => roadHalf;
+  const WH = wallHalf == null ? null : (typeof wallHalf === 'function' ? wallHalf : () => wallHalf);
+  const rh0 = baseHalf ?? RH(base);
+
+  // --- sector hand-over (see the header) ---
+  const S = sector && range ? sector : null;
+  const so = (k) => path.wrap(k - S.from);
+  const ease = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
+  const taper = S && (S.fadeIn || S.fadeOut)
+    ? (k) => {
+      const o = so(k);
+      return Math.min(
+        S.fadeIn ? ease((o + 0.5) / S.fadeIn) : 1,
+        S.fadeOut ? ease((S.span - o - 0.5) / S.fadeOut) : 1,
+      );
+    }
+    : () => 1;
+  // this piece's share of the stretch the sector owns outright
+  const pieceO = S ? so(base) : 0;
+  const ownFrom = S ? Math.floor(S.fadeIn / 2) : 0;
+  const ownTo = S ? S.span - Math.floor(S.fadeOut / 2) : span;
+  const ownA = Math.max(ownFrom, pieceO), ownB = Math.min(ownTo, pieceO + span);
+  const OWN = !S ? R : (ownB > ownA ? { fromIndex: path.wrap(S.from + ownA), spanIndices: ownB - ownA } : null);
+  const ownBase = OWN ? (OWN.fromIndex ?? 0) : 0;
+  const ownSpan = OWN ? (OWN.spanIndices ?? path.count) : 0;
   const inSpan = (k) => path.wrap(k - base) < span;
-  const spanIndices = function* (step) {
-    for (let o = 0; o < span; o += step) yield path.wrap(base + o);
+  const inOwn = (k) => OWN != null && path.wrap(k - ownBase) < ownSpan;
+  const ownIndices = function* (step) {
+    for (let o = 0; o < ownSpan; o += step) yield path.wrap(ownBase + o);
   };
+  // Cross-fade: `make(range, alphaMul)` is called for each step of the
+  // sector's fade-in that falls in this piece, then once for the rest.
+  const faded = (make) => {
+    if (!S || !S.fadeIn) { make(R, 1); return; }
+    const K = 6;
+    for (let st = 0; st < K; st++) {
+      const lo = Math.max(Math.floor((S.fadeIn * st) / K), pieceO);
+      const hi = Math.min(Math.floor((S.fadeIn * (st + 1)) / K), pieceO + span);
+      if (hi > lo) make({ fromIndex: path.wrap(S.from + lo), spanIndices: hi - lo }, (st + 1) / (K + 1));
+    }
+    const lo = Math.max(S.fadeIn, pieceO), hi = pieceO + span;
+    if (hi > lo) make({ fromIndex: path.wrap(S.from + lo), spanIndices: hi - lo }, 1);
+  };
+  // How far a strip may reach on the inside of a bend (see `fold`).
+  const guard = fold
+    ? (k, off) => {
+      const a = Math.abs(off), rh = RH(k);
+      if (a <= rh) return off;
+      const lim = off > 0 ? fold.pos[k] : fold.neg[k];
+      return Math.sign(off) * (rh + (a - rh) * squeezeAt(P, lim, rh, WH ? WH(k) : null));
+    }
+    : (k, off) => off;
+  const G = (fn) => (k) => guard(k, fn(k));
+  const absV = S ? { absoluteV: true } : {};
 
   // --- ground: one world-space tiling plane covering the track bounds ---
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -344,7 +425,7 @@ export function buildSurface(path, tex, {
     if (x < minX) minX = x; if (x > maxX) maxX = x;
     if (y < minY) minY = y; if (y > maxY) maxY = y;
   }
-  const pad = roadHalf + 3200;
+  const pad = rh0 + 3200;
   const groundSprite = new TilingSprite({
     texture: tex[P.ground],
     width: (maxX - minX) + pad * 2,
@@ -377,12 +458,12 @@ export function buildSurface(path, tex, {
   // built with the deck it paints a swathe of hillside over whatever the
   // bridge is flying above.
   if (P.terrain && !noTerrain) {
-    (terrainLayer ?? layer).addChild(ribbonMesh(path, tex[P.ground], {
-      ...R,
+    faded((r, am) => (terrainLayer ?? layer).addChild(ribbonMesh(path, tex[P.ground], {
+      ...r, ...absV,
       innerOffset: -P.terrain, outerOffset: P.terrain,
       uInner: 0, uOuter: P.terrainRepeat ?? 9, vPerWorldUnit: 1 / (P.terrainV ?? 900),
-      tint: P.groundTint,
-    }));
+      tint: P.groundTint, alpha: am,
+    })));
   }
 
   // --- elevated expressway under-deck / cast shadow ---
@@ -392,45 +473,49 @@ export function buildSurface(path, tex, {
     for (const side of [1, -1]) {
       layer.addChild(ribbonMesh(path, Texture.WHITE, {
         ...R,
-        innerOffset: side * (roadHalf + 18),
-        outerOffset: side * (roadHalf + 155),
+        innerOffset: G((k) => side * (RH(k) + 18)),
+        outerOffset: G((k) => side * (RH(k) + 18 + 137 * taper(k))),
         tint: 0x111820, alpha: 0.42,
       }));
       layer.addChild(ribbonMesh(path, Texture.WHITE, {
         ...R,
-        innerOffset: side * (roadHalf + 6),
-        outerOffset: side * (roadHalf + 92),
+        innerOffset: G((k) => side * (RH(k) + 6)),
+        outerOffset: G((k) => side * (RH(k) + 6 + 86 * taper(k))),
         tint: 0x3d4247, alpha: 0.98,
       }));
     }
   }
 
   // --- main asphalt ---
-  layer.addChild(ribbonMesh(path, tex[P.asphalt.texture], {
-        ...R,
-    innerOffset: -roadHalf, outerOffset: roadHalf,
+  faded((r, am) => layer.addChild(ribbonMesh(path, tex[P.asphalt.texture], {
+    ...r, ...absV,
+    innerOffset: (k) => -RH(k), outerOffset: (k) => RH(k),
     uInner: 0, uOuter: P.asphalt.uRepeat, vPerWorldUnit: P.asphalt.vPer,
-    tint: P.asphalt.tint,
-  }));
+    tint: P.asphalt.tint, alpha: am,
+  })));
 
   // --- wear: two wheel tracks polished into the surface ---
-  if (P.ruts) {
-    for (const off of [-P.ruts.offset, P.ruts.offset]) {
+  // Laid at the same share of the road's width wherever it is wider.
+  if (P.ruts && OWN) {
+    for (const sgn of [-1, 1]) {
+      const at = (k) => sgn * P.ruts.offset * (RH(k) / rh0);
       layer.addChild(ribbonMesh(path, tex.rut_overlay, {
-        ...R,
-        innerOffset: off - P.ruts.width / 2, outerOffset: off + P.ruts.width / 2,
+        ...OWN,
+        innerOffset: (k) => at(k) - P.ruts.width / 2, outerOffset: (k) => at(k) + P.ruts.width / 2,
         uInner: 0, uOuter: 1, vPerWorldUnit: P.ruts.vPer, alpha: P.ruts.alpha,
       }));
     }
   }
 
   // --- contact shading on the asphalt beside the boundary ---
-  for (const side of [1, -1]) {
-    layer.addChild(ribbonMesh(path, tex.edge_shadow, {
-        ...R,
-      innerOffset: side * roadHalf, outerOffset: side * (roadHalf - 110),
-      uInner: 0, uOuter: 1, vPerWorldUnit: 1 / 2048, alpha: 0.9,
-    }));
+  if (OWN) {
+    for (const side of [1, -1]) {
+      layer.addChild(ribbonMesh(path, tex.edge_shadow, {
+        ...OWN,
+        innerOffset: (k) => side * RH(k), outerOffset: (k) => side * (RH(k) - 110),
+        uInner: 0, uOuter: 1, vPerWorldUnit: 1 / 2048, alpha: 0.9,
+      }));
+    }
   }
 
   // Everything from here to the boundary bands is paint on the road, and
@@ -438,22 +523,22 @@ export function buildSurface(path, tex, {
   layer.addChild(markings);
 
   // --- painted edge lines ---
-  if (P.edgeLine) {
+  if (P.edgeLine && OWN) {
     for (const side of [1, -1]) {
-      const inner = side * (roadHalf - P.edgeLine.inset);
+      const inner = (k) => side * (RH(k) - P.edgeLine.inset);
       markings.addChild(ribbonMesh(path, Texture.WHITE, {
-        ...R,
-        innerOffset: inner, outerOffset: inner - side * P.edgeLine.width,
+        ...OWN,
+        innerOffset: inner, outerOffset: (k) => inner(k) - side * P.edgeLine.width,
         tint: P.edgeLine.tint, alpha: P.edgeLine.alpha,
       }));
     }
   }
 
   // --- dashed centre line (public-road stages) ---
-  if (P.centreLine) {
+  if (P.centreLine && OWN) {
     const cl = P.centreLine;
     markings.addChild(ribbonMesh(path, cl.texture ? tex[cl.texture] : Texture.WHITE, {
-        ...R,
+      ...OWN,
       innerOffset: -cl.width / 2, outerOffset: cl.width / 2,
       uInner: 0, uOuter: 1, vPerWorldUnit: cl.vPer ?? 1 / 1024,
       tint: cl.tint, alpha: cl.alpha ?? 0.92,
@@ -463,11 +548,11 @@ export function buildSurface(path, tex, {
 
   // --- metropolitan expressway lane markings ---
   // Three usable lanes: two dashed white separators at ±1/3 road width.
-  if (P.highwayLanes) {
-    for (const off of [-roadHalf / 3, roadHalf / 3]) {
+  if (P.highwayLanes && OWN) {
+    for (const sgn of [-1, 1]) {
       markings.addChild(ribbonMesh(path, tex.dash_white, {
-        ...R,
-        innerOffset: off - 6, outerOffset: off + 6,
+        ...OWN,
+        innerOffset: (k) => (sgn * RH(k)) / 3 - 6, outerOffset: (k) => (sgn * RH(k)) / 3 + 6,
         uInner: 0, uOuter: 1, vPerWorldUnit: 1 / 165, alpha: 0.94,
       }));
     }
@@ -480,7 +565,7 @@ export function buildSurface(path, tex, {
     const startSpan = 3;
     markings.addChild(ribbonMesh(path, tex.checker, {
         ...R,
-      innerOffset: -roadHalf, outerOffset: roadHalf,
+      innerOffset: -RH(0), outerOffset: RH(0),
       uInner: 0, uOuter: 1,
       // exactly one copy of the two-row pattern over the painted span
       vPerWorldUnit: 1 / (startSpan * path.spacing),
@@ -496,7 +581,7 @@ export function buildSurface(path, tex, {
   // for the side-street stubs in props.js.
   if (P.startMarker === 'crosswalk' && inSpan(0)) {
     const g = new Graphics();
-    paintCrossing(g, path, 0, roadHalf - (P.edgeLine?.inset ?? 14) - 4, { stopLine: false });
+    paintCrossing(g, path, 0, RH(0) - (P.edgeLine?.inset ?? 14) - 4, { stopLine: false });
     markings.addChild(g);
   }
 
@@ -507,22 +592,28 @@ export function buildSurface(path, tex, {
   // they cost no new art. Driven off the path's own curvature, so they
   // follow the course rather than a list of lap fractions that goes stale
   // the moment the course is regenerated.
+  //
+  // Only on a turn a junction would be: 60 degrees or more. A gentle bend
+  // in the road is not an intersection, and stage 5's town has two 34-degree
+  // bends -- the second of them at the tunnel mouth -- that were each given
+  // a pair of zebra crossings and signals out in the middle of nowhere.
   if (P.junctionMarks) {
     const g = new Graphics();
     const gantry = new Graphics();
-    const half = roadHalf - (P.edgeLine?.inset ?? 14) - 4;
     const setback = Math.round(210 / path.spacing);
-    // post at the back of the pavement, head reaching back in over the road
-    const signalOut = roadHalf + 250;
-    const signalReach = roadHalf - 120;
     for (const [enter, exit] of cornerRuns(path, 0.16)) {
+      if (Math.abs(turnBetween(path, enter, exit)) < (60 * Math.PI) / 180) continue;
       for (const k of [path.wrap(enter - setback), path.wrap(exit + setback)]) {
-        if (!inSpan(k)) continue;
+        if (!inOwn(k)) continue;
         // A junction the viaduct flies over gets no signals. The gantry is
         // drawn above the cars, which necessarily puts it above the deck
         // too, so a signal head left here shows through the bridge from
         // the carriageway on top of it.
         if (skipJunctionAt?.(k)) continue;
+        const half = RH(k) - (P.edgeLine?.inset ?? 14) - 4;
+        // post at the back of the pavement, head reaching back in over the road
+        const signalOut = RH(k) + 250;
+        const signalReach = RH(k) - 120;
         paintCrossing(g, path, k, half, { stopLine: true });
         paintSignalShadow(g, path, k, signalOut, signalReach);
         paintSignalOverhead(gantry, path, k, signalOut, signalReach);
@@ -541,7 +632,8 @@ export function buildSurface(path, tex, {
   // which reads at speed and from a distance without pretending to be a
   // racetrack. Geometry comes straight off the path's own normal/tangent at
   // distance 0, the same approach as the crosswalk above.
-  if (P.startMarker === 'gate' && wallHalf != null && inSpan(0)) {
+  if (P.startMarker === 'gate' && WH != null && inSpan(0)) {
+    const rh = RH(0), wh = WH(0);
     const nx = path.normals[0], ny = path.normals[1];
     const tx = -ny, ty = nx;
     const cx0 = path.points[0][0], cy0 = path.points[0][1];
@@ -551,10 +643,10 @@ export function buildSurface(path, tex, {
     // still registers when crossed at full speed
     const band = (from, to, color, alpha) => {
       g.poly([
-        cx0 + tx * from - nx * roadHalf, cy0 + ty * from - ny * roadHalf,
-        cx0 + tx * to - nx * roadHalf, cy0 + ty * to - ny * roadHalf,
-        cx0 + tx * to + nx * roadHalf, cy0 + ty * to + ny * roadHalf,
-        cx0 + tx * from + nx * roadHalf, cy0 + ty * from + ny * roadHalf,
+        cx0 + tx * from - nx * rh, cy0 + ty * from - ny * rh,
+        cx0 + tx * to - nx * rh, cy0 + ty * to - ny * rh,
+        cx0 + tx * to + nx * rh, cy0 + ty * to + ny * rh,
+        cx0 + tx * from + nx * rh, cy0 + ty * from + ny * rh,
       ]).fill({ color, alpha });
     };
     band(-70, 70, 0xf2f4f5, 0.96);
@@ -563,8 +655,8 @@ export function buildSurface(path, tex, {
 
     // lit pylons just outside the barrier on both shoulders
     for (const side of [1, -1]) {
-      const px = cx0 + nx * side * (wallHalf + 55);
-      const py = cy0 + ny * side * (wallHalf + 55);
+      const px = cx0 + nx * side * (wh + 55);
+      const py = cy0 + ny * side * (wh + 55);
       g.circle(px, py, 150).fill({ color: 0xffd34d, alpha: 0.12 });
       g.circle(px, py, 78).fill({ color: 0xffd34d, alpha: 0.2 });
       const hw = 34, hl = 78;
@@ -592,8 +684,9 @@ export function buildSurface(path, tex, {
   // one ended, so each is fully backed by the one under it. Materials with
   // transparent zones (the kerb's contact and cast shadows) then land on a
   // real surface instead of letting the ground show through.
+  // At a sector hand-over every band's width runs down to nothing (taper).
   const bounds = [];
-  let cursor = roadHalf;
+  let cursor = 0;
   for (const band of P.bands || []) {
     cursor += band.width;
     bounds.push({ band, to: cursor });
@@ -602,9 +695,9 @@ export function buildSurface(path, tex, {
     const { band, to } = bounds[i];
     for (const side of [1, -1]) {
       layer.addChild(ribbonMesh(path, band.texture ? tex[band.texture] : Texture.WHITE, {
-        ...R,
-        innerOffset: side * (roadHalf - OVERLAP),
-        outerOffset: side * to,
+        ...R, ...absV,
+        innerOffset: G((k) => side * (RH(k) - OVERLAP)),
+        outerOffset: G((k) => side * (RH(k) + to * taper(k))),
         uInner: 0,
         uOuter: band.uRepeat ?? 1,
         vPerWorldUnit: band.vPer ?? 1 / 1024,
@@ -621,12 +714,13 @@ export function buildSurface(path, tex, {
   // Mountain uses this for the lit crest of the cut slope, city for the
   // shade where the footpath meets the building line.
   if (P.bandEdge) {
-    const outer = roadHalf + (P.bands || []).reduce((a, b) => a + b.width, 0);
+    const total = (P.bands || []).reduce((a, b) => a + b.width, 0);
+    const outer = (k) => RH(k) + total * taper(k);
     for (const side of [1, -1]) {
       layer.addChild(ribbonMesh(path, Texture.WHITE, {
         ...R,
-        innerOffset: side * (outer - P.bandEdge.width),
-        outerOffset: side * outer,
+        innerOffset: G((k) => side * (outer(k) - P.bandEdge.width * taper(k))),
+        outerOffset: G((k) => side * outer(k)),
         tint: P.bandEdge.tint, alpha: P.bandEdge.alpha,
       }));
     }
@@ -637,10 +731,10 @@ export function buildSurface(path, tex, {
   // faded in by how hard: a hairpin is built out on fill, so that is the
   // side that drops. Drawn beyond the guardrail (which goes in below), so
   // the rail reads as standing at the lip of it.
-  if (P.valleyDrop && wallHalf != null) {
+  if (P.valleyDrop && WH != null && OWN) {
     const vd = P.valleyDrop;
     const drop = outsideDropAmount(path, vd.from, vd.full);
-    const start = wallHalf + 66;
+    const start = (k) => WH(k) + 66;
     for (const side of [1, -1]) {
       const width = (k) => Math.max(0, side * drop[k]) * vd.reach;
       // A flat dark band just reads as a shadow. edge_shadow is a gradient
@@ -648,55 +742,56 @@ export function buildSurface(path, tex, {
       // shade at the road's edge to nothing further out -- which is what
       // ground falling away from under you looks like from above.
       layer.addChild(ribbonMesh(path, tex.edge_shadow, {
-        ...R,
-        innerOffset: (k) => side * (start + width(k) * 0.05),
-        outerOffset: (k) => side * (start + width(k)),
+        ...OWN,
+        innerOffset: G((k) => side * (start(k) + width(k) * 0.05)),
+        outerOffset: G((k) => side * (start(k) + width(k))),
         uInner: 0, uOuter: 1, vPerWorldUnit: 1 / 2048,
         tint: vd.tint, alpha: vd.alpha,
       }));
       // the built-out lip itself, catching the light -- without it the
       // shade starts from nothing and the edge has no edge
       layer.addChild(ribbonMesh(path, Texture.WHITE, {
-        ...R,
-        innerOffset: (k) => side * (start - vd.lip * Math.min(1, width(k) / vd.reach)),
-        outerOffset: (k) => side * (start + vd.lip * 0.35 * Math.min(1, width(k) / vd.reach)),
+        ...OWN,
+        innerOffset: G((k) => side * (start(k) - vd.lip * Math.min(1, width(k) / vd.reach))),
+        outerOffset: G((k) => side * (start(k) + vd.lip * 0.35 * Math.min(1, width(k) / vd.reach))),
         tint: vd.lipTint, alpha: 0.85,
       }));
     }
   }
 
   // --- elevated highway concrete crash walls ---
-  if (P.concreteWalls && wallHalf != null) {
+  if (P.concreteWalls && WH != null && OWN) {
     const wallGfx = new Graphics();
-    const offset = wallHalf + 8;
+    const offset = (k) => WH(k) + 8;
     for (const side of [1, -1]) {
       // broad cast shadow under the wall
       layer.addChild(ribbonMesh(path, Texture.WHITE, {
-        ...R,
-        innerOffset: side * (offset - 18), outerOffset: side * (offset + 34),
+        ...OWN,
+        innerOffset: G((k) => side * (offset(k) - 18)), outerOffset: G((k) => side * (offset(k) + 34)),
         tint: 0x101418, alpha: 0.30,
       }));
       // dark wall base + bright concrete cap create height in top-down view
       layer.addChild(ribbonMesh(path, Texture.WHITE, {
-        ...R,
-        innerOffset: side * (offset - 11), outerOffset: side * (offset + 17),
+        ...OWN,
+        innerOffset: G((k) => side * (offset(k) - 11)), outerOffset: G((k) => side * (offset(k) + 17)),
         tint: 0x555b60, alpha: 1,
       }));
       layer.addChild(ribbonMesh(path, Texture.WHITE, {
-        ...R,
-        innerOffset: side * (offset - 8), outerOffset: side * (offset + 7),
+        ...OWN,
+        innerOffset: G((k) => side * (offset(k) - 8)), outerOffset: G((k) => side * (offset(k) + 7)),
         tint: 0xc9cdd0, alpha: 1,
       }));
     }
     // expansion joints / posts make the continuous wall read as constructed
     // concrete rather than a flat grey stripe.
     const step = Math.max(1, Math.round(115 / path.spacing));
-    for (const i of spanIndices(step)) {
+    for (const i of ownIndices(step)) {
       const px=path.points[i][0], py=path.points[i][1];
       const nx=path.normals[i*2], ny=path.normals[i*2+1];
       const tx=-ny, ty=nx;
       for (const side of [1,-1]) {
-        const cx=px+nx*side*offset, cy=py+ny*side*offset;
+        const o = Math.abs(guard(i, side * offset(i)));
+        const cx=px+nx*side*o, cy=py+ny*side*o;
         wallGfx.poly([
           cx-tx*4-nx*side*13, cy-ty*4-ny*side*13,
           cx+tx*4-nx*side*13, cy+ty*4-ny*side*13,
@@ -717,20 +812,31 @@ export function buildSurface(path, tex, {
   // measured from wallHalf (the player's actual physical limit), not any
   // particular band, since what has to stay clear is the player's own
   // reach, not a fixed surface layer.
-  if (P.guardrail && wallHalf != null) {
+  if (P.guardrail && WH != null && OWN) {
     const rail = P.guardrail;
-    const offset = wallHalf + rail.inset;
+    // At a sector hand-over the rail ends the way a real one does: flared
+    // away from the road over its last few metres to a terminal, not cut.
+    const FLARE = 8, FLARE_OUT = 46;
+    const flare = (k) => {
+      if (!S) return 0;
+      const o = so(k);
+      let d = Infinity;
+      if (S.fadeIn) d = Math.min(d, o - ownFrom);
+      if (S.fadeOut) d = Math.min(d, ownTo - 1 - o);
+      return d < FLARE ? FLARE_OUT * (1 - Math.max(0, d) / FLARE) ** 2 : 0;
+    };
+    const offset = (k) => WH(k) + rail.inset + flare(k);
     for (const side of [1, -1]) {
       // soft shadow first, wider and darker, so the rail reads as
       // standing proud of the shoulder rather than painted flat onto it
       layer.addChild(ribbonMesh(path, Texture.WHITE, {
-        ...R,
-        innerOffset: side * (offset - rail.width * 0.8), outerOffset: side * (offset + rail.width * 0.8),
+        ...OWN,
+        innerOffset: G((k) => side * (offset(k) - rail.width * 0.8)), outerOffset: G((k) => side * (offset(k) + rail.width * 0.8)),
         tint: 0x000000, alpha: 0.16,
       }));
       layer.addChild(ribbonMesh(path, Texture.WHITE, {
-        ...R,
-        innerOffset: side * (offset - rail.width / 2), outerOffset: side * (offset + rail.width / 2),
+        ...OWN,
+        innerOffset: G((k) => side * (offset(k) - rail.width / 2)), outerOffset: G((k) => side * (offset(k) + rail.width / 2)),
         tint: rail.tint, alpha: 0.95,
       }));
     }
@@ -741,12 +847,13 @@ export function buildSurface(path, tex, {
     const postGfx = new Graphics();
     const postStep = Math.max(1, Math.round(rail.postEvery / path.spacing));
     const hw = rail.postWidth / 2, hl = rail.width * 0.7;
-    for (const i of spanIndices(postStep)) {
+    for (const i of ownIndices(postStep)) {
       const px = path.points[i][0], py = path.points[i][1];
       const nx = path.normals[i * 2], ny = path.normals[i * 2 + 1];
       const tx = -ny, ty = nx;
       for (const side of [1, -1]) {
-        const cx = px + nx * side * offset, cy = py + ny * side * offset;
+        const o = Math.abs(guard(i, side * offset(i)));
+        const cx = px + nx * side * o, cy = py + ny * side * o;
         postGfx.poly([
           cx - tx * hw - nx * side * hl, cy - ty * hw - ny * side * hl,
           cx + tx * hw - nx * side * hl, cy + ty * hw - ny * side * hl,
@@ -763,12 +870,12 @@ export function buildSurface(path, tex, {
     if (P.delineator) {
       const del = P.delineator;
       const delStep = Math.max(1, Math.round(del.every / path.spacing));
-      const dOff = offset + del.out;
-      for (const i of spanIndices(delStep)) {
+      for (const i of ownIndices(delStep)) {
         const px = path.points[i][0], py = path.points[i][1];
         const nx = path.normals[i * 2], ny = path.normals[i * 2 + 1];
         const tx = -ny, ty = nx;
         for (const side of [1, -1]) {
+          const dOff = Math.abs(guard(i, side * (offset(i) + del.out)));
           const cx = px + nx * side * dOff, cy = py + ny * side * dOff;
           postGfx.poly([
             cx - tx * 5 - nx * side * 5, cy - ty * 5 - ny * side * 5,
@@ -786,6 +893,97 @@ export function buildSurface(path, tex, {
   }
 
   return layer;
+}
+
+/** Signed heading change from route index `a` to `b`, radians. */
+function turnBetween(path, a, b) {
+  let d = path.tangents[b] - path.tangents[a];
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return d;
+}
+
+/** The furthest anything of preset `P` is drawn from the centreline. */
+function outerExtent(P, rh, wh) {
+  let e = rh + (P.bands || []).reduce((a, b) => a + b.width, 0);
+  // The rail, not the delineators beyond it: they are posts, not a strip,
+  // so they cannot fold, and counting them squeezed the rail ~50 further
+  // in than it needs to be.
+  if (P.guardrail && wh != null) e = Math.max(e, wh + P.guardrail.inset + P.guardrail.width);
+  if (P.concreteWalls && wh != null) e = Math.max(e, wh + 42);
+  return e;
+}
+
+/** Share (0..1) of its width beyond the road edge that preset `P` keeps
+ *  where the inside of a bend allows it only out to `lim`. */
+function squeezeAt(P, lim, rh, wh) {
+  const e = outerExtent(P, rh, wh);
+  return e > rh ? Math.max(0, Math.min(1, (lim - rh) / (e - rh))) : 1;
+}
+
+/** The barrier of preset `preset` on one side (`lim`: that side's fold
+ *  limit) for a visible barrier `vb` on open ground: squeezed exactly as
+ *  the drawing is (see buildSurface's `fold`). */
+export function squeezedBarrier(preset, lim, rh, wh, vb) {
+  const P = SURFACE_PRESETS[preset] || SURFACE_PRESETS.circuit;
+  return vb <= rh ? vb : rh + (vb - rh) * squeezeAt(P, lim, rh, wh);
+}
+
+/**
+ * Per route index, for each side of the road (`pos`: the +normal side,
+ * `neg`: the other), how far out anything may be drawn there: where that
+ * side is the inside of a bend, the local radius less `keep`, so the
+ * innermost thing drawn never runs round a tighter loop than that;
+ * elsewhere unlimited. Each side is eased along the route on its own, so a
+ * cap never steps and never leaks across to the outside of the same bend.
+ * See buildSurface's `fold`.
+ */
+// keep 80: every stage-5 corner but the pass's hairpins is left exactly as
+// drawn (a 520 city junction still clears the 416 its footpath reaches; at
+// keep 150 those were being squeezed too), and on the hairpins the rail
+// gives up only what it must. The squeezed rail is also a wall the rival
+// has to live with, and it runs well inside its own line into a hairpin
+// (it steers for where the line will be a dozen points on): at keep 100
+// with a long ease it met the inside rail at every hairpin, every lap;
+// here it is back to about what it scraped before any of this.
+export function foldLimits(path, { keep = 80 } = {}) {
+  const n = path.count;
+  const W = 3;
+  const rawP = new Float32Array(n).fill(1e5);
+  const rawN = new Float32Array(n).fill(1e5);
+  for (let i = 0; i < n; i++) {
+    const a = path.points[path.wrap(i - W)], b = path.points[path.wrap(i + W)], p = path.points[i];
+    // towards the centre of curvature, over the same window as the radius
+    const cx = a[0] + b[0] - 2 * p[0], cy = a[1] + b[1] - 2 * p[1];
+    const along = cx * path.normals[i * 2] + cy * path.normals[i * 2 + 1];
+    const d = turnBetween(path, path.wrap(i - W), path.wrap(i + W));
+    if (Math.abs(d) < 1e-6) continue;
+    const r = Math.max(0, (2 * W * path.spacing) / Math.abs(d) - keep);
+    if (along > 0) rawP[i] = r; else rawN[i] = r;
+  }
+  // Tightest within +/-10 points, then averaged over +/-14 (~360 units):
+  // over much less, a hairpin's two legs kept their full roadside right up
+  // to the apex and the squeeze all happened at it, which drew the inside
+  // as a keyhole -- a narrow neck between the legs opening into a round
+  // island; over more, the rail started coming in far enough before the
+  // apex to meet the rival there on the way in.
+  const ease = (raw) => {
+    const Rm = 10, Ra = 14;
+    const lo = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      let m = Infinity;
+      for (let k = -Rm; k <= Rm; k++) m = Math.min(m, raw[path.wrap(i + k)]);
+      lo[i] = m;
+    }
+    const out = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      let sum = 0;
+      for (let k = -Ra; k <= Ra; k++) sum += lo[path.wrap(i + k)];
+      out[i] = sum / (2 * Ra + 1);
+    }
+    return out;
+  };
+  return { pos: ease(rawP), neg: ease(rawN) };
 }
 
 /**
@@ -965,7 +1163,9 @@ export function computeElevationProfile(path) {
  * progress -- purely a visual reveal of the logical deck the player is
  * already on, same non-gameplay footing as buildVisualHighwayDeck.
  */
-export function buildRampStructure(path, { wallHalf = 355 } = {}) {
+export function buildRampStructure(path, { wallHalf: wallHalfOpt = 355 } = {}) {
+  // `wallHalf` may vary along the route (a stage whose road widens).
+  const WH = typeof wallHalfOpt === 'function' ? wallHalfOpt : () => wallHalfOpt;
   const layer = new Container();
   layer.label = 'ramp-structure';
   const height = computeElevationProfile(path);
@@ -989,8 +1189,8 @@ export function buildRampStructure(path, { wallHalf = 355 } = {}) {
     // cast shadow: slides outward and widens as the deck climbs, reading as
     // the structure lifting away from the ground plane underneath it.
     layer.addChild(ribbonMesh(path, Texture.WHITE, {
-      innerOffset: (k) => side * (wallHalf + shadowNear + height[k] * shadowFar),
-      outerOffset: (k) => side * (wallHalf + shadowNear + height[k] * (shadowFar + shadowWidth)),
+      innerOffset: (k) => side * (WH(k) + shadowNear + height[k] * shadowFar),
+      outerOffset: (k) => side * (WH(k) + shadowNear + height[k] * (shadowFar + shadowWidth)),
       tint: 0x020304, alpha: 0.78, ...range,
     }));
 
@@ -1004,13 +1204,13 @@ export function buildRampStructure(path, { wallHalf = 355 } = {}) {
     // bright-colour pass, which showed the geometry itself was always
     // correct -- only the tint contrast was insufficient).
     layer.addChild(ribbonMesh(path, Texture.WHITE, {
-      innerOffset: side * (wallHalf + 8),
-      outerOffset: (k) => side * (wallHalf + 8 + height[k] * wallReach),
+      innerOffset: (k) => side * (WH(k) + 8),
+      outerOffset: (k) => side * (WH(k) + 8 + height[k] * wallReach),
       tint: 0x767d84, alpha: 1, ...range,
     }));
     layer.addChild(ribbonMesh(path, Texture.WHITE, {
-      innerOffset: side * (wallHalf + 8),
-      outerOffset: (k) => side * (wallHalf + 8 + height[k] * wallReach * 0.42),
+      innerOffset: (k) => side * (WH(k) + 8),
+      outerOffset: (k) => side * (WH(k) + 8 + height[k] * wallReach * 0.42),
       tint: 0xf0f2f2, alpha: 1, ...range,
     }));
 
@@ -1021,8 +1221,8 @@ export function buildRampStructure(path, { wallHalf = 355 } = {}) {
     // ground tint (not just a shade off it) for the same visibility reason
     // as the wall base above.
     layer.addChild(ribbonMesh(path, Texture.WHITE, {
-      innerOffset: (k) => side * (wallHalf + 8 + height[k] * (wallReach + girderGap)),
-      outerOffset: (k) => side * (wallHalf + 8 + height[k] * (wallReach + girderGap + girderReach)),
+      innerOffset: (k) => side * (WH(k) + 8 + height[k] * (wallReach + girderGap)),
+      outerOffset: (k) => side * (WH(k) + 8 + height[k] * (wallReach + girderGap + girderReach)),
       tint: 0x0e1012, alpha: 1, ...range,
     }));
   }
@@ -1037,7 +1237,7 @@ export function buildRampStructure(path, { wallHalf = 355 } = {}) {
   // pier instead of interpolated along its own length -- piers are discrete
   // objects, not a continuous ribbon, so this reads the same either way).
   const pierGfx = new Graphics();
-  const pierOffset = wallHalf + 8 + wallReach + girderGap + girderReach + 42;
+  const pierExtra = 8 + wallReach + girderGap + girderReach + 42;
   const pierStep = Math.max(1, Math.round(260 / path.spacing));
   const pierHalfW = 30, pierHalfL = 46;
   for (let i = 0; i < path.count; i += pierStep) {
@@ -1047,6 +1247,7 @@ export function buildRampStructure(path, { wallHalf = 355 } = {}) {
     const nx = path.normals[i * 2], ny = path.normals[i * 2 + 1];
     const tx = -ny, ty = nx;
     for (const side of [1, -1]) {
+      const pierOffset = WH(i) + pierExtra;
       const cx = px + nx * side * pierOffset, cy = py + ny * side * pierOffset;
       // cast shadow, offset toward the road so the pier reads as standing
       // proud of the ground rather than painted flat onto it
@@ -1192,9 +1393,10 @@ export function deckRuns(path, fromIndex, spanIndices) {
 export function buildElevatedDeckShadow(path, { roadHalf = 360 } = {}) {
   const layer = new Container();
   layer.label = 'elevated-deck-shadow';
+  const RH = typeof roadHalf === 'function' ? roadHalf : () => roadHalf;
   for (const [from, span] of elevatedRuns(path)) {
     layer.addChild(ribbonMesh(path, Texture.WHITE, {
-      innerOffset: -(roadHalf + 46), outerOffset: roadHalf + 46,
+      innerOffset: (k) => -(RH(k) + 46), outerOffset: (k) => RH(k) + 46,
       tint: 0x04060a, alpha: 0.55, fromIndex: from, spanIndices: span,
     }));
   }

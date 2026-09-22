@@ -1,7 +1,7 @@
 import { Application, Assets, Container, Graphics, Sprite, Texture, Rectangle } from './pixi.js';
 import { STAGES, PHYSICS, CAR_SIZE, CAR_VISUAL_SCALE, CAR_HULL_SCALE, CAR_HULL_OFFSET, DRIFT_MARK_LIFE } from './config.js';
 import { STAGE_PATHS } from './track/stages.js';
-import { buildSurface, surfaceExtent, visibleBarrierHalf, buildRampStructure, buildTunnelStructure, buildElevatedDeckShadow, elevatedRuns, deckRuns } from './render/surfaces.js';
+import { buildSurface, surfaceExtent, visibleBarrierHalf, buildRampStructure, buildTunnelStructure, buildElevatedDeckShadow, elevatedRuns, deckRuns, foldLimits, squeezedBarrier } from './render/surfaces.js';
 import { buildProps, buildGroundPatches, buildSideStreets } from './render/props.js';
 import { buildMiniMap } from './render/minimap.js';
 import { buildFinishFX } from './render/finishfx.js';
@@ -184,17 +184,51 @@ const SURFACE_SECTORS_BY_STAGE = {
       // being painted right through the city's first two junctions. The
       // straight ends at 0.034; 0.024 stops short of the viaduct that
       // crosses it. The second range is the run down to the line.
-      { preset: 'gt_circuit', from: 0.000, to: 0.024 },
-      { preset: 'gt_city', from: 0.021, to: 0.245 },
-      { preset: 'gt_touge', from: 0.242, to: 0.522 },
-      { preset: 'gt_highway', from: 0.519, to: 0.994 },
+      //
+      // Neighbours overlap by the incoming sector's `fadeIn` and hand over
+      // across it (see buildSurface's `sector`) instead of meeting on a cut
+      // straight across the road, which is what every one of these joins
+      // used to be. Town gives way to the pass INSIDE the tunnel through
+      // the ridge (0.200-0.229), where the change is out of sight; the
+      // pass joins the expressway where the road widens to it (see
+      // widthProfile in config.js).
+      { preset: 'gt_circuit', from: 0.000, to: 0.024, fadeOut: 0.004 },
+      { preset: 'gt_city', from: 0.020, to: 0.222, fadeIn: 0.004, fadeOut: 0.010 },
+      { preset: 'gt_touge', from: 0.212, to: 0.527, fadeIn: 0.010, fadeOut: 0.008 },
+      { preset: 'gt_highway', from: 0.519, to: 0.998, fadeIn: 0.008, fadeOut: 0.008 },
       // Last, so it draws over the highway sector it follows: the run out
       // of the final corner is part of the pit straight and wants the
       // circuit's surface, not the expressway's.
-      { preset: 'gt_circuit', from: 0.994, to: 1.000 },
+      { preset: 'gt_circuit', from: 0.990, to: 1.000, fadeIn: 0.008 },
     ],
   },
 };
+
+/**
+ * Road half-width at every route point. `cfg.widthProfile` is a list of
+ * [lap fraction, half-width] knots, eased between neighbours; before the
+ * first and after the last it eases from the last back round to the first.
+ * A stage without one is `cfg.roadHalf` all the way round.
+ */
+function widthProfile(path, cfg) {
+  const n = path.count;
+  const out = new Float32Array(n).fill(cfg.roadHalf);
+  const knots = cfg.widthProfile;
+  if (!knots?.length) return out;
+  const ease = (t) => t * t * (3 - 2 * t);
+  for (let i = 0; i < n; i++) {
+    const f = i / n;
+    let j = knots.length - 1;
+    for (let q = 0; q < knots.length; q++) if (knots[q][0] <= f) j = q;
+    if (f < knots[0][0]) j = knots.length - 1;
+    const [f0, h0] = knots[j];
+    const [f1raw, h1] = knots[(j + 1) % knots.length];
+    const f1 = f1raw <= f0 ? f1raw + 1 : f1raw;
+    const ff = f < f0 ? f + 1 : f;
+    out[i] = h0 + (h1 - h0) * ease(Math.min(1, Math.max(0, (ff - f0) / (f1 - f0))));
+  }
+  return out;
+}
 
 /** Textures used as tiling materials must wrap; atlas frames never can. */
 const WRAPPED = [
@@ -569,9 +603,25 @@ export class Game {
           preset: sec.preset,
           from,
           span: Math.max(1, Math.ceil(sec.to * path.count) - from),
+          fadeIn: Math.round((sec.fadeIn ?? 0) * path.count),
+          fadeOut: Math.round((sec.fadeOut ?? 0) * path.count),
         };
       })
-      : [{ preset, from: 0, span: path.count }];
+      : [{ preset, from: 0, span: path.count, fadeIn: 0, fadeOut: 0 }];
+
+    // Road half-width per route point (cfg.widthProfile; the stage's one
+    // roadHalf everywhere else) and the wall that goes with it: wherever
+    // the road is wider, everything laid out from its edge moves out by
+    // the same amount.
+    const halfW = widthProfile(path, cfg);
+    this.halfWidth = halfW;
+    const variable = !!cfg.widthProfile;
+    const roadHalfAt = variable ? (k) => halfW[k] : cfg.roadHalf;
+    const wallHalfAt = variable ? (k) => cfg.wallHalf + halfW[k] - cfg.roadHalf : cfg.wallHalf;
+    const widen = (k) => halfW[k] - cfg.roadHalf;
+    // Inside-of-bend caps (see foldLimits) -- only where a stage's own
+    // strips are wide enough against its corners to need them.
+    const fold = mixed ? foldLimits(path) : null;
 
     // The physics barrier, per route point: where each stretch of road
     // SHOWS something to hit (see visibleBarrierHalf). cfg.wallHalf is left
@@ -589,10 +639,14 @@ export class Game {
     // these widths (closest: 295 units of clearance, stage 3).
     this.barrier = new Float32Array(path.count);
     for (const sec of sectors) {
-      const b = cfg.barrierAtWallHalf
-        ? cfg.wallHalf
-        : visibleBarrierHalf(cfg.roadHalf, cfg.wallHalf, sec.preset);
-      for (let k = 0; k < sec.span; k++) this.barrier[path.wrap(sec.from + k)] = b;
+      // the stretch this sector owns outright: overlaps split at the middle
+      const a = Math.floor(sec.fadeIn / 2), z = sec.span - Math.floor(sec.fadeOut / 2);
+      for (let k = a; k < z; k++) {
+        const i = path.wrap(sec.from + k);
+        this.barrier[i] = cfg.barrierAtWallHalf
+          ? cfg.wallHalf + widen(i)
+          : visibleBarrierHalf(halfW[i], cfg.wallHalf + widen(i), sec.preset);
+      }
     }
     if (mixed) {
       const raw = Float32Array.from(this.barrier);
@@ -603,15 +657,36 @@ export class Game {
         this.barrier[i] = sum / (2 * r + 1);
       }
     }
+    // On the inside of a bend too tight for the full roadside (see
+    // foldLimits), the drawing is squeezed in toward the road, and the wall
+    // on that side with it: `barrierSide` is the wall per side of the road
+    // (pos: the +normal side), `barrier` the open-ground one.
+    this.barrierSide = null;
+    if (fold) {
+      const pos = Float32Array.from(this.barrier), neg = Float32Array.from(this.barrier);
+      for (const sec of sectors) {
+        const a = Math.floor(sec.fadeIn / 2), z = sec.span - Math.floor(sec.fadeOut / 2);
+        for (let k = a; k < z; k++) {
+          const i = path.wrap(sec.from + k);
+          const rh = halfW[i], wh = cfg.wallHalf + widen(i), vb = this.barrier[i];
+          pos[i] = squeezedBarrier(sec.preset, fold.pos[i], rh, wh, vb);
+          neg[i] = squeezedBarrier(sec.preset, fold.neg[i], rh, wh, vb);
+        }
+      }
+      this.barrierSide = { pos, neg };
+    }
 
     let groundPlaneDone = false;
     for (const sec of sectors) {
       for (const [from, span, up] of deckRuns(path, sec.from, sec.span)) {
         const surface = buildSurface(path, this.tex, {
-          roadHalf: cfg.roadHalf,
-          wallHalf: cfg.wallHalf,
+          roadHalf: roadHalfAt,
+          wallHalf: wallHalfAt,
+          baseHalf: cfg.roadHalf,
           preset: sec.preset,
           range: { fromIndex: from, spanIndices: span },
+          sector: mixed ? sec : null,
+          fold,
           // The one world-spanning ground plane belongs to the first piece
           // that is actually ON the ground -- built into the deck instead
           // it would fade out along with it.
@@ -646,8 +721,8 @@ export class Game {
     // parented further down, after the ground-level scenery, so a bridge
     // passes over the buildings and grandstands beside the road below
     // instead of under them.
-    this.elevatedShadow = buildElevatedDeckShadow(path, { roadHalf: cfg.roadHalf });
-    this.elevatedStructure = buildRampStructure(path, { wallHalf: cfg.wallHalf });
+    this.elevatedShadow = buildElevatedDeckShadow(path, { roadHalf: roadHalfAt });
+    this.elevatedStructure = buildRampStructure(path, { wallHalf: wallHalfAt });
 
     // (The old stage-4 pass here painted a decorative overpass at a fixed
     // fraction of the route -- a bridge-shaped picture beside the road,
@@ -669,7 +744,7 @@ export class Game {
 
     if (layout?.patches) {
       this.world.addChild(buildGroundPatches(path, this.tex, {
-        edge, seed: stageId,
+        edge, seed: stageId, widen,
         count: layout.patches.count,
         names: layout.patches.textures,
       }));
@@ -697,7 +772,7 @@ export class Game {
     this.worldScale = s;
 
     const props = buildProps(path, this.propSheet, this.tex.shadow_blob, {
-      edge, preset, seed: stageId, layout, worldScale: s, wallHalf: cfg.wallHalf,
+      edge, preset, seed: stageId, layout, worldScale: s, wallHalf: cfg.wallHalf, widen,
     });
     // Ground-level scenery goes UNDER the raised deck. Parented after the
     // ground road and before the deck, so a viaduct crossing the city
@@ -819,6 +894,8 @@ export class Game {
 
     this.player = new PlayerCar(path, cfg);
     this.player.barrier = this.barrier;
+    this.player.halfWidth = halfW;
+    this.player.barrierSide = this.barrierSide;
     this.player.placeAtStart(-startBack, playerStartLateral);
     this.player.deckId = 0;
     this.player.zLevel = 0;
@@ -860,6 +937,8 @@ export class Game {
     this.rival.hullHalfW = this.rivalHullSize.w / 2;
     this.rival.hullHalfL = this.rivalHullSize.h / 2;
     this.rival.barrier = this.barrier;
+    this.rival.halfWidth = halfW;
+    this.rival.barrierSide = this.barrierSide;
     this.rival.placeAtStart(-rivalStartBack, rivalStartLateral);
     this.rival.deckId = 0;
     this.rival.zLevel = 0;

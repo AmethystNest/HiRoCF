@@ -150,7 +150,11 @@ export function bodyPastBarrier(car, path, barrierAt, body, hint, maxDist) {
     const wx = car.x - tx * s - ty * c;
     const wy = car.y + tx * c - ty * s;
     const n = path.nearestLocal(wx, wy, hint, 40, maxDist);
-    const wall = barrierAt(n.index);
+    // Which side of the centreline this point of the body is on: a stage
+    // may draw the inside of a tight bend closer in than the outside (see
+    // main.js's barrierSide), and the wall has to be where it is drawn.
+    const lat = (wx - n.x) * path.normals[n.index * 2] + (wy - n.y) * path.normals[n.index * 2 + 1];
+    const wall = barrierAt(n.index, lat >= 0 ? 1 : -1);
     const over = n.dist - wall;
     if (over > hit.over) {
       // The contact itself: the point on the barrier level with the part of

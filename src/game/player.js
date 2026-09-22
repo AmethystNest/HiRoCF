@@ -138,7 +138,7 @@ export class PlayerCar {
     // racing line) onto whichever deck happens to be marginally closer.
     // See TrackPath.nearestLocal.
     const near = this.nearestOnRoute(this.x, this.y);
-    const onGrass = near.dist > this.roadHalf;
+    const onGrass = near.dist > (this.halfWidth ? this.halfWidth[near.index] : this.roadHalf);
 
     // --- nitro ---
     if (this.boosting) {
@@ -277,7 +277,11 @@ export class PlayerCar {
     // INSIDE the concrete before the centre reached the trigger.
     const barrier = this.barrier;
     const hit = bodyPastBarrier(
-      this, this.path, (i) => (barrier ? barrier[i] : this.wallHalf),
+      this, this.path, (i, side) => {
+        if (!barrier) return this.wallHalf;
+        const bs = this.barrierSide;
+        return bs ? (side > 0 ? bs.pos[i] : bs.neg[i]) : barrier[i];
+      },
       this.wallBody ?? { hw: 49, hl: 110, ox: 0, oy: 0 },
       after.index, this.wallHalf * 4,
     );
