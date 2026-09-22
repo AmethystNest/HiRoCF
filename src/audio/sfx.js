@@ -696,6 +696,21 @@ export function buildAudio(ctx) {
   const RIVAL_REDLINE_RPM = 6500;
   const RIVAL_SHIFT_TIME = 0.12;
   const RIVAL_SHIFT_DUCK = 0.5;
+  /**
+   * Weight under the rival's note, asked for. Moving, its two sawtooths put
+   * nothing below their fundamental (120-195 Hz through most of each gear)
+   * -- measured, the 63-125 Hz octave was empty -- so: a sine an octave
+   * under them (the engine's half order, as a four-stroke really has it)
+   * at RIVAL_SUB_LEVEL of one sawtooth, and a low shelf lifting what is
+   * already there below 200 Hz. Kept to "a little more", as asked: with
+   * the sub at 0.9 and the shelf at +5 dB the voice came out 6-8 dB louder
+   * overall, nearly all of it under 125 Hz; these put it 3-4 dB up. A
+   * high-pass at 40 Hz drops the sub at idle (22 Hz), which no speaker
+   * plays and would only have eaten headroom.
+   */
+  const RIVAL_SUB_LEVEL = 0.5;
+  const RIVAL_LOW_SHELF_HZ = 200;
+  const RIVAL_LOW_SHELF_DB = 3;
 
   function makeEngine(baseGain) {
     const osc1 = ctx.createOscillator();
@@ -703,6 +718,14 @@ export function buildAudio(ctx) {
     const osc2 = ctx.createOscillator();
     osc2.type = 'sawtooth';
     osc2.detune.value = 9;
+    const sub = ctx.createOscillator();
+    sub.type = 'sine';
+    const subGain = ctx.createGain();
+    subGain.gain.value = RIVAL_SUB_LEVEL;
+    const low = ctx.createBiquadFilter();
+    low.type = 'lowshelf'; low.frequency.value = RIVAL_LOW_SHELF_HZ; low.gain.value = RIVAL_LOW_SHELF_DB;
+    const rumbleCut = ctx.createBiquadFilter();
+    rumbleCut.type = 'highpass'; rumbleCut.frequency.value = 40; rumbleCut.Q.value = 0.7;
     const filt = ctx.createBiquadFilter();
     filt.type = 'lowpass';
     filt.frequency.value = 300;
@@ -711,12 +734,18 @@ export function buildAudio(ctx) {
     g.gain.value = 0;
     osc1.connect(filt);
     osc2.connect(filt);
-    filt.connect(g);
+    sub.connect(subGain);
+    subGain.connect(filt);
+    filt.connect(low);
+    low.connect(rumbleCut);
+    rumbleCut.connect(g);
     g.connect(master);
     osc1.frequency.value = 55;
     osc2.frequency.value = 55;
+    sub.frequency.value = 27.5;
     osc1.start();
     osc2.start();
+    sub.start();
     let stopped = false;
     let gear = 0;
     let shiftUntil = 0;
@@ -750,6 +779,7 @@ export function buildAudio(ctx) {
         const glide = shifting ? 0.025 : 0.06;
         osc1.frequency.setTargetAtTime(freq, t, glide);
         osc2.frequency.setTargetAtTime(freq, t, glide);
+        sub.frequency.setTargetAtTime(freq / 2, t, glide);
         filt.frequency.setTargetAtTime(280 + 1100 * inGear + 400 * r + (boosting ? 700 : 0), t, 0.08);
         const duck = shifting ? RIVAL_SHIFT_DUCK : 1;
         g.gain.setTargetAtTime(
@@ -764,30 +794,52 @@ export function buildAudio(ctx) {
       },
       stop() {
         stopped = true;
-        try { osc1.stop(); osc2.stop(); } catch { /* already stopped */ }
+        try { osc1.stop(); osc2.stop(); sub.stop(); } catch { /* already stopped */ }
       },
     };
   }
 
   // --- tyre squeal: the other continuous sound -------------------------
   /**
-   * Squeal grains: the recording's steady middle cut into SQUEAL_GRAIN-long
-   * pieces every SQUEAL_GRAIN_STEP, each under a sine window. Unlike the
-   * engine's, these are not phase-aligned -- a squeal is stick-slip noise
-   * around a wandering tone, with no cycle to align to -- so two grains
-   * overlapping are uncorrelated and it is their POWER that has to sum to
-   * one across the overlap: sin^2 + cos^2 does, where a Hann pair (which
-   * sums to one in amplitude) would dip 3 dB at every crossing and flutter
-   * at the hop rate. Built once.
+   * Tyre squeal, played from a recording (squealsample.js) the way the
+   * recording itself goes: every slide starts at the recording's own bite
+   * and runs on through it, and once it reaches the clean, tonal part
+   * (SQUEAL_SAMPLE.sustain onwards) it stays there for as long as the slide
+   * lasts. That part is only half a second long, so it is re-entered at
+   * irregular points rather than looped end to start -- a fixed loop that
+   * short is heard as a rhythm.
+   *
+   * Mechanics: two-hop Hann grains read straight off the recording, each
+   * starting half a grain after the last, which reconstructs it exactly
+   * while the walk is contiguous. A squeal is close to a pure tone, so a
+   * jump anywhere else in it only crossfades cleanly if the two sides are
+   * in phase: every jump target is chosen (from a few random candidates,
+   * each slid a little either way) by how well its first half-grain
+   * correlates with the half-grain it will overlap. The first version of
+   * this voice cut 0.12 s grains from random points of the recording's
+   * noisy front half, with no alignment, and measured nothing like it: the
+   * tone smeared across 1.4-1.8 kHz and stood 30-35 dB over the noise
+   * floor, against the recording's 40-50.
    */
-  const SQUEAL_GRAIN = 0.12;
-  const SQUEAL_GRAIN_STEP = 0.015;
+  const SQUEAL_GRAIN = 0.16;
+  /** Chance per grain, inside the tonal part, of re-entering it elsewhere. */
+  const SQUEAL_JUMP = 0.3;
+  /**
+   * Largest playback-rate change from one grain to the next. Two grains
+   * overlap for half a grain, and if they run at different rates a tone
+   * near 2 kHz slides out of phase across that overlap and cancels: a
+   * 0.5% step (what a per-grain random wander gave) is most of a cycle,
+   * and it measured as 6-7 dB holes the recording does not have. 0.15%
+   * keeps the drift under a tenth of a cycle; the recording's own pitch
+   * wobble is left to supply the unsteadiness.
+   */
+  const SQUEAL_RATE_STEP = 0.0015;
   /** Recording's level against the synthesised squeal's: measured, this
-   *  puts full slip at the same RMS, so the mix around it does not move. */
-  const SQUEAL_SAMPLE_LEVEL = 0.62;
-  let squealGrainCache = null;
-  function squealGrains() {
-    if (squealGrainCache) return squealGrainCache;
+   *  puts full slip at the same RMS it has always had in the mix. */
+  const SQUEAL_SAMPLE_LEVEL = 0.72;
+  let squealCache = null;
+  function squealSource() {
+    if (squealCache) return squealCache;
     const S = SQUEAL_SAMPLE;
     const bin = atob(S.pcm);
     const pcm = new Float32Array(bin.length >> 1);
@@ -795,40 +847,66 @@ export function buildAudio(ctx) {
       const v = bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8);
       pcm[i] = (v > 32767 ? v - 65536 : v) / 32768;
     }
-    const len = Math.round(SQUEAL_GRAIN * S.rate);
-    const step = Math.round(SQUEAL_GRAIN_STEP * S.rate);
-    const grains = [];
-    for (let a = 0; a + len <= pcm.length; a += step) {
-      const buf = ctx.createBuffer(1, len, S.rate);
-      const d = buf.getChannelData(0);
-      for (let i = 0; i < len; i++) d[i] = pcm[a + i] * Math.sin((Math.PI * i) / len);
-      grains.push(buf);
-    }
-    squealGrainCache = grains;
-    return grains;
+    const buf = ctx.createBuffer(1, pcm.length, S.rate);
+    buf.getChannelData(0).set(pcm);
+    const hann = new Float32Array(129);
+    for (let i = 0; i < hann.length; i++) hann[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (hann.length - 1));
+    squealCache = { pcm, buf, hann, rate: S.rate, sustain: Math.round(S.sustain * S.rate) };
+    return squealCache;
   }
 
   /**
-   * Tyre squeal from a recording (squealsample.js) instead of synthesised:
-   * grains of the real thing laid end to end at half-grain spacing, each
-   * picked at random from the recording, so a long slide never loops the
-   * same half-second. Pitch rises a little with slip and wanders on its
-   * own, which is what a tyre sliding harder and less evenly does.
-   *
+   * Where to re-enter the tonal part so the join is in phase: `ref` is the
+   * sample the walk would have read next, i.e. the start of the half-grain
+   * the new grain's first half is going to overlap.
+   */
+  function squealJoin(src, ref, grainLen) {
+    const { pcm, sustain } = src;
+    const half = grainLen >> 1;
+    const hi = pcm.length - grainLen - 1;
+    const corr = (t, step) => {
+      let c = 0, e = 0, r = 0;
+      for (let i = 0; i < half; i += step) {
+        const v = pcm[t + i], w = pcm[ref + i];
+        c += w * v; e += v * v; r += w * w;
+      }
+      return c / Math.sqrt(e * r + 1e-12);
+    };
+    let best = sustain, bestC = -Infinity;
+    for (let k = 0; k < 12; k++) {
+      const c0 = sustain + Math.floor(Math.random() * (hi - sustain));
+      for (let d = -40; d <= 40; d += 2) {
+        const t = Math.max(sustain, Math.min(hi, c0 + d));
+        const c = corr(t, 4);
+        if (c > bestC) { bestC = c; best = t; }
+      }
+    }
+    // refine to the sample
+    let fine = best, fineC = -Infinity;
+    for (let d = -2; d <= 2; d++) {
+      const t = Math.max(sustain, Math.min(hi, best + d));
+      const c = corr(t, 1);
+      if (c > fineC) { fineC = c; fine = t; }
+    }
+    return fine;
+  }
+
+  /**
    * `baseGain` is the voice's ceiling at full slip, same contract as the
-   * engines'. (This replaced a synthesised squeal -- a band-passed
-   * sawtooth plus noise -- at the same level and interface.)
+   * engines'.
    */
   function makeSqueal(baseGain) {
-    const grains = squealGrains();
+    const src = squealSource();
+    const grainLen = Math.round(SQUEAL_GRAIN * src.rate);
+    const hop = grainLen >> 1;
     const out = ctx.createGain();
     out.gain.value = 0;
     out.connect(master);
 
     let stopped = false;
-    let wander = 0;
     let nextAt = 0;
-    let last = -1;
+    let rate = 1;
+    let pos = 0;           // recording sample the next grain starts at
     let quietSince = -1;   // ctx time slip last fell to 0; grains run on
                            // through the release, then stop being queued
     return {
@@ -850,21 +928,32 @@ export function buildAudio(ctx) {
         else if (quietSince < 0) quietSince = t;
         if (quietSince >= 0 && t - quietSince > 0.6) { nextAt = 0; return; }
 
-        wander = wander * 0.92 + (Math.random() - 0.5) * 0.06;
-        // 1.08-1.24x the recording (about 2.5 semitones over where it was
-        // first set, 0.92-1.08x): asked for higher.
-        const rate = (1.08 + 0.16 * s) * (1 + wander);
+        // 1.35-1.5x the recording: its tone at 1.36 kHz lands at 1.8-2.0
+        // kHz, rising with slip. (Asked for twice: higher.)
+        const want = 1.35 + 0.15 * s;
+        // A new slide starts from the recording's bite, at its own pitch.
+        if (nextAt === 0) { pos = 0; rate = want; }
         if (nextAt < t) nextAt = t + 0.005;
         while (nextAt < t + SAMPLE_LOOKAHEAD) {
-          let k = Math.floor(Math.random() * grains.length);
-          if (k === last) k = (k + 1) % grains.length;
-          last = k;
-          const src = ctx.createBufferSource();
-          src.buffer = grains[k];
-          src.playbackRate.value = rate;
-          src.connect(out);
-          src.start(nextAt);
-          nextAt += SQUEAL_GRAIN / 2 / rate;
+          rate += Math.max(-SQUEAL_RATE_STEP, Math.min(SQUEAL_RATE_STEP, want / rate - 1)) * rate;
+          const dur = grainLen / src.rate / rate;
+          const node = ctx.createBufferSource();
+          node.buffer = src.buf;
+          node.playbackRate.value = rate;
+          const win = ctx.createGain();
+          win.gain.value = 0;
+          win.gain.setValueCurveAtTime(src.hann, nextAt, dur);
+          node.connect(win);
+          win.connect(out);
+          node.start(nextAt, pos / src.rate, grainLen / src.rate);
+          nextAt += dur / 2;
+          const next = pos + hop;
+          const inTone = pos >= src.sustain;
+          if (next + grainLen >= src.pcm.length || (inTone && Math.random() < SQUEAL_JUMP)) {
+            pos = squealJoin(src, next, grainLen);
+          } else {
+            pos = next;
+          }
         }
       },
       silence() {
