@@ -978,7 +978,21 @@ export class RivalCar {
     // pull-back never firing at all, since a ~100-unit body reach is
     // never greater than a 260-420 unit wallHalf by itself) silently
     // disables containment for every car, on every stage.
-    const bodyAtWall = this.wallHalf - bodyReach;
+    //
+    // Floored at roadHalf on a NON-wall-line stage: stage 4's truck has a
+    // plain half-width (79) wider than that stage's own 60-unit shoulder,
+    // so wallHalf-bodyReach sat at 340.9, ten to twenty units INSIDE
+    // roadHalf(360) -- measured, that fired the pull-back and the crash
+    // sound 129 times over three laps while the truck's centre never left
+    // the pavement, which is the "wall contact at the road edge" complaint
+    // made literal. Off-road costs nothing on purpose (see PHYSICS), so a
+    // car earns the whole shoulder before anything about touching a wall
+    // may fire, whatever its own width. A wall-line stage is exempt: there
+    // the apex is deliberately run at the barrier while the centre is
+    // still well inside roadHalf (stage 3 alone logs ~200 contacts over
+    // three laps this way), and that is the feature, not the bug.
+    let bodyAtWall = this.wallHalf - bodyReach;
+    if (!this.wallLine) bodyAtWall = Math.max(bodyAtWall, this.roadHalf);
     if (after.dist > bodyAtWall) {
       this.x += (after.x - this.x) * 0.09;
       this.y += (after.y - this.y) * 0.09;
