@@ -405,10 +405,18 @@ export function buildAudio(ctx) {
    * below SAMPLE_FADE_LOW the synthesised V8 takes over, crossfaded.
    */
   const SAMPLE_FADE_LOW = 2200;
-  /** Recording's level against the synthesised voice's: measured, the
-   *  recording played 3.6-4.9 dB under it at 4,200-5,600 rpm, so this puts
-   *  the two at the same RMS and the crossfade between them level. */
-  const SAMPLE_LEVEL = 1.55;
+  /** Recording's level against the synthesised voice's, re-measured with
+   *  the EQ below in: this puts the two at about the same RMS, so the
+   *  crossfade between them is level and nothing else in the mix moves. */
+  const SAMPLE_LEVEL = 1.2;
+  /** EQ on the recording (see makeSampledV8Engine's `weight`): a broad
+   *  lift centred in the 50-160 Hz body of the note, and a small dip where
+   *  the lift's shoulder would otherwise make 200-400 Hz boxy. */
+  const SAMPLE_WEIGHT_HZ = 100;
+  const SAMPLE_WEIGHT_Q = 1.0;
+  const SAMPLE_WEIGHT_DB = 6.5;
+  const SAMPLE_BOXY_HZ = 320;
+  const SAMPLE_BOXY_DB = -2.5;
   const SAMPLE_FADE_HIGH = 3000;
   /** How far ahead grains are queued, s: enough to ride out a frame that
    *  takes 100 ms (measured in-game at 15 fps under software rendering the
@@ -482,14 +490,34 @@ export function buildAudio(ctx) {
     const grains = v8Grains();
     const srcMin = grains[0].rpm;
     const srcMax = grains[grains.length - 1].rpm;
+    // The recording is played in its own register: the game's rev range
+    // (idle to the 7,000 limiter) maps onto idle to the top of the
+    // recording (5,777). Played at the game's own rpm instead, the RC F's
+    // close-ratio box kept it at 4,100-7,000 -- most of the time above the
+    // recording, re-pitched up by as much as 21%, which is what made it
+    // thinner and lighter than the source: at equal rpm the voice and the
+    // recording measure within 1-2 dB per band, so the difference was never
+    // in the grains, it was in the pitch they were being asked for.
+    const toSoundRpm = (rpm) => V8_IDLE_RPM + (rpm - V8_IDLE_RPM) * (srcMax - V8_IDLE_RPM) / (V8_REDLINE_RPM - V8_IDLE_RPM);
     const synth = makeV8Engine(baseGain);
     const box = makeGearbox();
 
     const bus = ctx.createGain();
     bus.gain.value = 0;
+    // Weight, put back. Over a full-throttle run the game spends far longer
+    // near the top of each gear than the recording's steady climb does, so
+    // the long-term balance came out lighter than the source: 50-100 Hz
+    // 5.3 dB and 100-200 Hz 2.2 dB under it, everything above 200 Hz 2-3 dB
+    // over. SAMPLE_LOW_SHELF_* are fitted to close that.
+    const weight = ctx.createBiquadFilter();
+    weight.type = 'peaking'; weight.frequency.value = SAMPLE_WEIGHT_HZ; weight.Q.value = SAMPLE_WEIGHT_Q; weight.gain.value = SAMPLE_WEIGHT_DB;
+    const boxy = ctx.createBiquadFilter();
+    boxy.type = 'peaking'; boxy.frequency.value = SAMPLE_BOXY_HZ; boxy.Q.value = 1.0; boxy.gain.value = SAMPLE_BOXY_DB;
     const overrun = ctx.createBiquadFilter();
     overrun.type = 'lowpass'; overrun.frequency.value = 11000; overrun.Q.value = 0.5;
-    bus.connect(overrun);
+    bus.connect(weight);
+    weight.connect(boxy);
+    boxy.connect(overrun);
     overrun.connect(master);
 
     let stopped = false;
@@ -518,7 +546,7 @@ export function buildAudio(ctx) {
         // The same glide the synthesised voice gives its pitch: quick through
         // a shift, so the drop reads as a clutch opening, not a bog.
         const tau = shifting ? 0.025 : 0.05;
-        rpmNow += (rpm - rpmNow) * (dt > 0 ? 1 - Math.exp(-dt / tau) : 1);
+        rpmNow += (toSoundRpm(rpm) - rpmNow) * (dt > 0 ? 1 - Math.exp(-dt / tau) : 1);
 
         const mix = Math.max(0, Math.min(1, (rpmNow - SAMPLE_FADE_LOW) / (SAMPLE_FADE_HIGH - SAMPLE_FADE_LOW)));
         synth.update(speed, boosting, maxSpeed, throttle, Math.sqrt(1 - mix));
