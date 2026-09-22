@@ -1161,7 +1161,7 @@ export class Game {
       // Everything the rival makes is heard from where the player is (see
       // distanceLevel), not at one fixed level wherever it is on the course.
       const rivalLevel = distanceLevel(Math.hypot(this.rival.x - p.x, this.rival.y - p.y));
-      this.rivalEngine.update(this.rival.speed, this.rival.boosting, PHYSICS.maxSpeed, rivalLevel);
+      this.rivalEngine.update(this.rival.speed, this.rival.boosting, this.rival.maxSpeed, rivalLevel);
       this.playerSqueal.update(this.tyreSlip(p, 'player', dt));
       this.rivalSqueal.update(this.tyreSlip(this.rival, 'rival', dt), rivalLevel);
 

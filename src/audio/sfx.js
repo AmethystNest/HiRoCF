@@ -16,6 +16,7 @@
  *             resumed) by the caller.
  */
 import { V8_SAMPLE } from './v8sample.js';
+import { SQUEAL_SAMPLE } from './squealsample.js';
 
 export function buildAudio(ctx) {
   const master = ctx.createGain();
@@ -287,11 +288,54 @@ export function buildAudio(ctx) {
     return v8WaveCache;
   }
 
+  /**
+   * The idle note. The full order stack above repeats once every two crank
+   * turns, which at 850 rpm is 7 Hz -- slow enough to be heard as separate
+   * beats rather than a pitch, and it came out as a single-cylinder
+   * putt-putt (envelope modulated 0.8 deep at 7 and 14 Hz). A warm V8 at
+   * idle is a steady hum on its firing frequency, 8 cylinders over two
+   * turns = order 4 = 57 Hz at 850 rpm, so the idle wave carries only that
+   * order and its multiples, with the same fall-off. Its own repeat is the
+   * firing frequency itself, heard as pitch, not as beats. A trace of
+   * order 2 keeps it from being a plain buzz without bringing the beat back.
+   */
+  /** The idle wave's level against the full one. A PeriodicWave is
+   *  normalised to its peak, and one that is nearly a single sinusoid
+   *  carries far more RMS per peak than the full stack does -- unscaled it
+   *  measured 9.5 dB over the old idle. This puts it about 3 dB over,
+   *  which at 57 Hz, where the ear is least sensitive, is a similar
+   *  loudness with more weight. */
+  const V8_IDLE_WAVE_LEVEL = 0.47;
+  let v8IdleWaveCache = null;
+  function v8IdleWave() {
+    if (v8IdleWaveCache) return v8IdleWaveCache;
+    const N = 2 * 24 + 1;
+    const real = new Float32Array(N);
+    const imag = new Float32Array(N);
+    for (let k = 1; k < N; k++) {
+      const order = k / 2;
+      if (order % 4 === 0) imag[k] = Math.pow(order / 4, -0.8);
+      else if (order === 2) imag[k] = 0.1;
+    }
+    v8IdleWaveCache = ctx.createPeriodicWave(real, imag);
+    return v8IdleWaveCache;
+  }
+  /** Rpm band the idle wave hands over to the full V8 one across. */
+  const V8_IDLE_WAVE_TO = 1400;
+  const V8_FULL_WAVE_FROM = 2600;
+
   /** @param baseGain same contract as makeEngine's. */
   function makeV8Engine(baseGain) {
     const osc = ctx.createOscillator();
     osc.setPeriodicWave(v8Wave());
     osc.frequency.value = V8_IDLE_RPM / 120;
+    const idleOsc = ctx.createOscillator();
+    idleOsc.setPeriodicWave(v8IdleWave());
+    idleOsc.frequency.value = V8_IDLE_RPM / 120;
+    const fullMix = ctx.createGain();
+    fullMix.gain.value = 0;
+    const idleMix = ctx.createGain();
+    idleMix.gain.value = V8_IDLE_WAVE_LEVEL;
 
     // 48, not 75: the recording carries its 40-80 Hz octave only 8.4-8.9 dB
     // under its peak and cutting at 75 left this 2-5 dB short of that, so
@@ -311,7 +355,7 @@ export function buildAudio(ctx) {
     lp.type = 'lowpass'; lp.frequency.value = 900; lp.Q.value = 0.4;
     const toneGain = ctx.createGain();
     toneGain.gain.value = 0;
-    osc.connect(hp); hp.connect(low); low.connect(body); body.connect(mid); mid.connect(lp); lp.connect(toneGain);
+    osc.connect(fullMix); idleOsc.connect(idleMix); fullMix.connect(hp); idleMix.connect(hp); hp.connect(low); low.connect(body); body.connect(mid); mid.connect(lp); lp.connect(toneGain);
 
     // Induction/turbulence: the half of the energy that is not tonal.
     const noise = ctx.createBufferSource();
@@ -325,6 +369,7 @@ export function buildAudio(ctx) {
     toneGain.connect(master);
     noiseGain.connect(master);
     osc.start();
+    idleOsc.start();
     noise.start();
 
     const box = makeGearbox();
@@ -362,6 +407,13 @@ export function buildAudio(ctx) {
         wobble = wobble * 0.86 + (Math.random() - 0.5) * 0.4;
         osc.detune.setTargetAtTime(wobble * 22, t, 0.03);
         osc.frequency.setTargetAtTime(rpm / 120, t, glide);
+        // The idle wave drifts half as far: a settled idle is steadier than
+        // an engine under load, and it is steadiness that was asked for.
+        idleOsc.detune.setTargetAtTime(wobble * 11, t, 0.03);
+        idleOsc.frequency.setTargetAtTime(rpm / 120, t, glide);
+        const full = Math.max(0, Math.min(1, (rpm - V8_IDLE_WAVE_TO) / (V8_FULL_WAVE_FROM - V8_IDLE_WAVE_TO)));
+        fullMix.gain.setTargetAtTime(Math.sqrt(full), t, 0.05);
+        idleMix.gain.setTargetAtTime(V8_IDLE_WAVE_LEVEL * Math.sqrt(1 - full), t, 0.05);
 
         // Eased rather than switched: a driver's foot is not a gate, and a
         // hard step in level on every brake tap is more obviously fake
@@ -390,7 +442,7 @@ export function buildAudio(ctx) {
       },
       stop() {
         stopped = true;
-        try { osc.stop(); noise.stop(); } catch { /* already stopped */ }
+        try { osc.stop(); idleOsc.stop(); noise.stop(); } catch { /* already stopped */ }
       },
     };
   }
@@ -603,6 +655,20 @@ export function buildAudio(ctx) {
     };
   }
 
+  /**
+   * The rival's gearbox: five speeds, so across a run from the grid to its
+   * top speed it is heard shifting four times, the way a car pulling away
+   * ahead of you is. Top speed per gear follows from the ratios exactly as
+   * for the V8 box (last ratio over this one); the steps (1.64, 1.47, 1.36,
+   * 1.29) land each upshift at 4,300-5,200 rpm off a 6,500 limiter.
+   */
+  const RIVAL_GEAR_RATIOS = [3.6, 2.2, 1.5, 1.1, 0.85];
+  const RIVAL_GEAR_TOP = RIVAL_GEAR_RATIOS.map((r) => RIVAL_GEAR_RATIOS[RIVAL_GEAR_RATIOS.length - 1] / r);
+  const RIVAL_IDLE_RPM = 800;
+  const RIVAL_REDLINE_RPM = 6500;
+  const RIVAL_SHIFT_TIME = 0.12;
+  const RIVAL_SHIFT_DUCK = 0.5;
+
   function makeEngine(baseGain) {
     const osc1 = ctx.createOscillator();
     osc1.type = 'sawtooth';
@@ -624,10 +690,15 @@ export function buildAudio(ctx) {
     osc1.start();
     osc2.start();
     let stopped = false;
+    let gear = 0;
+    let shiftUntil = 0;
 
     return {
       /**
-       * @param speed 0..maxSpeed, @param boosting bool, @param maxSpeed PHYSICS.maxSpeed
+       * @param speed 0..maxSpeed, @param boosting bool
+       * @param maxSpeed the car's own top speed (rival.maxSpeed): the box
+       *              is laid out against it, so fifth runs out where the
+       *              car does.
        * @param level 0..1 multiplier on top of everything else -- how far
        *              away this car is from the listener (see main.js's
        *              distanceLevel); 1 is right alongside.
@@ -636,11 +707,26 @@ export function buildAudio(ctx) {
         if (stopped) return;
         const r = Math.max(0, Math.min(1, speed / Math.max(1, maxSpeed)));
         const t = ctx.currentTime;
-        const freq = 52 + r * 150 + (boosting ? 45 : 0);
-        osc1.frequency.setTargetAtTime(freq, t, 0.07);
-        osc2.frequency.setTargetAtTime(freq, t, 0.07);
-        filt.frequency.setTargetAtTime(280 + r * 1500 + (boosting ? 700 : 0), t, 0.1);
-        g.gain.setTargetAtTime(baseGain * (0.45 + 0.55 * r) * (boosting ? 1.25 : 1) * level, t, 0.06);
+        // One step per call, 0.93 hysteresis on the way down so it does not
+        // hunt on a shift point -- the same rules as the V8 box.
+        const last = RIVAL_GEAR_TOP.length - 1;
+        if (gear < last && r > RIVAL_GEAR_TOP[gear]) { gear++; shiftUntil = t + RIVAL_SHIFT_TIME; }
+        else if (gear > 0 && r < RIVAL_GEAR_TOP[gear - 1] * 0.93) gear--;
+        const shifting = t < shiftUntil;
+        const inGear = Math.min(1, r / RIVAL_GEAR_TOP[gear]);
+        const rpm = RIVAL_IDLE_RPM + (RIVAL_REDLINE_RPM - RIVAL_IDLE_RPM) * inGear;
+        // Same 45-195 Hz span the ungeared voice swept once from standstill
+        // to top speed, now swept once per gear.
+        const freq = 45 + (150 * (rpm - RIVAL_IDLE_RPM)) / (RIVAL_REDLINE_RPM - RIVAL_IDLE_RPM) + (boosting ? 30 : 0);
+        // Quick through the cut, so the drop reads as a shift, not a bog.
+        const glide = shifting ? 0.025 : 0.06;
+        osc1.frequency.setTargetAtTime(freq, t, glide);
+        osc2.frequency.setTargetAtTime(freq, t, glide);
+        filt.frequency.setTargetAtTime(280 + 1100 * inGear + 400 * r + (boosting ? 700 : 0), t, 0.08);
+        const duck = shifting ? RIVAL_SHIFT_DUCK : 1;
+        g.gain.setTargetAtTime(
+          baseGain * (0.45 + 0.55 * r) * (boosting ? 1.25 : 1) * duck * level, t, shifting ? 0.025 : 0.06,
+        );
       },
       /** Fully silent (grid, pause, finish) without tearing the voice
        *  down and rebuilding it -- gain to 0 is cheaper and click-free
@@ -657,48 +743,66 @@ export function buildAudio(ctx) {
 
   // --- tyre squeal: the other continuous sound -------------------------
   /**
-   * Tyres at the limit of grip. What a squeal actually is: rubber
-   * stick-slipping against the road at a few hundred to about a thousand
-   * times a second, which comes out as a strong, slightly unsteady tone
-   * with a hard, narrow band of hiss wrapped round it -- not white noise,
-   * and not a clean whistle either. So: a sawtooth at the stick-slip rate,
-   * narrowed by a resonant band-pass onto its second harmonic (where the
-   * screech sits), with the shared noise buffer through a tighter band-pass
-   * a little above it for the grit. The pitch wanders a few percent on its
-   * own and rises with how hard the tyres are working, which is what keeps
-   * it from sounding like a held note.
+   * Squeal grains: the recording's steady middle cut into SQUEAL_GRAIN-long
+   * pieces every SQUEAL_GRAIN_STEP, each under a sine window. Unlike the
+   * engine's, these are not phase-aligned -- a squeal is stick-slip noise
+   * around a wandering tone, with no cycle to align to -- so two grains
+   * overlapping are uncorrelated and it is their POWER that has to sum to
+   * one across the overlap: sin^2 + cos^2 does, where a Hann pair (which
+   * sums to one in amplitude) would dip 3 dB at every crossing and flutter
+   * at the hop rate. Built once.
+   */
+  const SQUEAL_GRAIN = 0.12;
+  const SQUEAL_GRAIN_STEP = 0.015;
+  /** Recording's level against the synthesised squeal's: measured, this
+   *  puts full slip at the same RMS, so the mix around it does not move. */
+  const SQUEAL_SAMPLE_LEVEL = 0.62;
+  let squealGrainCache = null;
+  function squealGrains() {
+    if (squealGrainCache) return squealGrainCache;
+    const S = SQUEAL_SAMPLE;
+    const bin = atob(S.pcm);
+    const pcm = new Float32Array(bin.length >> 1);
+    for (let i = 0; i < pcm.length; i++) {
+      const v = bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8);
+      pcm[i] = (v > 32767 ? v - 65536 : v) / 32768;
+    }
+    const len = Math.round(SQUEAL_GRAIN * S.rate);
+    const step = Math.round(SQUEAL_GRAIN_STEP * S.rate);
+    const grains = [];
+    for (let a = 0; a + len <= pcm.length; a += step) {
+      const buf = ctx.createBuffer(1, len, S.rate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = pcm[a + i] * Math.sin((Math.PI * i) / len);
+      grains.push(buf);
+    }
+    squealGrainCache = grains;
+    return grains;
+  }
+
+  /**
+   * Tyre squeal from a recording (squealsample.js) instead of synthesised:
+   * grains of the real thing laid end to end at half-grain spacing, each
+   * picked at random from the recording, so a long slide never loops the
+   * same half-second. Pitch rises a little with slip and wanders on its
+   * own, which is what a tyre sliding harder and less evenly does.
    *
    * `baseGain` is the voice's ceiling at full slip, same contract as the
-   * engines'.
+   * engines'. (This replaced a synthesised squeal -- a band-passed
+   * sawtooth plus noise -- at the same level and interface.)
    */
   function makeSqueal(baseGain) {
-    const osc = ctx.createOscillator();
-    osc.type = 'sawtooth';
-    osc.frequency.value = 820;
-    const tonal = ctx.createBiquadFilter();
-    tonal.type = 'bandpass'; tonal.frequency.value = 1640; tonal.Q.value = 5;
-    const toneGain = ctx.createGain();
-    toneGain.gain.value = 0.55;
-    osc.connect(tonal); tonal.connect(toneGain);
-
-    const hiss = ctx.createBufferSource();
-    hiss.buffer = noiseBuffer; hiss.loop = true;
-    const grit = ctx.createBiquadFilter();
-    grit.type = 'bandpass'; grit.frequency.value = 2300; grit.Q.value = 9;
-    const gritGain = ctx.createGain();
-    gritGain.gain.value = 1.0;
-    hiss.connect(grit); grit.connect(gritGain);
-
+    const grains = squealGrains();
     const out = ctx.createGain();
     out.gain.value = 0;
-    toneGain.connect(out);
-    gritGain.connect(out);
     out.connect(master);
-    osc.start();
-    hiss.start();
 
     let stopped = false;
     let wander = 0;
+    let nextAt = 0;
+    let last = -1;
+    let quietSince = -1;   // ctx time slip last fell to 0; grains run on
+                           // through the release, then stop being queued
     return {
       /**
        * @param slip   0..1, how far past the grip the tyres are (see
@@ -709,22 +813,36 @@ export function buildAudio(ctx) {
         if (stopped) return;
         const t = ctx.currentTime;
         const s = Math.max(0, Math.min(1, slip));
-        wander = wander * 0.9 + (Math.random() - 0.5) * 0.12;
-        const f0 = 760 + 300 * s;
-        osc.frequency.setTargetAtTime(f0 * (1 + wander * 0.35), t, 0.03);
-        tonal.frequency.setTargetAtTime(f0 * 2, t, 0.05);
-        grit.frequency.setTargetAtTime(f0 * 2.8, t, 0.05);
+        const target = baseGain * SQUEAL_SAMPLE_LEVEL * s * s * level;
         // Faster in than out: a squeal starts the instant the tyre lets go
         // and tails off as it hooks back up.
-        const target = baseGain * s * s * level;
         out.gain.setTargetAtTime(target, t, target > out.gain.value ? 0.035 : 0.12);
+
+        if (target > 0) quietSince = -1;
+        else if (quietSince < 0) quietSince = t;
+        if (quietSince >= 0 && t - quietSince > 0.6) { nextAt = 0; return; }
+
+        wander = wander * 0.92 + (Math.random() - 0.5) * 0.06;
+        const rate = (0.92 + 0.16 * s) * (1 + wander);
+        if (nextAt < t) nextAt = t + 0.005;
+        while (nextAt < t + SAMPLE_LOOKAHEAD) {
+          let k = Math.floor(Math.random() * grains.length);
+          if (k === last) k = (k + 1) % grains.length;
+          last = k;
+          const src = ctx.createBufferSource();
+          src.buffer = grains[k];
+          src.playbackRate.value = rate;
+          src.connect(out);
+          src.start(nextAt);
+          nextAt += SQUEAL_GRAIN / 2 / rate;
+        }
       },
       silence() {
         out.gain.setTargetAtTime(0, ctx.currentTime, 0.08);
+        quietSince = ctx.currentTime;
       },
       stop() {
         stopped = true;
-        try { osc.stop(); hiss.stop(); } catch { /* already stopped */ }
       },
     };
   }
