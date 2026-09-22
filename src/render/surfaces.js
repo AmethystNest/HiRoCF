@@ -143,19 +143,26 @@ export const SURFACE_PRESETS = {
     // real guardrail's reflective beam is exactly this kind of "stands
     // out against everything" bright by design.
     //
-    // inset 90 -> 12. The rail was drawn 80-100 units beyond wallHalf --
-    // clear of the player's reach, as the comment above says, but by a
-    // margin nobody had checked against what "reach" actually means once
-    // a wall-line rival is driven to put its nose AT wallHalf on purpose:
-    // the contact/spark system fires (correctly) against wallHalf while
-    // the rail a player can actually see sits 80-100 units further out,
-    // over open rock/verge, so both cars visibly "hit a wall" in what
-    // reads as empty ground. 12 puts the rail's own inner face 2 units
-    // past wallHalf -- the same order of clearance WALL_LINE_GAP already
-    // keeps a wall-line rival's apex short of the wall in rival.js -- so
-    // a car actually at its physical limit is drawn touching the rail,
-    // not 90 units short of it.
-    guardrail: { inset: 12, width: 20, tint: 0xf4f6f7, postTint: 0x2b2d30, postEvery: 95, postWidth: 8 },
+    // inset 90 -> 12 -> 30. The rail was drawn 80-100 units beyond
+    // wallHalf -- clear of the player's reach, as the comment above says,
+    // but by a margin nobody had checked against what "reach" actually
+    // means once a wall-line rival is driven to put its nose AT wallHalf
+    // on purpose: the contact/spark system fires (correctly) against
+    // wallHalf while the rail a player can actually see sat 80-100 units
+    // further out, over open rock/verge, so both cars visibly "hit a
+    // wall" in what read as empty ground. 12 fixed that but overshot the
+    // other way: it put the rail's own inner face only 2 units past
+    // wallHalf, most of the way across the rock/dirt bands (which extend
+    // to roadHalf+184, see their own comment) rather than just inside
+    // them, so the generous shoulder those bands were built for read as
+    // squeezed almost to nothing -- reported as the course itself looking
+    // more zoomed in, even though zoom, worldScale and every band's own
+    // width were all unchanged (checked against a pre-session build:
+    // identical). 30 keeps a visible run of rock/verge before the rail
+    // (a car's own nose is still within 15-30 units of it at a hard
+    // wall-line apex, close enough to read as touching) without eating
+    // the whole shoulder the way 12 did.
+    guardrail: { inset: 30, width: 20, tint: 0xf4f6f7, postTint: 0x2b2d30, postEvery: 95, postWidth: 8 },
   },
 
   highway: {
@@ -285,7 +292,7 @@ export const SURFACE_PRESETS = {
     ],
     bandEdge: { width: 26, tint: 0xb5ab9c, alpha: 0.8 },
     valleyDrop: { reach: 260, tint: 0x0d1a0b, alpha: 0.9, from: 0.20, full: 0.48, lip: 24, lipTint: 0xb2ab97 },
-    guardrail: { inset: 12, width: 18, tint: 0xf4f6f7, postTint: 0x2b2d30, postEvery: 95, postWidth: 8 },
+    guardrail: { inset: 30, width: 18, tint: 0xf4f6f7, postTint: 0x2b2d30, postEvery: 95, postWidth: 8 },
     delineator: { every: 320, tint: 0xf4f7f8, reflector: 0xff9838, out: 30 },
   },
 
