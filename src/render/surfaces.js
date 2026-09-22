@@ -142,7 +142,20 @@ export const SURFACE_PRESETS = {
     // against the similarly light rock/verge bands right next to it; a
     // real guardrail's reflective beam is exactly this kind of "stands
     // out against everything" bright by design.
-    guardrail: { inset: 90, width: 20, tint: 0xf4f6f7, postTint: 0x2b2d30, postEvery: 95, postWidth: 8 },
+    //
+    // inset 90 -> 12. The rail was drawn 80-100 units beyond wallHalf --
+    // clear of the player's reach, as the comment above says, but by a
+    // margin nobody had checked against what "reach" actually means once
+    // a wall-line rival is driven to put its nose AT wallHalf on purpose:
+    // the contact/spark system fires (correctly) against wallHalf while
+    // the rail a player can actually see sits 80-100 units further out,
+    // over open rock/verge, so both cars visibly "hit a wall" in what
+    // reads as empty ground. 12 puts the rail's own inner face 2 units
+    // past wallHalf -- the same order of clearance WALL_LINE_GAP already
+    // keeps a wall-line rival's apex short of the wall in rival.js -- so
+    // a car actually at its physical limit is drawn touching the rail,
+    // not 90 units short of it.
+    guardrail: { inset: 12, width: 20, tint: 0xf4f6f7, postTint: 0x2b2d30, postEvery: 95, postWidth: 8 },
   },
 
   highway: {
@@ -272,7 +285,7 @@ export const SURFACE_PRESETS = {
     ],
     bandEdge: { width: 26, tint: 0xb5ab9c, alpha: 0.8 },
     valleyDrop: { reach: 260, tint: 0x0d1a0b, alpha: 0.9, from: 0.20, full: 0.48, lip: 24, lipTint: 0xb2ab97 },
-    guardrail: { inset: 80, width: 18, tint: 0xf4f6f7, postTint: 0x2b2d30, postEvery: 95, postWidth: 8 },
+    guardrail: { inset: 12, width: 18, tint: 0xf4f6f7, postTint: 0x2b2d30, postEvery: 95, postWidth: 8 },
     delineator: { every: 320, tint: 0xf4f7f8, reflector: 0xff9838, out: 30 },
   },
 
