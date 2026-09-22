@@ -40,7 +40,13 @@
 // 11.9, 28.4 -> 19.8, 61.8 -> 45.7, 74.9 -> 52.3, 81.9 -> 58.4s), and every
 // corner now demands braking that much earlier. Going further needs longer
 // courses, not another number here.
-const MOVE_SCALE = 2.90;
+//
+// 2.90 -> 2.70 (-7%), asked for: "a little slower overall, dial unchanged".
+// The dial reads `speed`, not ground covered (hudSpeedFactor), so this
+// slows the world alone -- full speed is now 147 km/h of real travel
+// against the same ~350 reading -- and everything distance-shaped follows
+// through paceScale as above.
+const MOVE_SCALE = 2.70;
 const PACE_REF = 1.82;
 
 export const PHYSICS = {
