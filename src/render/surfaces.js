@@ -895,6 +895,27 @@ export function surfaceExtent(roadHalf, preset = 'circuit') {
 }
 
 /**
+ * Where a car meets something a player can actually SEE, measured from the
+ * centreline -- the physics barrier (see main.js's buildBarrier). Reads the
+ * same preset numbers the drawing code above uses and draws nothing, so the
+ * wall is wherever the course already shows one:
+ *
+ *  - concrete crash walls (highway presets): wallHalf itself, which is
+ *    what those walls were always drawn against (base at wallHalf - 3).
+ *  - a guardrail ribbon (mountain presets): the rail's own inner face,
+ *    wallHalf + inset - width / 2.
+ *  - anything else (circuit / city): no barrier is drawn at all, so the
+ *    edge of the drawn run-off -- the gravel trap's outer edge, the
+ *    building line -- is the first thing there is to hit.
+ */
+export function visibleBarrierHalf(roadHalf, wallHalf, preset = 'circuit') {
+  const P = SURFACE_PRESETS[preset] || SURFACE_PRESETS.circuit;
+  if (P.concreteWalls) return wallHalf;
+  if (P.guardrail) return wallHalf + P.guardrail.inset - P.guardrail.width / 2;
+  return surfaceExtent(roadHalf, preset);
+}
+
+/**
  * Per-point elevation (0..1) derived from TrackPath's own deck/zLevel route
  * metadata: zLevel 0 is ground, zLevel 1 is a ramp run (ascending or
  * descending), zLevel >=2 is the upper deck. Ramp runs are not authored with

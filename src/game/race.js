@@ -123,6 +123,52 @@ export class Race {
   }
 }
 
+/** Where a body is tested against the barrier: four corners and the middle
+ *  of each flank, as (along the car, across it) in half-extents. */
+const BODY_POINTS = [[1, 1], [1, -1], [-1, 1], [-1, -1], [0, 1], [0, -1]];
+
+/**
+ * How far the DRAWN body of `car` reaches past the barrier the course shows
+ * (positive = through it, negative = clear by that much). Tested at the body
+ * itself -- corners and flanks, at the angle the sprite is drawn at, each
+ * against its own nearest centreline point and the barrier there -- rather
+ * than estimated from the car's centre, because every centre-based estimate
+ * tried was wrong somewhere: half-width misses a nose swung out at an angle,
+ * and a skew term off the centre's tangent treats a curving wall as straight.
+ *
+ * `body` is { hw, hl, ox, oy }: half-width, half-length, and the body's
+ * offset from the sprite's anchor, in texture axes (+x across, +y toward the
+ * tail), all in world units -- see main.js's drawnBody().
+ */
+export function bodyPastBarrier(car, path, barrierAt, body, hint, maxDist) {
+  const ang = car.angle + (car.driftVisualAngle ?? 0);
+  const s = Math.sin(ang), c = Math.cos(ang);
+  const hit = { over: -Infinity, x: car.x, y: car.y, nx: 0, ny: 0 };
+  for (const [a, b] of BODY_POINTS) {
+    const tx = body.ox + body.hw * b;
+    const ty = body.oy + body.hl * a;
+    const wx = car.x - tx * s - ty * c;
+    const wy = car.y + tx * c - ty * s;
+    const n = path.nearestLocal(wx, wy, hint, 40, maxDist);
+    const wall = barrierAt(n.index);
+    const over = n.dist - wall;
+    if (over > hit.over) {
+      // The contact itself: the point on the barrier level with the part of
+      // the body that reached it, and the outward direction there. Sparks
+      // go HERE -- on a 560-unit truck the point beside its middle can be
+      // a lorry-length away from the corner actually touching.
+      const d = n.dist || 1;
+      const nx = (wx - n.x) / d, ny = (wy - n.y) / d;
+      hit.over = over;
+      hit.nx = nx;
+      hit.ny = ny;
+      hit.x = n.x + nx * wall;
+      hit.y = n.y + ny * wall;
+    }
+  }
+  return hit;
+}
+
 /**
  * Three circles down the length of each car approximate its body well enough
  * for arcade contact, and cost far less than a polygon test.
@@ -191,13 +237,26 @@ export function autoDrivePostRace(car, path, dt, targetSpeed, laneOffset = 0) {
   // this the other deck and drive the car off across the course.
   const near = path.nearestLocal(car.x, car.y, car._routeHint, 90, (car.wallHalf ?? 500) * 4);
   car._routeHint = near.index;
-  const lookAhead = path.offsetPoint(near.index + 10, laneOffset);
+  // 10 route points at the pace this was tuned for, scaled like every
+  // other distance-standing-for-time (see PHYSICS.paceScale): at today's
+  // pace an unscaled 10 left the car steering at a point it reached in a
+  // fraction of a second, and it ran wide of its lane onto the verge on
+  // every post-race corner.
+  const lookAhead = path.offsetPoint(near.index + Math.round(10 * P.paceScale), laneOffset);
   const desired = Math.atan2(lookAhead.y - car.y, lookAhead.x - car.x);
   const diff = Math.atan2(Math.sin(desired - car.angle), Math.cos(desired - car.angle));
   car.angle += diff * Math.min(1, 2.7 * dt);
 
-  car.speed += (targetSpeed - car.speed) * Math.min(1, 2.2 * dt);
-  car.speed = Math.max(0, Math.min(targetSpeed + 40, car.speed));
+  // The cruise speeds main.js passes were tuned as GROUND speed at the
+  // original pace, so they come down by paceScale to stay the same ground
+  // speed now: carried over unscaled, the MOVE_SCALE step made the post-
+  // race lap 59% faster than it was ever set up for, and on stages 2, 3
+  // and 5 the car ran wide of its lane onto the verge on every tight corner
+  // -- something the old roadHalf pull below used to hide by yanking it
+  // back, which is exactly what read as hitting a wall at the road edge.
+  const cruise = targetSpeed / P.paceScale;
+  car.speed += (cruise - car.speed) * Math.min(1, 2.2 * dt);
+  car.speed = Math.max(0, Math.min(cruise + 40, car.speed));
 
   const move = car.speed * P.moveScale;
   car.x += Math.cos(car.angle) * move * dt;
@@ -205,8 +264,13 @@ export function autoDrivePostRace(car, path, dt, targetSpeed, laneOffset = 0) {
 
   const after = path.nearestLocal(car.x, car.y, car._routeHint, 90, (car.wallHalf ?? 500) * 4);
   car._routeHint = after.index;
-  const roadHalf = car.roadHalf ?? near.dist;
-  if (after.dist > roadHalf - 30) {
+  // Held off the barrier the course actually shows there (see main.js's
+  // `barrier`), not the pavement edge: pulling back at roadHalf - 30 put an
+  // invisible wall 30 units INSIDE the road, which after the finish read as
+  // the car bouncing off nothing at the edge of the tarmac. 60 is about a
+  // car's half-width, so the body, not the middle, is what stops short.
+  const wall = car.barrier ? car.barrier[after.index] : (car.wallHalf ?? car.roadHalf ?? near.dist);
+  if (after.dist > wall - 60) {
     car.x += (after.x - car.x) * Math.min(1, 2.5 * dt);
     car.y += (after.y - car.y) * Math.min(1, 2.5 * dt);
   }

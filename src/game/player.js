@@ -6,6 +6,7 @@
  * identical.
  */
 import { PHYSICS as P, NITRO, DRIFT_MARK_LIFE } from '../config.js';
+import { bodyPastBarrier } from './race.js';
 import { makeContact, setContact } from './contact.js';
 
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -253,11 +254,25 @@ export class PlayerCar {
 
     // --- barrier: push back in and re-aim rather than hard-stopping ---
     const after = this.nearestOnRoute(this.x, this.y);
-    const wallTrigger = this.wallHalf + this.wallTriggerExtra;
-    const touchingWall = after.dist > wallTrigger;
+    // Against the barrier the course actually SHOWS here (main.js's
+    // `barrier`), and with the car's drawn body rather than its centre
+    // (bodyPastBarrier in race.js). This used to be the centre against
+    // cfg.wallHalf + wallTriggerExtra, which was wrong both ways at once:
+    // on most stages cfg.wallHalf sits in open ground well short of
+    // anything drawn, so the car hit nothing visible, and where a wall IS
+    // drawn at it (stage 4's crash walls) the body had to be ~55 units
+    // INSIDE the concrete before the centre reached the trigger.
+    const barrier = this.barrier;
+    const hit = bodyPastBarrier(
+      this, this.path, (i) => (barrier ? barrier[i] : this.wallHalf),
+      this.wallBody ?? { hw: 49, hl: 110, ox: 0, oy: 0 },
+      after.index, this.wallHalf * 4,
+    );
+    const over = hit.over;
+    const touchingWall = over > 0;
     // A frame-to-frame "was it touching last frame" test does NOT work
     // for telling an impact from a graze: the position snap below pulls
-    // the car back to `safe`, which sits clearly inside wallTrigger, so a
+    // the body back to wallInset clear of the wall, so a
     // car still steering into the barrier spends a couple of frames back
     // under the trigger before it crosses out again -- and each re-crossing
     // then reads as a brand new impact, one every 3-4 frames, which is the
@@ -270,11 +285,10 @@ export class PlayerCar {
     // held one.
     this.wallImpact = touchingWall && this._wallCooldown <= 0;
     if (touchingWall) {
-      const dx = this.x - after.x, dy = this.y - after.y;
-      const d = Math.hypot(dx, dy) || 1;
-      const safe = this.wallHalf - P.wallInset;
-      this.x = after.x + (dx / d) * safe;
-      this.y = after.y + (dy / d) * safe;
+      // Out by exactly how far the body went in, plus wallInset -- the same
+      // small margin inside the wall the old centre snap parked it at.
+      this.x -= hit.nx * (over + P.wallInset);
+      this.y -= hit.ny * (over + P.wallInset);
       // The full penalty is an IMPACT, and only happens on the frame
       // contact begins. Steering stays pinned into the barrier easily
       // (cornering wide, holding a slide), and the old check reapplied
@@ -311,15 +325,16 @@ export class PlayerCar {
     // every frame of a grind and false as soon as the car steers off.
     // The contact patch is the barrier face, not the middle of the roof,
     // which is where a burst placed on the car itself appears to come from.
-    if (after.dist > this.wallHalf - P.wallInset - 2) {
-      const ox = this.x - after.x, oy = this.y - after.y;
-      const od = Math.hypot(ox, oy) || 1;
+    // Where the body sits NOW relative to the wall (the snap above leaves
+    // it wallInset inside); same 2 units of slack as before.
+    const restOver = touchingWall ? -P.wallInset : over;
+    if (restOver > -P.wallInset - 2) {
       setContact(this.contact, {
         impact: this.wallImpact,
-        x: after.x + (ox / od) * this.wallHalf,
-        y: after.y + (oy / od) * this.wallHalf,
-        nx: ox / od,
-        ny: oy / od,
+        x: hit.x,
+        y: hit.y,
+        nx: hit.nx,
+        ny: hit.ny,
         force: Math.min(1, this.speed / P.maxSpeed),
       });
     }

@@ -1,7 +1,7 @@
 import { Application, Assets, Container, Graphics, Sprite, Texture, Rectangle } from './pixi.js';
 import { STAGES, PHYSICS, CAR_SIZE, CAR_VISUAL_SCALE, CAR_HULL_SCALE, CAR_HULL_OFFSET, DRIFT_MARK_LIFE } from './config.js';
 import { STAGE_PATHS } from './track/stages.js';
-import { buildSurface, surfaceExtent, buildRampStructure, buildTunnelStructure, buildElevatedDeckShadow, elevatedRuns, deckRuns } from './render/surfaces.js';
+import { buildSurface, surfaceExtent, visibleBarrierHalf, buildRampStructure, buildTunnelStructure, buildElevatedDeckShadow, elevatedRuns, deckRuns } from './render/surfaces.js';
 import { buildProps, buildGroundPatches, buildSideStreets } from './render/props.js';
 import { buildMiniMap } from './render/minimap.js';
 import { buildFinishFX } from './render/finishfx.js';
@@ -529,6 +529,35 @@ export class Game {
       })
       : [{ preset, from: 0, span: path.count }];
 
+    // The physics barrier, per route point: where each stretch of road
+    // SHOWS something to hit (see visibleBarrierHalf). cfg.wallHalf is left
+    // exactly as it was, because the drawing is built from it -- the
+    // guardrail, the crash walls, the valley drop -- and the course must
+    // look the same as it always has. It was also the collision wall, and
+    // on every stage but 4 it sat in open ground: 236 units short of stage
+    // 1's gravel edge, 158 short of stage 2's building line, 80 short of
+    // stage 3's guardrail. That is every "reacts without touching it"
+    // report at once. Later sectors override earlier ones, matching the
+    // draw order; the step where one sector meets the next is eased over
+    // +/-6 points so a car is steered along a change of wall rather than
+    // snapped by it. Checked against the courses themselves before use:
+    // no two stretches of any stage come within reach of each other at
+    // these widths (closest: 295 units of clearance, stage 3).
+    this.barrier = new Float32Array(path.count);
+    for (const sec of sectors) {
+      const b = visibleBarrierHalf(cfg.roadHalf, cfg.wallHalf, sec.preset);
+      for (let k = 0; k < sec.span; k++) this.barrier[path.wrap(sec.from + k)] = b;
+    }
+    if (mixed) {
+      const raw = Float32Array.from(this.barrier);
+      const r = 6;
+      for (let i = 0; i < path.count; i++) {
+        let sum = 0;
+        for (let k = -r; k <= r; k++) sum += raw[path.wrap(i + k)];
+        this.barrier[i] = sum / (2 * r + 1);
+      }
+    }
+
     let groundPlaneDone = false;
     for (const sec of sectors) {
       for (const [from, span, up] of deckRuns(path, sec.from, sec.span)) {
@@ -743,6 +772,7 @@ export class Game {
     this.actors.addChild(this.contactFX.underView);
 
     this.player = new PlayerCar(path, cfg);
+    this.player.barrier = this.barrier;
     this.player.placeAtStart(-startBack, playerStartLateral);
     this.player.deckId = 0;
     this.player.zLevel = 0;
@@ -783,6 +813,7 @@ export class Game {
     // (see the containment in rival.js, scoped to wallLine stages only).
     this.rival.hullHalfW = this.rivalHullSize.w / 2;
     this.rival.hullHalfL = this.rivalHullSize.h / 2;
+    this.rival.barrier = this.barrier;
     this.rival.placeAtStart(-rivalStartBack, rivalStartLateral);
     this.rival.deckId = 0;
     this.rival.zLevel = 0;
@@ -807,6 +838,12 @@ export class Game {
     this.rivalSprite.width = rivalDrawSize.w;
     this.rivalSprite.height = rivalDrawSize.h;
     this.actors.addChild(this.rivalSprite);
+
+    // What meets the wall is the car you can see: each sprite's own opaque
+    // body, measured off its photo (see drawnBody), not the canvas it is
+    // drawn on or the collision hull the two cars use against each other.
+    this.player.wallBody = drawnBody(this.playerSprite);
+    this.rival.wallBody = drawnBody(this.rivalSprite);
 
     // Now that both cars exist, sparks draw over them -- see contactFX
     // setup near driftGfx above.
@@ -1275,6 +1312,52 @@ const CAR_ALPHA_GAP = 0.09;
  * edge of the image has no opaque pixel on one side, so it is never
  * filled.
  */
+/**
+ * The opaque body of a car sprite, as { hw, hl, ox, oy } in world units:
+ * half-width, half-length, and the body's offset from the sprite's anchor
+ * in texture axes (+x across the car, +y toward its tail). Measured once
+ * per photo from its alpha and cached, then scaled to however the sprite is
+ * drawn on this stage. The photos are not cropped alike -- stage 1's and
+ * 3's carry as much empty canvas as car, the R8's almost none -- so the
+ * sprite's own width says nothing reliable about where its bodywork ends.
+ */
+const bodyFractionCache = new WeakMap();
+function drawnBody(sprite) {
+  const tex = sprite.texture;
+  let b = bodyFractionCache.get(tex);
+  if (!b) {
+    const f = tex.frame;
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(f.width));
+    c.height = Math.max(1, Math.round(f.height));
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(tex.source.resource, f.x, f.y, f.width, f.height, 0, 0, c.width, c.height);
+    const d = ctx.getImageData(0, 0, c.width, c.height).data;
+    let x0 = c.width, x1 = -1, y0 = c.height, y1 = -1;
+    for (let y = 0; y < c.height; y++) {
+      const row = y * c.width;
+      for (let x = 0; x < c.width; x++) {
+        if (d[(row + x) * 4 + 3] <= 12) continue;
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+    b = x1 < 0
+      ? { w: 1, h: 1, cx: 0, cy: 0 }
+      : {
+        w: (x1 + 1 - x0) / c.width,
+        h: (y1 + 1 - y0) / c.height,
+        cx: (x0 + x1 + 1) / 2 / c.width - 0.5,
+        cy: (y0 + y1 + 1) / 2 / c.height - 0.5,
+      };
+    bodyFractionCache.set(tex, b);
+  }
+  const W = Math.abs(sprite.width), H = Math.abs(sprite.height);
+  return { hw: (b.w * W) / 2, hl: (b.h * H) / 2, ox: b.cx * W, oy: b.cy * H };
+}
+
 function bridgeAlphaGaps(canvas, maxGap) {
   const w = canvas.width, h = canvas.height;
   const ctx = canvas.getContext('2d');

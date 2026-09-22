@@ -8,6 +8,7 @@
  */
 import { PHYSICS as P, DRIFT_MARK_LIFE } from '../config.js';
 import { makeContact, setContact } from './contact.js';
+import { bodyPastBarrier } from './race.js';
 
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
@@ -75,6 +76,14 @@ const MAX_LATERAL_SLOPE = 0.40;
  * barrier, 6 units further out.
  */
 const WALL_LINE_GAP = 6;
+
+/**
+ * Speed kept on the frame a rival's contact with the barrier begins. The
+ * old containment took 0.965 on each frame of a contact that its own pull
+ * kept to about two frames, i.e. roughly this.
+ */
+const RIVAL_WALL_IMPACT_MUL = 0.93;
+
 
 /**
  * Per-point lateral offset for a full out-in-out lap, solved once for the
@@ -489,6 +498,12 @@ export class RivalCar {
    * Nearest centreline point on this car's own stretch of route, tracked by
    * a rolling index hint -- see TrackPath.nearestLocal.
    */
+  /** The barrier the course actually shows at route point `index` (see
+   *  main.js's `barrier`); cfg.wallHalf only where none was handed over. */
+  barrierAt(index) {
+    return this.barrier ? this.barrier[index] : this.wallHalf;
+  }
+
   nearestOnRoute(x, y) {
     const n = this.path.nearestLocal(x, y, this._routeHint, 90, this.wallHalf * 4);
     this._routeHint = n.index;
@@ -600,7 +615,7 @@ export class RivalCar {
     // so running the apex is not the same thing as scraping (the
     // containment below starts at the barrier itself).
     const carHalf = this.drawHalf ?? this.bodyHalf ?? 45;
-    const edgeLimit = (this.wallLine ? this.wallHalf - WALL_LINE_GAP : this.roadHalf - 2) - carHalf;
+    const edgeLimit = (this.wallLine ? this.barrierAt(here) - WALL_LINE_GAP : this.roadHalf - 2) - carHalf;
 
     if (this._perfectLine) {
       // Read straight off the solved line at the car's own position. It is
@@ -717,7 +732,7 @@ export class RivalCar {
     // held sideways at 28 degrees through a hairpin then tracked 14 units
     // shy of the line it had been given, leaving the apex it was built for
     // a car's width off the rail. The bias exists to be spent here.
-    const aimCap = this.wallLine ? this.wallHalf - WALL_LINE_GAP : this.roadHalf - 20;
+    const aimCap = this.wallLine ? this.barrierAt(here) - WALL_LINE_GAP : this.roadHalf - 20;
     let aimLine = Math.max(-aimCap, Math.min(aimCap, steerLine + Math.sign(steerLine) * driftAimBias));
 
     // After body contact, don't immediately yank back to the programmed
@@ -937,67 +952,42 @@ export class RivalCar {
     // stops a wide car (stage 1's is 186 units across) hanging its flank
     // past the barrier while its middle is still inside the old trigger.
     const after = this.nearestOnRoute(this.x, this.y);
-    // How far the body's own farthest point reaches from the centreline.
-    // Plain half-width (`drawHalf`) is enough for every rival that is not
-    // asked to run its apex out to the barrier -- it is what this test used
-    // before wall-line stages existed, and nothing about a stage 1/2/4 car
-    // was ever tuned against anything sharper: applying either correction
-    // below to all five rivals is what turned "wall contact" into an event
-    // that fired at the ordinary road edge instead of the barrier --
-    // measured on stage 4's truck, whose plain half-width ALONE already
-    // exceeds that stage's 60-unit wall margin, and on stage 2's prius,
-    // which tripped a skew-based estimate from a few degrees of perfectly
-    // ordinary cornering. Neither car was ever meant to run its apex
-    // anywhere near the barrier, so neither needs more than its width.
+    // How far the drawn body is past the barrier the course shows (see
+    // bodyPastBarrier in race.js and main.js's `barrier`). Positive means
+    // through it.
+    const body = this.wallBody ?? {
+      hw: this.drawHalf ?? this.bodyHalf ?? 45, hl: (this.drawHalf ?? 45) * 2, ox: 0, oy: 0,
+    };
+    const hit = bodyPastBarrier(
+      this, this.path, (i) => this.barrierAt(i), body, after.index, this.wallHalf * 4,
+    );
+    const over = hit.over;
+    // Pushed back out by exactly how far it went in, so it comes to rest
+    // WITH its body against the wall. This used to be a pull of 9% of the
+    // car's whole distance from the centreline every frame -- about 30
+    // units at a typical wall -- which yanked the car well clear the
+    // instant it touched while the sparks were drawn at the wall itself:
+    // measured, the body sat 20-31 units off the wall on every one of those
+    // contacts.
     //
-    // On a WALL-LINE stage (3, 5) the apex genuinely is meant to kiss the
-    // barrier, and half-width alone undercounts a car sitting well off the
-    // tangent there: stage 5's rival was measured 32-35 degrees off it
-    // mid-corner, which put its nose 48.6 units THROUGH the wall it was
-    // supposed to graze. A support-function estimate off the CENTRE's own
-    // local tangent (halfW*|cos skew| + halfL*|sin skew|) fixes that back
-    // to single digits of daylight, and is safe to scope here specifically
-    // because neither wall-line rival is a long vehicle -- the truck-only
-    // failure mode above doesn't apply to a normal-length car.
-    let bodyReach = this.drawHalf ?? this.bodyHalf ?? 45;
-    if (this.wallLine) {
-      const drawnAngle = this.angle + (this.driftVisualAngle ?? 0);
-      const skew = wrapAngle(drawnAngle - after.angle);
-      const halfW = this.hullHalfW ?? bodyReach;
-      const halfL = this.hullHalfL ?? halfW * 2;
-      bodyReach = Math.max(
-        bodyReach,
-        Math.abs(halfW * Math.cos(skew)) + Math.abs(halfL * Math.sin(skew)),
-      );
-    }
-    // bodyReach is measured from the CAR'S OWN CENTRE, so it has to be
-    // added to how far that centre already sits from the centreline
-    // (after.dist) before comparing to the barrier -- comparing bodyReach
-    // to wallHalf on its own (dropped here once, and caught by a stage 5
-    // regression test: the car ran 222 units past the barrier with the
-    // pull-back never firing at all, since a ~100-unit body reach is
-    // never greater than a 260-420 unit wallHalf by itself) silently
-    // disables containment for every car, on every stage.
-    //
-    // Floored at roadHalf on a NON-wall-line stage: stage 4's truck has a
-    // plain half-width (79) wider than that stage's own 60-unit shoulder,
-    // so wallHalf-bodyReach sat at 340.9, ten to twenty units INSIDE
-    // roadHalf(360) -- measured, that fired the pull-back and the crash
-    // sound 129 times over three laps while the truck's centre never left
-    // the pavement, which is the "wall contact at the road edge" complaint
-    // made literal. Off-road costs nothing on purpose (see PHYSICS), so a
-    // car earns the whole shoulder before anything about touching a wall
-    // may fire, whatever its own width. A wall-line stage is exempt: there
-    // the apex is deliberately run at the barrier while the centre is
-    // still well inside roadHalf (stage 3 alone logs ~200 contacts over
-    // three laps this way), and that is the feature, not the bug.
-    let bodyAtWall = this.wallHalf - bodyReach;
-    if (!this.wallLine) bodyAtWall = Math.max(bodyAtWall, this.roadHalf);
-    if (after.dist > bodyAtWall) {
-      this.x += (after.x - this.x) * 0.09;
-      this.y += (after.y - this.y) * 0.09;
+    // Speed follows the player's model (see player.js): the full cut only
+    // on the frame a contact BEGINS, then graze friction for as long as it
+    // is held. The old flat 0.965 every frame only worked because the yank
+    // above kept each contact to a frame or two; with the car now resting
+    // against the wall it would bleed 88% of its speed per second of
+    // grazing, which on stage 4 cost the truck a second a lap.
+    // Decays every frame, not just while touching -- decayed only inside the
+    // contact branch below (as it used to be), it never got back to zero
+    // between contacts, so only a rival's very first touch of the race ever
+    // counted as an impact.
+    this._wallCooldown = Math.max(0, this._wallCooldown - dt);
+    const wallImpactNow = over > 0 && this._wallCooldown <= 0;
+    if (over > 0) {
+      // straight back off the wall it touched
+      this.x -= hit.nx * over;
+      this.y -= hit.ny * over;
       this.angle += wrapAngle(after.angle - this.angle) * 0.10;
-      this.speed *= 0.965;
+      this.speed *= wallImpactNow ? RIVAL_WALL_IMPACT_MUL : P.wallScrubMul;
     }
 
     // Effects only, and on the same barrier test: the pull above parks the
@@ -1006,18 +996,15 @@ export class RivalCar {
     // running for the whole scrape instead of strobing. A racing line that
     // runs the apex stays WALL_LINE_GAP short of this, so driving the line
     // never sparks.
-    if (after.dist > bodyAtWall - 2) {
-      const dx = this.x - after.x, dy = this.y - after.y;
-      const d = Math.hypot(dx, dy) || 1;
-      this._wallCooldown = Math.max(0, this._wallCooldown - dt);
+    if (over > -2) {
       const impact = this._wallCooldown <= 0;
       this._wallCooldown = P.wallGraceWindow;
       setContact(this.contact, {
         impact,
-        x: after.x + (dx / d) * this.wallHalf,
-        y: after.y + (dy / d) * this.wallHalf,
-        nx: dx / d,
-        ny: dy / d,
+        x: hit.x,
+        y: hit.y,
+        nx: hit.nx,
+        ny: hit.ny,
         force: Math.min(1, this.speed / P.maxSpeed),
       });
     }
