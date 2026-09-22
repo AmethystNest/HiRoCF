@@ -937,26 +937,48 @@ export class RivalCar {
     // stops a wide car (stage 1's is 186 units across) hanging its flank
     // past the barrier while its middle is still inside the old trigger.
     const after = this.nearestOnRoute(this.x, this.y);
-    // How far the body actually reaches across the road, which is not its
-    // half-width: a car pointed at an angle to the tangent reaches
-    // halfW*|cos| + halfL*|sin| sideways, and at the pace this build runs
-    // the stage 5 rival sits 32-35 degrees off the tangent at its widest
-    // point mid-corner. On half-width alone that put its nose 48.6 units
-    // THROUGH the barrier it was supposed to be kissing (measured; it had
-    // 8.2 units of daylight at the old pace, which is the same car making
-    // the same mistake more slowly). Hull half-extents, not photo ones, so
-    // the number means the same thing on a tightly cropped photo as on one
-    // with empty canvas beside the car. Floored at `drawHalf` so this can
-    // only ever pull a car in EARLIER than the old test did: a car whose
-    // photo is mostly empty canvas keeps the clearance it was signed off
-    // with instead of being allowed 48 units further out.
-    const drawnAngle = this.angle + (this.driftVisualAngle ?? 0);
-    const skew = wrapAngle(drawnAngle - after.angle);
-    const halfW = this.hullHalfW ?? this.drawHalf ?? this.bodyHalf ?? 45;
-    const halfL = this.hullHalfL ?? halfW * 2;
-    const bodyReach =
-      Math.abs(halfW * Math.cos(skew)) + Math.abs(halfL * Math.sin(skew));
-    const bodyAtWall = this.wallHalf - Math.max(this.drawHalf ?? 0, bodyReach);
+    // How far the body's own farthest point reaches from the centreline.
+    // Plain half-width (`drawHalf`) is enough for every rival that is not
+    // asked to run its apex out to the barrier -- it is what this test used
+    // before wall-line stages existed, and nothing about a stage 1/2/4 car
+    // was ever tuned against anything sharper: applying either correction
+    // below to all five rivals is what turned "wall contact" into an event
+    // that fired at the ordinary road edge instead of the barrier --
+    // measured on stage 4's truck, whose plain half-width ALONE already
+    // exceeds that stage's 60-unit wall margin, and on stage 2's prius,
+    // which tripped a skew-based estimate from a few degrees of perfectly
+    // ordinary cornering. Neither car was ever meant to run its apex
+    // anywhere near the barrier, so neither needs more than its width.
+    //
+    // On a WALL-LINE stage (3, 5) the apex genuinely is meant to kiss the
+    // barrier, and half-width alone undercounts a car sitting well off the
+    // tangent there: stage 5's rival was measured 32-35 degrees off it
+    // mid-corner, which put its nose 48.6 units THROUGH the wall it was
+    // supposed to graze. A support-function estimate off the CENTRE's own
+    // local tangent (halfW*|cos skew| + halfL*|sin skew|) fixes that back
+    // to single digits of daylight, and is safe to scope here specifically
+    // because neither wall-line rival is a long vehicle -- the truck-only
+    // failure mode above doesn't apply to a normal-length car.
+    let bodyReach = this.drawHalf ?? this.bodyHalf ?? 45;
+    if (this.wallLine) {
+      const drawnAngle = this.angle + (this.driftVisualAngle ?? 0);
+      const skew = wrapAngle(drawnAngle - after.angle);
+      const halfW = this.hullHalfW ?? bodyReach;
+      const halfL = this.hullHalfL ?? halfW * 2;
+      bodyReach = Math.max(
+        bodyReach,
+        Math.abs(halfW * Math.cos(skew)) + Math.abs(halfL * Math.sin(skew)),
+      );
+    }
+    // bodyReach is measured from the CAR'S OWN CENTRE, so it has to be
+    // added to how far that centre already sits from the centreline
+    // (after.dist) before comparing to the barrier -- comparing bodyReach
+    // to wallHalf on its own (dropped here once, and caught by a stage 5
+    // regression test: the car ran 222 units past the barrier with the
+    // pull-back never firing at all, since a ~100-unit body reach is
+    // never greater than a 260-420 unit wallHalf by itself) silently
+    // disables containment for every car, on every stage.
+    const bodyAtWall = this.wallHalf - bodyReach;
     if (after.dist > bodyAtWall) {
       this.x += (after.x - this.x) * 0.09;
       this.y += (after.y - this.y) * 0.09;

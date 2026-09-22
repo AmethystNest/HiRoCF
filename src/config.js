@@ -58,7 +58,15 @@ export const PHYSICS = {
   brake: 430,
   coast: 28,
   turnLow: 2.95,
-  turnHigh: 0.68,
+  // Scaled by MOVE_SCALE/PACE_REF: turning radius at a given speed fraction
+  // is speed*moveScale/turnRate, so raising moveScale alone (see above)
+  // widens every high-speed corner by the same amount without the player
+  // being able to do anything about it -- the 1.82 -> 2.90 pace step widened
+  // top-speed radius by 59% on its own. turnLow is left alone (low-speed
+  // maneuvering was never the complaint, and a radius argument does not
+  // apply near-standstill the way it does at speed), so only the top of the
+  // curve moves, keeping the same low-to-high shape.
+  turnHigh: 0.68 * (MOVE_SCALE / PACE_REF),
   // World units travelled per unit of `speed`. This is the actual pace of
   // the game; `hudSpeedFactor` below is only the number on the dial, and it
   // is now DERIVED from this value rather than tuned against it (see there).

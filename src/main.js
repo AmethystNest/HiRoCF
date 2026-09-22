@@ -778,13 +778,9 @@ export class Game {
     // keeps 42 units of clearance that nobody can see and the apexes look
     // timid however hard they are actually being attacked.
     this.rival.drawHalf = rivalDrawSize.w / 2;
-    // The body the wall must not be driven through, as half-extents of the
-    // collision hull rather than of the photo: an ae86 or devilz canvas is
-    // over twice as wide as the car in it, while the r8's is cropped tight,
-    // so `drawHalf` alone means "stop the flank at the barrier" for one car
-    // and "stop the middle at it" for another. See the containment in
-    // rival.js, which needs the length too because a car crossing the road
-    // at an angle reaches further sideways than its own width.
+    // The body a WALL-LINE stage's rival is allowed to run out to the
+    // barrier with, as collision-hull half-extents rather than photo ones
+    // (see the containment in rival.js, scoped to wallLine stages only).
     this.rival.hullHalfW = this.rivalHullSize.w / 2;
     this.rival.hullHalfL = this.rivalHullSize.h / 2;
     this.rival.placeAtStart(-rivalStartBack, rivalStartLateral);
@@ -1008,7 +1004,23 @@ export class Game {
       const rNear = this.rival.nearestOnRoute(this.rival.x, this.rival.y);
       const rLat = this.path.lateralOf(this.rival.x, this.rival.y, rNear);
       const sign = pLat >= rLat ? 1 : -1;
-      const halfGap = Math.max(52, (this.playerSprite.width + this.rivalSprite.width) / 2 + 20);
+      const wantedGap = Math.max(52, (this.playerSprite.width + this.rivalSprite.width) / 2 + 20);
+      // Clamped to stay ON the pavement: uncapped, a narrow stage (3's 190
+      // roadHalf against a 200+ wanted gap) sent the lane target itself
+      // past the road edge, so autoDrivePostRace's own edge-pull (see
+      // race.js, which corrects against roadHalf) held both cars parked
+      // in the verge for the whole post-race lap -- reported as the same
+      // "wall contact at the course edge" the rival's own hull fix above
+      // addresses, just from a target that was off the road from the
+      // start rather than a body that reached past it. Reserves 12 units
+      // of pavement beyond each car's own half-width as breathing room;
+      // whatever wantedGap cannot fit inside that is a smaller, still
+      // centred separation rather than a car sent onto the grass.
+      const safeGap = Math.max(
+        20,
+        this.rival.roadHalf - Math.max(this.playerSprite.width, this.rivalSprite.width) / 2 - 12,
+      );
+      const halfGap = Math.min(wantedGap, safeGap);
       this._postRaceLane = { player: sign * halfGap, rival: -sign * halfGap };
 
       const place = this.race.positionOf(this.playerEntry);
