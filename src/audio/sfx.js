@@ -15,6 +15,8 @@
  * @param ctx  an AudioContext, already created (and ideally already
  *             resumed) by the caller.
  */
+import { V8_SAMPLE } from './v8sample.js';
+
 export function buildAudio(ctx) {
   const master = ctx.createGain();
   // A compressor on the master bus, not tuned per-sound: several one-shots
@@ -244,6 +246,29 @@ export function buildAudio(ctx) {
   const V8_SHIFT_TIME = 0.11;
   const V8_SHIFT_DUCK = 0.42;
 
+  /**
+   * The 8-speed box and rpm model both V8 voices share: one step per call
+   * (at 60 fps nothing can cross two gears in a frame), 0.93 hysteresis on
+   * the way back down so it does not hunt on a shift point, and a torque
+   * cut of V8_SHIFT_TIME on every upshift.
+   */
+  function makeGearbox() {
+    let gear = 0;
+    let shiftUntil = 0;
+    return {
+      step(speed, maxSpeed, boosting, t) {
+        const sf = Math.max(0, Math.min(1, speed / Math.max(1, maxSpeed)));
+        if (gear < 7 && sf > V8_GEAR_TOP[gear]) { gear++; shiftUntil = t + V8_SHIFT_TIME; }
+        else if (gear > 0 && sf < V8_GEAR_TOP[gear - 1] * 0.93) gear--;
+        const rpm = Math.min(
+          V8_REDLINE_RPM,
+          V8_IDLE_RPM + (V8_REDLINE_RPM - V8_IDLE_RPM) * Math.min(1, sf / V8_GEAR_TOP[gear]),
+        ) * (boosting ? 1.04 : 1);
+        return { sf, rpm, shifting: t < shiftUntil };
+      },
+    };
+  }
+
   let v8WaveCache = null;
   function v8Wave() {
     if (v8WaveCache) return v8WaveCache;
@@ -302,8 +327,7 @@ export function buildAudio(ctx) {
     osc.start();
     noise.start();
 
-    let gear = 0;
-    let shiftUntil = 0;
+    const box = makeGearbox();
     let stopped = false;
     let wobble = 0;
     let onThrottle = 1;
@@ -319,23 +343,13 @@ export function buildAudio(ctx) {
        *                  tell the two apart: rpm is derived from road
        *                  speed, which barely moves in the instant the
        *                  driver lifts.
+       * @param level     0..1 overall multiplier (the sampled voice fades
+       *                  this one in and out; see makeSampledV8Engine).
        */
-      update(speed, boosting, maxSpeed, throttle = 1) {
+      update(speed, boosting, maxSpeed, throttle = 1, level = 1) {
         if (stopped) return;
         const t = ctx.currentTime;
-        const sf = Math.max(0, Math.min(1, speed / Math.max(1, maxSpeed)));
-
-        // One step per call: at 60fps nothing can cross two gears in a frame,
-        // and the 0.93 on the way back down is the hysteresis that stops it
-        // hunting when the car sits exactly on a shift point.
-        if (gear < 7 && sf > V8_GEAR_TOP[gear]) { gear++; shiftUntil = t + V8_SHIFT_TIME; }
-        else if (gear > 0 && sf < V8_GEAR_TOP[gear - 1] * 0.93) gear--;
-
-        const rpm = Math.min(
-          V8_REDLINE_RPM,
-          V8_IDLE_RPM + (V8_REDLINE_RPM - V8_IDLE_RPM) * Math.min(1, sf / V8_GEAR_TOP[gear]),
-        ) * (boosting ? 1.04 : 1);
-        const shifting = t < shiftUntil;
+        const { sf, rpm, shifting } = box.step(speed, maxSpeed, boosting, t);
         // Through the cut the note has to fall as fast as the clutch opens,
         // or the drop reads as the engine bogging rather than as a shift.
         const glide = shifting ? 0.025 : 0.05;
@@ -359,14 +373,14 @@ export function buildAudio(ctx) {
           (700 + rpm * 0.08 + (boosting ? 500 : 0)) * (0.62 + 0.38 * onThrottle), t, 0.08,
         );
         nf.frequency.setTargetAtTime(800 + rpm * 0.10, t, 0.08);
-        toneGain.gain.setTargetAtTime(baseGain * load * duck * (boosting ? 1.2 : 1), t, glide);
+        toneGain.gain.setTargetAtTime(baseGain * load * duck * (boosting ? 1.2 : 1) * level, t, glide);
         // 0.10 of the tone, which is where the fit put it: the recording's
         // energy above 5 kHz sits 34 dB under its peak, and a noise layer
         // any louder than this buries that roll-off in hiss. Its own small
         // wander keeps the induction from sitting as a steady hiss behind
         // an engine that is moving.
         noiseGain.gain.setTargetAtTime(
-          baseGain * 0.10 * load * duck * (1 + wobble * 0.25), t, 0.06,
+          baseGain * 0.10 * load * duck * (1 + wobble * 0.25) * level, t, 0.06,
         );
       },
       silence() {
@@ -377,6 +391,186 @@ export function buildAudio(ctx) {
       stop() {
         stopped = true;
         try { osc.stop(); noise.stop(); } catch { /* already stopped */ }
+      },
+    };
+  }
+
+  // --- the player's engine, played from a recording --------------------
+  /**
+   * Rpm range the sampled voice plays from the recording itself. Inside it
+   * every grain is the real engine at (almost) the same speed, pitch-
+   * corrected by at most a few percent; outside it the nearest end of the
+   * recording is re-pitched, which holds up to about +25% (the 7,000 rpm
+   * limiter from a 5,780 rpm top) but not the four-fold drop to idle, so
+   * below SAMPLE_FADE_LOW the synthesised V8 takes over, crossfaded.
+   */
+  const SAMPLE_FADE_LOW = 2200;
+  /** Recording's level against the synthesised voice's: measured, the
+   *  recording played 3.6-4.9 dB under it at 4,200-5,600 rpm, so this puts
+   *  the two at the same RMS and the crossfade between them level. */
+  const SAMPLE_LEVEL = 1.55;
+  const SAMPLE_FADE_HIGH = 3000;
+  /** How far ahead grains are queued, s: enough to ride out a frame that
+   *  takes 100 ms (measured in-game at 15 fps under software rendering the
+   *  grain stream stayed continuous), short enough that rpm still tracks
+   *  the throttle without an audible lag. */
+  const SAMPLE_LOOKAHEAD = 0.12;
+  /**
+   * Which cycles a held rpm may draw from: any within +/-SAMPLE_TOL of it
+   * (re-pitched by at most that much, which does not audibly move the
+   * sound's character), and at least SAMPLE_MIN_SPAN of them. The walk
+   * plays SAMPLE_RUN consecutive cycles -- real, continuous engine -- then
+   * jumps to a random cycle in that range; every jump lands on a cycle
+   * boundary, so it is seamless. Without the spread, a car held at its top
+   * speed (the recording's top end, clamped) replayed the same half-dozen
+   * cycles, 70 ms of engine, for as long as the straight lasted.
+   */
+  const SAMPLE_TOL = 0.03;
+  const SAMPLE_MIN_SPAN = 24;
+  const SAMPLE_RUN = 8;
+
+  let sampleGrains = null;
+  /**
+   * The recording cut into two-cycle grains, one per pitch mark: grain j
+   * runs from mark j to mark j+2 under a Hann window, so it is centred on
+   * mark j+1 and two neighbours overlap by exactly one engine cycle, which
+   * a pair of Hann halves sums back to unity. Because every grain starts on
+   * a cycle boundary (see make-v8-sample.mjs), any two of them overlap in
+   * phase -- which is what lets grains from different parts of the
+   * recording be laid end to end without comb-filtering. Built once.
+   */
+  function v8Grains() {
+    if (sampleGrains) return sampleGrains;
+    const S = V8_SAMPLE;
+    const bin = atob(S.pcm);
+    const pcm = new Float32Array(bin.length >> 1);
+    for (let i = 0; i < pcm.length; i++) {
+      const v = bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8);
+      pcm[i] = (v > 32767 ? v - 65536 : v) / 32768;
+    }
+    const grains = [];
+    for (let j = 0; j + 2 < S.marks.length; j++) {
+      const a = S.marks[j], len = S.marks[j + 2] - a;
+      const buf = ctx.createBuffer(1, len, S.rate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = pcm[a + i] * (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / len));
+      // One engine cycle of this grain, in seconds at its own speed -- the
+      // hop between grains when it is played back unshifted.
+      grains.push({ buf, rpm: S.rpm[j + 1], cycle: len / 2 / S.rate });
+    }
+    sampleGrains = grains;
+    return grains;
+  }
+
+  /**
+   * The player's engine, from a recording of a real-sounding V8 at full
+   * throttle rather than synthesised: the recording is cut into engine
+   * cycles (v8Grains), and every cycle the car needs is played from the
+   * part of the recording where the engine was at that same speed, nudged
+   * the last few percent in pitch. It is the recording's own sound -- its
+   * firing pattern, exhaust and intake -- not an imitation of it; the
+   * voice only chooses WHICH part of it plays and when.
+   *
+   * Same interface and same gearbox as makeV8Engine, which it keeps for
+   * what the recording does not contain: below ~2,200 rpm (idle and the
+   * first instant of a launch) the synthesised V8 plays instead, faded
+   * across 2,200-3,000. Off the throttle the recording (full throttle
+   * throughout) is dulled and dropped, the same overrun treatment the
+   * synthesised voice gives itself.
+   */
+  function makeSampledV8Engine(baseGain) {
+    const grains = v8Grains();
+    const srcMin = grains[0].rpm;
+    const srcMax = grains[grains.length - 1].rpm;
+    const synth = makeV8Engine(baseGain);
+    const box = makeGearbox();
+
+    const bus = ctx.createGain();
+    bus.gain.value = 0;
+    const overrun = ctx.createBiquadFilter();
+    overrun.type = 'lowpass'; overrun.frequency.value = 11000; overrun.Q.value = 0.5;
+    bus.connect(overrun);
+    overrun.connect(master);
+
+    let stopped = false;
+    let nextAt = 0;         // ctx time the next grain starts
+    let cursor = 0;         // grain index the walk is on
+    let run = 0;            // consecutive cycles played since the last jump
+    let rpmNow = V8_IDLE_RPM;
+    let lastT = 0;
+    let onThrottle = 1;
+
+    /** First grain at or above `rpm` (binary search; grains rise with j). */
+    function grainFor(rpm) {
+      let lo = 0, hi = grains.length - 1;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (grains[mid].rpm < rpm) lo = mid + 1; else hi = mid; }
+      return lo;
+    }
+
+    return {
+      /** Same contract as makeV8Engine's update. */
+      update(speed, boosting, maxSpeed, throttle = 1) {
+        if (stopped) return;
+        const t = ctx.currentTime;
+        const dt = lastT ? Math.min(0.1, Math.max(0, t - lastT)) : 0;
+        lastT = t;
+        const { sf, rpm, shifting } = box.step(speed, maxSpeed, boosting, t);
+        // The same glide the synthesised voice gives its pitch: quick through
+        // a shift, so the drop reads as a clutch opening, not a bog.
+        const tau = shifting ? 0.025 : 0.05;
+        rpmNow += (rpm - rpmNow) * (dt > 0 ? 1 - Math.exp(-dt / tau) : 1);
+
+        const mix = Math.max(0, Math.min(1, (rpmNow - SAMPLE_FADE_LOW) / (SAMPLE_FADE_HIGH - SAMPLE_FADE_LOW)));
+        synth.update(speed, boosting, maxSpeed, throttle, Math.sqrt(1 - mix));
+
+        onThrottle += (throttle - onThrottle) * 0.18;
+        const load = (0.55 + 0.45 * sf) * (0.55 + 0.45 * onThrottle);
+        const duck = shifting ? V8_SHIFT_DUCK : 1;
+        bus.gain.setTargetAtTime(
+          baseGain * SAMPLE_LEVEL * load * duck * (boosting ? 1.15 : 1) * Math.sqrt(mix), t, shifting ? 0.025 : 0.05,
+        );
+        overrun.frequency.setTargetAtTime(1300 + 9700 * onThrottle ** 2, t, 0.08);
+
+        if (mix <= 0) { nextAt = 0; return; }
+        // Queue grains up to the lookahead. A stalled frame (tab switch,
+        // GC) leaves nextAt in the past; restart just ahead of now rather
+        // than firing a burst of late grains at once.
+        if (nextAt < t) nextAt = t + 0.005;
+        const target = Math.max(srcMin, Math.min(srcMax, rpmNow));
+        let lo = grainFor(target * (1 - SAMPLE_TOL));
+        let hi = Math.min(grains.length - 1, grainFor(target * (1 + SAMPLE_TOL)));
+        if (hi - lo < SAMPLE_MIN_SPAN) {
+          const mid = (lo + hi) >> 1;
+          lo = Math.max(0, Math.min(grains.length - 1 - SAMPLE_MIN_SPAN, mid - (SAMPLE_MIN_SPAN >> 1)));
+          hi = lo + SAMPLE_MIN_SPAN;
+        }
+        while (nextAt < t + SAMPLE_LOOKAHEAD) {
+          if (cursor < lo || cursor > hi || run >= SAMPLE_RUN) {
+            cursor = lo + Math.floor(Math.random() * (hi - lo + 1));
+            run = 0;
+          }
+          run++;
+          const g = grains[cursor];
+          const rate = rpmNow / g.rpm;
+          const src = ctx.createBufferSource();
+          src.buffer = g.buf;
+          src.playbackRate.value = rate;
+          src.connect(bus);
+          src.start(nextAt);
+          nextAt += g.cycle / rate;
+          cursor++;
+        }
+      },
+      silence() {
+        const t = ctx.currentTime;
+        bus.gain.setTargetAtTime(0, t, 0.05);
+        synth.silence();
+        nextAt = 0;
+        lastT = 0;
+      },
+      stop() {
+        stopped = true;
+        synth.stop();
       },
     };
   }
@@ -511,6 +705,6 @@ export function buildAudio(ctx) {
     get muted() { return muted; },
     setMuted,
     click, countBeep, go, whoosh, crash, scrape, lapChime, finalLap, fanfare,
-    makeEngine, makeV8Engine, makeSqueal,
+    makeEngine, makeV8Engine, makeSampledV8Engine, makeSqueal,
   };
 }

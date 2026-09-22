@@ -214,11 +214,12 @@ export class Game {
     // so a browser with no Web Audio support, or a caller that never
     // passed one, still runs the game silently rather than throwing.
     this.audio = audioCtx ? buildAudio(audioCtx) : null;
-    // The player drives a V8 with an 8-speed box and gets the voice built
-    // for it (see makeV8Engine). The rival keeps the plain one: it is a
-    // different car on every stage -- a saloon, a truck -- and none of
-    // them is the car that engine was measured from.
-    this.playerEngine = this.audio?.makeV8Engine(0.34) ?? null;
+    // The player drives a V8 with an 8-speed box, and hears a recorded one
+    // (see makeSampledV8Engine -- the synthesised makeV8Engine now only
+    // covers idle and launch inside it). The rival keeps the plain voice:
+    // it is a different car on every stage -- a saloon, a truck -- and
+    // none of them is a V8 like this.
+    this.playerEngine = this.audio?.makeSampledV8Engine(0.34) ?? null;
     this.rivalEngine = this.audio?.makeEngine(0.11) ?? null;
     // Tyre squeal, one voice per car (see makeSqueal and tyreSlip). The
     // rival's ceiling is lower for the same reason its engine's is: the car
