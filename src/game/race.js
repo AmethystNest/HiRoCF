@@ -297,6 +297,17 @@ export function resolveContacts(cars, sizes, dt = 1 / 60, passes = 4) {
         // behind and has the greater speed, transfer part of that closing
         // speed forward instead of making the following car simply "lose".
         // This gives a clear shove while avoiding pinball-style launches.
+        // A rear-end shove may carry a car past its own top speed -- that
+        // is what being rear-ended does -- but not without limit. For
+        // stage 4's truck (contactMass 9 against the player's 1) `aPower`
+        // and `bHit` together are worth up to 875 of speed in ONE contact,
+        // and above maxSpeed there is nothing pulling the car back down
+        // but `coast` at 28/s, so repeated hits ratcheted the player to
+        // 1336 internal on a measured stage 4 run -- 76% over its own top
+        // speed, and with the pace step above that reads 615 on a dial
+        // that goes to 350. 1.18 is the same over-speed ceiling the
+        // rivals' own boost uses, so a hit is still clearly felt.
+        const overSpeedCap = (car) => (car.maxSpeed ?? P.maxSpeed) * 1.18;
         if (headingDot > 0.55) {
           const aTowardB = ahx * best.nx + ahy * best.ny;
           const bTowardA = -(bhx * best.nx + bhy * best.ny);
@@ -307,14 +318,14 @@ export function resolveContacts(cars, sizes, dt = 1 / 60, passes = 4) {
             // running into a truck pushes the truck barely at all and
             // costs the car most of the closing speed
             const shove = closing * 0.22 * (aPower / 0.55) * bHit;
-            b.speed += shove;
+            b.speed = Math.min(b.speed + shove, overSpeedCap(b));
             b.x += ahx * closing * 0.010 * bHit;
             b.y += ahy * closing * 0.010 * bHit;
             a.speed -= closing * 0.035 * aHit;
           } else if (bTowardA > 0.45 && b.speed > a.speed + 12) {
             const closing = Math.min(180, b.speed - a.speed);
             const shove = closing * 0.22 * (bPower / 0.55) * aHit;
-            a.speed += shove;
+            a.speed = Math.min(a.speed + shove, overSpeedCap(a));
             a.x += bhx * closing * 0.010 * aHit;
             a.y += bhy * closing * 0.010 * aHit;
             b.speed -= closing * 0.035 * bHit;

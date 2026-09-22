@@ -2,6 +2,47 @@
  * Tuning values carried over verbatim from the Canvas build.
  * The implementation around them is new; these numbers are not to drift.
  */
+
+/**
+ * World units travelled per unit of `speed` -- the actual pace of the game,
+ * and the one number that decides how fast the world goes past. It is named
+ * here rather than written inline because several other values are NOT free
+ * of it: anything that is a DISTANCE standing in for a span of TIME has to
+ * grow with it, and anything that is a SPEED at which a distance-based
+ * effect latches has to shrink with it. Those are derived from MOVE_SCALE
+ * below and in rival.js (see PHYSICS.paceScale), so raising it no longer
+ * means hunting for the values that pay for it.
+ *
+ * PACE_REF is the moveScale every one of those distances was originally
+ * tuned at, so at MOVE_SCALE === PACE_REF the derived numbers come out
+ * exactly as they were measured.
+ */
+// 1.48 -> 1.66 -> 1.82 -> 2.90. The last step is +59% of real pace, and it
+// exists because the dial and the ground disagreed: at 1.82 a full-speed
+// reading of 350 was 99 km/h of ground actually covered (see hudSpeedFactor
+// for how that is measured), so "100 km/h" on the HUD was 28 km/h and the
+// car visibly crawled. Rather than shrink the number -- a dial that tops out
+// at 99 is worse than one that flatters -- the world now moves: full speed
+// is 158 km/h against the 350 reading, so the over-read is 2.21x where it
+// was 3.52x.
+//
+// 2.90 and not more, measured rather than guessed. Sweeping the whole build
+// at 2.40 / 2.90 / 3.40 with the same bot: 3.40 breaks stage 3 outright --
+// the bot finished no lap at all, spent 9620 frames off the pavement, and
+// the drift latched on 48 frames against 712 at 2.90, i.e. the touge stage
+// loses the mechanic it is built on -- and on stages 1-2 even the AI could
+// no longer reach its own top speed, because the corners had become the
+// only limit. 2.40 leaves margin but only +32%. 2.90 keeps every stage
+// drivable (all five completed, worst off-pavement run 147-234 frames where
+// running wide costs nothing anyway) at about 85% of the measured ceiling.
+//
+// What it costs, stated plainly: laps are 26-37% shorter (bot laps 18.0 ->
+// 11.9, 28.4 -> 19.8, 61.8 -> 45.7, 74.9 -> 52.3, 81.9 -> 58.4s), and every
+// corner now demands braking that much earlier. Going further needs longer
+// courses, not another number here.
+const MOVE_SCALE = 2.90;
+const PACE_REF = 1.82;
+
 export const PHYSICS = {
   // 210 -> 90, with accelGapSpan/accelScaleMin below widening the taper:
   // measured, the car went 0-100 km/h on the dial in 0.9s and sat at 99%
@@ -36,10 +77,22 @@ export const PHYSICS = {
   // value below was set to fix) and the AI's aim/corner-scan lookaheads in
   // rival.js, which are DISTANCES, so the same number of route points buys
   // proportionally less warning time as the world moves faster.
-  moveScale: 1.82,
+  moveScale: MOVE_SCALE,
+  // MOVE_SCALE expressed against the pace every distance-shaped constant
+  // was tuned at. Multiply a distance that stands for reaction time by it
+  // (the AI's aim and corner-scan lookaheads, the elevated-deck fade
+  // radius); divide a latch speed by it.
+  paceScale: MOVE_SCALE / PACE_REF,
   driftTurnBoost: 1.42,
   driftSlip: 0.50,
-  driftMinSpeed: 328,
+  // 328 at PACE_REF. A drift latches while BRAKE and steering are held
+  // above this speed and drops the moment speed falls back under it, and
+  // the speed a given corner is actually taken at is inversely
+  // proportional to moveScale -- a faster world holds the same radius at a
+  // proportionally LOWER `speed` value. Pinning this to a fixed number is
+  // what broke the slide at the apex of every hairpin on the two previous
+  // pace raises, so it is derived now rather than re-found by hand.
+  driftMinSpeed: Math.round((328 * PACE_REF) / MOVE_SCALE),
   boostMoveScale: 1.38,
   boostDuration: 2.45,
   boostRecover: 9,
@@ -76,28 +129,27 @@ export const PHYSICS = {
   wallInset: 10,
   wallStuckTime: 0.85,
   wallStuckSpeed: 95,
-  // km/h on the dial per unit of `speed`, derived from moveScale rather
-  // than chosen. It was 0.46, which read ~350 at full speed and was simply
-  // false. Measured against the one object in the world whose real size is
-  // known -- the player's own car, an RC F at 4.705 x 1.845 m, drawn 221.1
-  // x 98.8 world units -- the world runs at 50.2 units per metre (47.0 from
-  // the length, 53.5 from the width). The road widths that scale implies
-  // are 12.0 / 9.2 / 7.6 / 14.4 / 9.6 m across stages 1-5, i.e. 3.9 to 7.3
-  // car widths of road, so the world IS consistent with itself: the dial
-  // was the only thing lying, and by 3.52x. At 0.46, "100 km/h" on the HUD
-  // was 28 km/h of ground actually covered, which is the whole of the
-  // complaint that the car hardly moves at 100.
+  // km/h on the dial per unit of `speed`. Deliberately NOT honest, and the
+  // reason is worth writing down, because it was tried the other way for
+  // exactly one build.
   //
-  // 0.1316 = moveScale * 3.6 / 50.2, rounded so full speed reads exactly
-  // 100: true value 99.2 km/h, and the 0.8% is well inside the spread
-  // between the length- and width-derived scales. Nitro rides on the same
-  // factor (see player.js displaySpeed), so a boost reads 138 and travels
-  // 137. Nothing about the game's pace changes -- moveScale is untouched.
+  // Measured against the one object in the world whose real size is known
+  // -- the player's own car, an RC F at 4.705 x 1.845 m, drawn 221.1 x 98.8
+  // world units -- the world runs at 50.2 units per metre (47.0 from the
+  // length, 53.5 from the width). The road widths that scale implies are
+  // 12.0 / 9.2 / 7.6 / 14.4 / 9.6 m across stages 1-5, i.e. 3.9 to 7.3 car
+  // widths of road, so the world is consistent with itself, and the dial is
+  // the one thing that is not. A truthful factor is moveScale * 3.6 / 50.2.
   //
-  // The other direction, keeping the 350, is not a retune: it needs
-  // moveScale 6.41 instead of 1.82, which divides every lap time by 3.52
-  // (stage 3: 62s -> 18s) and therefore needs courses 3.5x longer.
-  hudSpeedFactor: 0.1316,
+  // At the old pace that came out at 0.1305, which put a full-speed reading
+  // at 99 km/h, and a racing game whose dial tops out at 99 is worse than
+  // one whose dial flatters. So the dial keeps its ~350 and the gap is
+  // closed from the other side instead: MOVE_SCALE above went 1.82 -> 2.90,
+  // which makes full speed 158 km/h of real travel rather than 99, and the
+  // dial's over-read 2.21x rather than 3.52x. An honest factor at this pace
+  // would be 0.208; the remaining flattery is deliberate and bounded by how
+  // fast the existing courses can be driven, not by taste.
+  hudSpeedFactor: 0.46,
 };
 
 export const RACE = {
@@ -188,7 +240,7 @@ export const STAGES = {
       // proportionally LOWER `speed` value, so this has to come down with
       // it (400 * 1.66 / 1.82) or the same bug comes straight back. 365
       // still leaves a drift impossible to hold at walking pace.
-      driftMinSpeed: 365,
+      driftMinSpeed: Math.round((365 * PACE_REF) / MOVE_SCALE),
       launchBoostBelow: 300,
       launchBoostMul: 1.28,
       accelScaleMin: 0.115,
@@ -216,7 +268,14 @@ export const STAGES = {
       // (playerPhysics.accelScaleMin 0.115 above). The rival meanwhile went
       // 50.9 -> 51.9s, so a 4.7s advantage had become 10.1s. Measured back
       // to 57.0s, i.e. the 4.7-5.0s the stage was tuned around.
-      maxSpeed: 645, accel: 90, turn: 3.35, sprite: 'ae86',
+      //
+      // 645 -> 593 after the MOVE_SCALE step above, for the same reason
+      // again: more pace costs a car that has to brake for eight hairpins
+      // more than it costs one on a racing line, and this is the one stage
+      // where two different test bots agreed about it (the gap reopened to
+      // -8.0 and -7.8s against a -4.7s target, while on the other stages
+      // the two bots disagreed by up to 2s and were left alone).
+      maxSpeed: 593, accel: 90, turn: 3.35, sprite: 'ae86',
       drift: 0.62, driftVisualBoost: 0.5,
       // Takes its hairpin apexes out to the guardrail rather than the
       // pavement edge -- there is no off-road penalty left to pay for it,
@@ -322,7 +381,14 @@ export const STAGES = {
       // 3% off top speed would have been +2.2s on its own). The last ~1s
       // is its racing line, which is the approved design, not a side
       // effect of the accel change.
-      cornerSlow: 0.44, cornerLookAhead: 40,
+      // 0.44 -> 0.52 with the MOVE_SCALE step, which is as far as this
+      // lever reaches: measured, the last 18% of it is worth only 0.5s a
+      // lap, and the gap here is 1.5-3.4s wider than the -6.7s the stage
+      // was tuned around. Closing the rest means either lowering its top
+      // speed below the player's -- which is the one thing this rival is
+      // defined by not doing -- or dulling the racing line that IS its
+      // advantage, so it is left open and visible instead of fudged.
+      cornerSlow: 0.52, cornerLookAhead: 40,
       raceLine: true, perfectLine: true, lineAim: 13, wallLine: true,
       block: false, weave: false, drift: 0, finalLapBoostOnly: true,
     },

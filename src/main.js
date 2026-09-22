@@ -497,7 +497,7 @@ export class Game {
       // though it is directly overhead.
       this._deckGrid = {
         grid, cell,
-        reach: cfg.roadHalf + 210,
+        reach: cfg.roadHalf + Math.round(210 * PHYSICS.paceScale),
         ownStretch: Math.ceil(1500 / path.spacing),
       };
     }
@@ -778,6 +778,15 @@ export class Game {
     // keeps 42 units of clearance that nobody can see and the apexes look
     // timid however hard they are actually being attacked.
     this.rival.drawHalf = rivalDrawSize.w / 2;
+    // The body the wall must not be driven through, as half-extents of the
+    // collision hull rather than of the photo: an ae86 or devilz canvas is
+    // over twice as wide as the car in it, while the r8's is cropped tight,
+    // so `drawHalf` alone means "stop the flank at the barrier" for one car
+    // and "stop the middle at it" for another. See the containment in
+    // rival.js, which needs the length too because a car crossing the road
+    // at an angle reaches further sideways than its own width.
+    this.rival.hullHalfW = this.rivalHullSize.w / 2;
+    this.rival.hullHalfL = this.rivalHullSize.h / 2;
     this.rival.placeAtStart(-rivalStartBack, rivalStartLateral);
     this.rival.deckId = 0;
     this.rival.zLevel = 0;

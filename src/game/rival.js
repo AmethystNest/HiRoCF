@@ -349,7 +349,10 @@ export class RivalCar {
     // (stage 3's switchbacks) has to see them coming from further out, or
     // it arrives still at full speed and gets dragged round by the
     // containment below instead of driving the corner.
-    this.cornerLookAhead = tuning.cornerLookAhead ?? 32;
+    // Scaled by P.paceScale: this is a distance in route points standing
+    // in for a span of warning TIME, so the same count buys proportionally
+    // less of it as the world goes past faster.
+    this.cornerLookAhead = Math.round((tuning.cornerLookAhead ?? 32) * P.paceScale);
     // Running wide costs nothing any more (there is no off-pavement speed
     // penalty left on any car), so a stage may tell its rival to take the
     // apex out to the BARRIER rather than stopping at the pavement edge:
@@ -402,7 +405,7 @@ export class RivalCar {
     // practice oscillates into the corner exits, longer cuts them. 13 is
     // where the body stopped crossing the pavement at all while still
     // reaching the commanded apex.
-    this._lineAim = tuning.lineAim ?? 11;
+    this._lineAim = Math.round((tuning.lineAim ?? 11) * P.paceScale);
     this._driftAmt = 0; // smoothed 0..1 "currently committed to a big-curve drift"
     this.boostUsed = false;
     this.boostTimer = 0;
@@ -727,7 +730,7 @@ export class RivalCar {
       aimLine = currentLine + (aimLine - currentLine) * lineRecovery;
     }
 
-    const lookAhead = 11;
+    const lookAhead = Math.round(11 * P.paceScale);
     // A solved line is known everywhere, so offset the aim point by the
     // line's value AT THE AIM POINT rather than at the car. Using the
     // car's own value steers toward a point 11 indices ahead while holding
@@ -934,7 +937,26 @@ export class RivalCar {
     // stops a wide car (stage 1's is 186 units across) hanging its flank
     // past the barrier while its middle is still inside the old trigger.
     const after = this.nearestOnRoute(this.x, this.y);
-    const bodyAtWall = this.wallHalf - (this.drawHalf ?? this.bodyHalf ?? 45);
+    // How far the body actually reaches across the road, which is not its
+    // half-width: a car pointed at an angle to the tangent reaches
+    // halfW*|cos| + halfL*|sin| sideways, and at the pace this build runs
+    // the stage 5 rival sits 32-35 degrees off the tangent at its widest
+    // point mid-corner. On half-width alone that put its nose 48.6 units
+    // THROUGH the barrier it was supposed to be kissing (measured; it had
+    // 8.2 units of daylight at the old pace, which is the same car making
+    // the same mistake more slowly). Hull half-extents, not photo ones, so
+    // the number means the same thing on a tightly cropped photo as on one
+    // with empty canvas beside the car. Floored at `drawHalf` so this can
+    // only ever pull a car in EARLIER than the old test did: a car whose
+    // photo is mostly empty canvas keeps the clearance it was signed off
+    // with instead of being allowed 48 units further out.
+    const drawnAngle = this.angle + (this.driftVisualAngle ?? 0);
+    const skew = wrapAngle(drawnAngle - after.angle);
+    const halfW = this.hullHalfW ?? this.drawHalf ?? this.bodyHalf ?? 45;
+    const halfL = this.hullHalfL ?? halfW * 2;
+    const bodyReach =
+      Math.abs(halfW * Math.cos(skew)) + Math.abs(halfL * Math.sin(skew));
+    const bodyAtWall = this.wallHalf - Math.max(this.drawHalf ?? 0, bodyReach);
     if (after.dist > bodyAtWall) {
       this.x += (after.x - this.x) * 0.09;
       this.y += (after.y - this.y) * 0.09;
