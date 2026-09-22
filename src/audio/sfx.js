@@ -231,41 +231,60 @@ export function buildAudio(ctx) {
   const V8_IDLE_RPM = 850;
   const V8_REDLINE_RPM = 7000;
   /**
-   * The real RC F 8-speed ratio set. Top speed in a gear is inversely
-   * proportional to its ratio, so 8th's ratio over gear g's is the
-   * fraction of the car's own top speed that g reaches -- which is all
-   * this needs, since the game gives speed rather than wheel rpm.
-   *
-   * The resulting steps (1.69, 1.46, 1.27, 1.19, 1.23, 1.21, 1.20) put
-   * each upshift's landing rpm at 4,140-5,850 off a 7,000 limiter; the
-   * reference's three clean upshifts measured 7,020 -> 5,910, 6,900 ->
-   * 5,640 and 7,020 -> 5,970, i.e. the top-gear end of exactly that.
+   * Fraction of the car's top speed each of the 8 gears runs out at. These
+   * started as the real RC F ratio set (top in gear g = 8th's ratio over
+   * g's), but with the game's near-linear launch (13.5% of top speed per
+   * second at full throttle, measured) that put a shift every 0.75-0.9 s
+   * from 1.1 s onwards -- the first one heard as far too early. Laid out
+   * for the game instead: upshifts at about 1.6 / 2.7 / 3.8 / 4.9 / 6.2 s
+   * from standstill, with the steps closing from 1.61 to 1.09 up the box
+   * the way a real one's do, so each upshift lands 4,600-6,500 rpm.
    */
-  const V8_GEAR_RATIOS = [4.596, 2.724, 1.863, 1.464, 1.231, 1.0, 0.824, 0.685];
-  const V8_GEAR_TOP = V8_GEAR_RATIOS.map((r) => V8_GEAR_RATIOS[V8_GEAR_RATIOS.length - 1] / r);
+  const V8_GEAR_TOP = [0.22, 0.355, 0.49, 0.62, 0.735, 0.835, 0.92, 1];
   /** Torque cut on an upshift: how long, and how far the note drops. */
   const V8_SHIFT_TIME = 0.11;
   const V8_SHIFT_DUCK = 0.42;
 
   /**
+   * Throttle blip on a downshift: the ECU (or a driver heel-and-toeing)
+   * opens the throttle for an instant with the clutch open, so the engine
+   * flares past the lower gear's rpm and settles back as the clutch bites
+   * -- the "bwaa" between braking and turn-in. Shape: V8_BLIP_RISE up,
+   * then an exponential fall of V8_BLIP_FALL; V8_BLIP_OVERSHOOT is how far
+   * past the new gear's rpm the flare goes (capped at the limiter).
+   */
+  const V8_BLIP_RISE = 0.045;
+  const V8_BLIP_FALL = 0.09;
+  const V8_BLIP_OVERSHOOT = 0.14;
+  /** Extra level at the blip's peak: an open throttle with no load on it. */
+  const V8_BLIP_GAIN = 0.35;
+
+  /**
    * The 8-speed box and rpm model both V8 voices share: one step per call
    * (at 60 fps nothing can cross two gears in a frame), 0.93 hysteresis on
-   * the way back down so it does not hunt on a shift point, and a torque
-   * cut of V8_SHIFT_TIME on every upshift.
+   * the way back down so it does not hunt on a shift point, a torque cut
+   * of V8_SHIFT_TIME on every upshift and a throttle blip on every
+   * downshift. `blip` (0..1) is that blip's envelope; each voice applies it
+   * as full throttle and extra level for its own sound.
    */
   function makeGearbox() {
     let gear = 0;
     let shiftUntil = 0;
+    let blipAt = -1;
     return {
       step(speed, maxSpeed, boosting, t) {
         const sf = Math.max(0, Math.min(1, speed / Math.max(1, maxSpeed)));
-        if (gear < 7 && sf > V8_GEAR_TOP[gear]) { gear++; shiftUntil = t + V8_SHIFT_TIME; }
-        else if (gear > 0 && sf < V8_GEAR_TOP[gear - 1] * 0.93) gear--;
+        if (gear < V8_GEAR_TOP.length - 1 && sf > V8_GEAR_TOP[gear]) { gear++; shiftUntil = t + V8_SHIFT_TIME; }
+        else if (gear > 0 && sf < V8_GEAR_TOP[gear - 1] * 0.93) { gear--; blipAt = t; }
+        const since = blipAt < 0 ? Infinity : t - blipAt;
+        const blip = since < V8_BLIP_RISE ? since / V8_BLIP_RISE
+          : since < V8_BLIP_RISE + 6 * V8_BLIP_FALL ? Math.exp(-(since - V8_BLIP_RISE) / V8_BLIP_FALL) : 0;
         const rpm = Math.min(
           V8_REDLINE_RPM,
-          V8_IDLE_RPM + (V8_REDLINE_RPM - V8_IDLE_RPM) * Math.min(1, sf / V8_GEAR_TOP[gear]),
+          (V8_IDLE_RPM + (V8_REDLINE_RPM - V8_IDLE_RPM) * Math.min(1, sf / V8_GEAR_TOP[gear]))
+            * (1 + V8_BLIP_OVERSHOOT * blip),
         ) * (boosting ? 1.04 : 1);
-        return { sf, rpm, shifting: t < shiftUntil };
+        return { sf, rpm, shifting: t < shiftUntil, blip };
       },
     };
   }
@@ -394,10 +413,12 @@ export function buildAudio(ctx) {
       update(speed, boosting, maxSpeed, throttle = 1, level = 1) {
         if (stopped) return;
         const t = ctx.currentTime;
-        const { sf, rpm, shifting } = box.step(speed, maxSpeed, boosting, t);
+        const { sf, rpm, shifting, blip } = box.step(speed, maxSpeed, boosting, t);
         // Through the cut the note has to fall as fast as the clutch opens,
         // or the drop reads as the engine bogging rather than as a shift.
-        const glide = shifting ? 0.025 : 0.05;
+        // Same for a blip: it is over in a quarter of a second, and a slow
+        // glide would smear it into a gentle swell.
+        const glide = shifting || blip > 0 ? 0.025 : 0.05;
 
         // Combustion is never perfectly even, and a PeriodicWave is: held
         // at an exact frequency this reads as a siren rather than an
@@ -419,10 +440,13 @@ export function buildAudio(ctx) {
         // hard step in level on every brake tap is more obviously fake
         // than no overrun at all.
         onThrottle += (throttle - onThrottle) * 0.18;
-        const load = (0.35 + 0.65 * sf) * (0.55 + 0.45 * onThrottle);
+        // A blip is the throttle wide open for an instant, whatever the
+        // pedal says -- that is the whole of it -- so it bypasses the easing.
+        const thr = Math.max(onThrottle, blip);
+        const load = (0.35 + 0.65 * sf) * (0.55 + 0.45 * thr) * (1 + V8_BLIP_GAIN * blip);
         const duck = shifting ? V8_SHIFT_DUCK : 1;
         lp.frequency.setTargetAtTime(
-          (700 + rpm * 0.08 + (boosting ? 500 : 0)) * (0.62 + 0.38 * onThrottle), t, 0.08,
+          (700 + rpm * 0.08 + (boosting ? 500 : 0)) * (0.62 + 0.38 * thr), t, blip > 0 ? 0.03 : 0.08,
         );
         nf.frequency.setTargetAtTime(800 + rpm * 0.10, t, 0.08);
         toneGain.gain.setTargetAtTime(baseGain * load * duck * (boosting ? 1.2 : 1) * level, t, glide);
@@ -594,22 +618,26 @@ export function buildAudio(ctx) {
         const t = ctx.currentTime;
         const dt = lastT ? Math.min(0.1, Math.max(0, t - lastT)) : 0;
         lastT = t;
-        const { sf, rpm, shifting } = box.step(speed, maxSpeed, boosting, t);
+        const { sf, rpm, shifting, blip } = box.step(speed, maxSpeed, boosting, t);
         // The same glide the synthesised voice gives its pitch: quick through
         // a shift, so the drop reads as a clutch opening, not a bog.
-        const tau = shifting ? 0.025 : 0.05;
+        const tau = shifting || blip > 0 ? 0.025 : 0.05;
         rpmNow += (toSoundRpm(rpm) - rpmNow) * (dt > 0 ? 1 - Math.exp(-dt / tau) : 1);
 
         const mix = Math.max(0, Math.min(1, (rpmNow - SAMPLE_FADE_LOW) / (SAMPLE_FADE_HIGH - SAMPLE_FADE_LOW)));
         synth.update(speed, boosting, maxSpeed, throttle, Math.sqrt(1 - mix));
 
         onThrottle += (throttle - onThrottle) * 0.18;
-        const load = (0.55 + 0.45 * sf) * (0.55 + 0.45 * onThrottle);
+        // The blip, as in makeV8Engine: wide open for an instant. The
+        // recording is full throttle throughout, so this is simply the
+        // overrun treatment lifted for the blip's length.
+        const thr = Math.max(onThrottle, blip);
+        const load = (0.55 + 0.45 * sf) * (0.55 + 0.45 * thr) * (1 + V8_BLIP_GAIN * blip);
         const duck = shifting ? V8_SHIFT_DUCK : 1;
         bus.gain.setTargetAtTime(
-          baseGain * SAMPLE_LEVEL * load * duck * (boosting ? 1.15 : 1) * Math.sqrt(mix), t, shifting ? 0.025 : 0.05,
+          baseGain * SAMPLE_LEVEL * load * duck * (boosting ? 1.15 : 1) * Math.sqrt(mix), t, shifting || blip > 0 ? 0.025 : 0.05,
         );
-        overrun.frequency.setTargetAtTime(1300 + 9700 * onThrottle ** 2, t, 0.08);
+        overrun.frequency.setTargetAtTime(1300 + 9700 * thr ** 2, t, blip > 0 ? 0.02 : 0.08);
 
         if (mix <= 0) { nextAt = 0; return; }
         // Queue grains up to the lookahead. A stalled frame (tab switch,
@@ -823,7 +851,9 @@ export function buildAudio(ctx) {
         if (quietSince >= 0 && t - quietSince > 0.6) { nextAt = 0; return; }
 
         wander = wander * 0.92 + (Math.random() - 0.5) * 0.06;
-        const rate = (0.92 + 0.16 * s) * (1 + wander);
+        // 1.08-1.24x the recording (about 2.5 semitones over where it was
+        // first set, 0.92-1.08x): asked for higher.
+        const rate = (1.08 + 0.16 * s) * (1 + wander);
         if (nextAt < t) nextAt = t + 0.005;
         while (nextAt < t + SAMPLE_LOOKAHEAD) {
           let k = Math.floor(Math.random() * grains.length);
