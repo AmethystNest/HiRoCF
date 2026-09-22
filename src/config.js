@@ -19,8 +19,8 @@ export const PHYSICS = {
   turnLow: 2.95,
   turnHigh: 0.68,
   // World units travelled per unit of `speed`. This is the actual pace of
-  // the game; `hudSpeedFactor` below is only the number on the dial, so the
-  // two are tuned separately (the HUD still reads ~350 at full speed).
+  // the game; `hudSpeedFactor` below is only the number on the dial, and it
+  // is now DERIVED from this value rather than tuned against it (see there).
   // Applies to the rival as well -- rival.js reads the same PHYSICS object.
   // Stage 3 used to override this to 1.70 while every other stage ran 1.48,
   // which meant the same car covered ground 15% faster on one stage than
@@ -76,7 +76,28 @@ export const PHYSICS = {
   wallInset: 10,
   wallStuckTime: 0.85,
   wallStuckSpeed: 95,
-  hudSpeedFactor: 0.46,
+  // km/h on the dial per unit of `speed`, derived from moveScale rather
+  // than chosen. It was 0.46, which read ~350 at full speed and was simply
+  // false. Measured against the one object in the world whose real size is
+  // known -- the player's own car, an RC F at 4.705 x 1.845 m, drawn 221.1
+  // x 98.8 world units -- the world runs at 50.2 units per metre (47.0 from
+  // the length, 53.5 from the width). The road widths that scale implies
+  // are 12.0 / 9.2 / 7.6 / 14.4 / 9.6 m across stages 1-5, i.e. 3.9 to 7.3
+  // car widths of road, so the world IS consistent with itself: the dial
+  // was the only thing lying, and by 3.52x. At 0.46, "100 km/h" on the HUD
+  // was 28 km/h of ground actually covered, which is the whole of the
+  // complaint that the car hardly moves at 100.
+  //
+  // 0.1316 = moveScale * 3.6 / 50.2, rounded so full speed reads exactly
+  // 100: true value 99.2 km/h, and the 0.8% is well inside the spread
+  // between the length- and width-derived scales. Nitro rides on the same
+  // factor (see player.js displaySpeed), so a boost reads 138 and travels
+  // 137. Nothing about the game's pace changes -- moveScale is untouched.
+  //
+  // The other direction, keeping the 350, is not a retune: it needs
+  // moveScale 6.41 instead of 1.82, which divides every lap time by 3.52
+  // (stage 3: 62s -> 18s) and therefore needs courses 3.5x longer.
+  hudSpeedFactor: 0.1316,
 };
 
 export const RACE = {
@@ -104,7 +125,21 @@ export const NITRO = {
   chainWindow: 1.0,
 };
 
-/** Per-stage rival tuning, also carried over verbatim. */
+/**
+ * Per-stage rival tuning, also carried over verbatim.
+ *
+ * On the rivals' top speeds: the PHYSICS.accel cut above slowed the player's
+ * lap by 3-11% depending on stage, but the rivals by only 0-6%, even after
+ * they were given the same top-end taper -- their laps are corner-limited,
+ * not accel-limited, so there was little for the taper to take. Measured on
+ * stage 3: cutting that rival's accel by another 65% costs it 1.4s a lap and
+ * raising its cornerSlow by 30% costs 2.8s, while 10% off its top speed
+ * costs 6.7s. Top speed is therefore the lever used to hand each rival the
+ * same share of lap time the player gave up, which restores the gap each
+ * stage was actually tuned around rather than leaving every race harder than
+ * it was signed off as. Stage 2 needed nothing and stage 5 cannot use this
+ * lever at all (its engine is the player's by design); see both below.
+ */
 export const STAGES = {
   1: {
     id: 1, name: 'STAGE 1', shortDesc: '初心者向け',
@@ -112,7 +147,10 @@ export const STAGES = {
     courseDesc: '長い直線 / 緩やかなカーブ / 大コーナー',
     rivalName: '這い寄る悪魔',
     roadHalf: 300, wallHalf: 410,
-    rival: { maxSpeed: 710, accel: 107, turn: 2.25, sprite: 'devilz', block: false, weave: false, raceLine: true, cornerSlow: 0.22, holdOpeningStraight: true, finalLapBoostOnly: true },
+    // 710 -> 689 (-3%): the player's lap here went 17.1 -> 18.0s with the
+    // accel change and this rival's only 17.1 -> 17.5s, which turned a
+    // dead-even stage into a 0.5s deficit. Measured back to 18.0s.
+    rival: { maxSpeed: 689, accel: 107, turn: 2.25, sprite: 'devilz', block: false, weave: false, raceLine: true, cornerSlow: 0.22, holdOpeningStraight: true, finalLapBoostOnly: true },
     bestKey: 'topdownRacer_stage1_best_ms',
   },
   2: {
@@ -123,6 +161,10 @@ export const STAGES = {
     roadHalf: 230, wallHalf: 320,
     playerPhysics: { wallInset: 2 },
     wallTriggerExtra: 18,
+    // Untouched: this is the one rival whose lap grew by the same share as
+    // the player's (27.1 -> 29.2s against 26.8 -> 28.6s), because a course
+    // this tight leaves it accelerating out of corners as much as the
+    // player does, so the taper reached it on its own.
     rival: { maxSpeed: 650, accel: 120, turn: 3.05, sprite: 'prius' },
     bestKey: 'topdownRacer_stage2_best_ms',
   },
@@ -167,7 +209,14 @@ export const STAGES = {
     // Now it actually brakes for the hairpin and drifts through it at a
     // speed its own steering rate can hold.
     rival: {
-      maxSpeed: 715, accel: 90, turn: 3.35, sprite: 'ae86',
+      // 715 -> 645 (-10%), the largest cut of the five, because stage 3 is
+      // where the player lost the most: 55.6 -> 62.0s a lap (+11.5%), since
+      // eight hairpins mean the player is accelerating out of a corner for
+      // most of the lap and this stage also runs the deepest taper floor
+      // (playerPhysics.accelScaleMin 0.115 above). The rival meanwhile went
+      // 50.9 -> 51.9s, so a 4.7s advantage had become 10.1s. Measured back
+      // to 57.0s, i.e. the 4.7-5.0s the stage was tuned around.
+      maxSpeed: 645, accel: 90, turn: 3.35, sprite: 'ae86',
       drift: 0.62, driftVisualBoost: 0.5,
       // Takes its hairpin apexes out to the guardrail rather than the
       // pavement edge -- there is no off-road penalty left to pay for it,
@@ -180,7 +229,7 @@ export const STAGES = {
       // leading edge of a long corner and, while it runs, bypasses corner
       // braking entirely (speed goes to maxSpeed * 1.18) -- which on the old
       // wide sweepers was the AE86's showpiece and on a 356-radius hairpin
-      // means arriving at 844 and being dragged round. The boost is saved
+      // means arriving at maxSpeed * 1.18 = 761 and being dragged round. The boost is saved
       // for the valley straight instead, where it is already guarded on
       // curveAhead and bigCurve both being near zero.
       finalLapBoostOnly: true,
@@ -196,15 +245,20 @@ export const STAGES = {
     playerPhysics: { wallInset: 3, wallSpeedMul: 0.82 },
     wallTriggerExtra: 6,
     rival: {
-      maxSpeed: 815, accel: 111, turn: 1.95, sprite: 'truck0164',
-      // The one rival specified as slow away and fast flat out: 815
+      maxSpeed: 790, accel: 111, turn: 1.95, sprite: 'truck0164',
+      // The one rival specified as slow away and fast flat out: 790
       // against the player's 760 at the top end, and a launch rate of 120
       // against the player's 244 off the line (see rival.js launchAccel).
       // A loaded box truck is the one car you can out-drag away from the
       // lights and the one you cannot out-run once it is rolling. No other
       // stage sets launchAccel, and no other rival's maxSpeed is above
-      // the player's. Corner speed is held at the old 790 * (1 - 0.10)
-      // = 711 by re-deriving cornerSlow from the raised maxSpeed.
+      // the player's -- which is why this one comes down only 815 -> 790
+      // (-3%), the least that both restores the 3.0s gap the stage was
+      // tuned around (69.4 -> 69.6s here against the player's 72.4 ->
+      // 75.0s) and leaves the truck the fastest thing on any straight.
+      // cornerSlow is deliberately NOT re-derived this time: at 0.205 the
+      // corner target falls with the top speed, 648 -> 628, which is the
+      // same 3% and keeps the one knob doing the one job.
       cornerSlow: 0.205, cornerLookAhead: 24, launchAccel: 51, block: false, weave: false,
       // Shuts the door on a car coming alongside, and only then -- `block`
       // stays off, because that one weaves about for as long as the rival
@@ -249,13 +303,26 @@ export const STAGES = {
     // photo dragged that red toward whatever the tint colour was).
     rival: {
       maxSpeed: PHYSICS.maxSpeed, accel: PHYSICS.accel, turn: 2.85, sprite: 'r8',
-      // 0.34, not 0.30: it is the last 4% of corner speed that lets the car
-      // hold the line it is given rather than washing out to the far side
-      // of it. Measured over two laps when the line still stopped at the
-      // pavement -- at 0.30 the body overran the commanded line on 39
-      // frames, at 0.34 on none, for the same lap time. Now the line runs
-      // to the barrier (wallLine), so overrunning it means a scrape.
-      cornerSlow: 0.34, cornerLookAhead: 40,
+      // 0.30 -> 0.34 -> 0.44. The first step was about holding the line,
+      // not pace: measured over two laps when the line still stopped at
+      // the pavement, at 0.30 the body overran the commanded line on 39
+      // frames and at 0.34 on none, for the same lap time. Now the line
+      // runs to the barrier (wallLine), so overrunning it means a scrape,
+      // and a higher value can only hold the line better.
+      //
+      // 0.44 is this stage's share of the pace restore described above
+      // STAGES, and it has to come out of corner speed rather than top
+      // speed: `maxSpeed: PHYSICS.maxSpeed` on the line above is the whole
+      // point of this rival -- the player's own engine, beaten only by a
+      // better line -- so taking its top speed below the player's would
+      // change what the car IS. What that costs is honesty about the
+      // limit: the player's lap here went 79.2 -> 82.5s and this rival's
+      // 72.5 -> 73.3s, so 2.2s wanted giving back and corner speed is
+      // worth about 1.2s of it (measured: +30% cornerSlow = +1.2s, where
+      // 3% off top speed would have been +2.2s on its own). The last ~1s
+      // is its racing line, which is the approved design, not a side
+      // effect of the accel change.
+      cornerSlow: 0.44, cornerLookAhead: 40,
       raceLine: true, perfectLine: true, lineAim: 13, wallLine: true,
       block: false, weave: false, drift: 0, finalLapBoostOnly: true,
     },
