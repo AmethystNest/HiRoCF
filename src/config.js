@@ -207,6 +207,14 @@ export const STAGES = {
     courseDesc: '長い直線 / 緩やかなカーブ / 大コーナー',
     rivalName: '這い寄る悪魔',
     roadHalf: 300, wallHalf: 410,
+    // The one stage whose collision wall is NOT the visible barrier (see
+    // main.js's `barrier`). Stage 1 draws no wall at all, so the visible
+    // limit was the far edge of the gravel trap at 646 -- and the circuit's
+    // trackside props (floodlights, camera towers, hoardings) are drawn
+    // leaning in over that gravel, so at 646 the cars drove straight
+    // through them. The wall stays where it was before, at wallHalf, still
+    // tested with the car's drawn body like every other stage.
+    barrierAtWallHalf: true,
     // 710 -> 689 (-3%): the player's lap here went 17.1 -> 18.0s with the
     // accel change and this rival's only 17.1 -> 17.5s, which turned a
     // dead-even stage into a 0.5s deficit. Measured back to 18.0s.

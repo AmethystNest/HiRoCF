@@ -114,6 +114,19 @@ export class PlayerCar {
   }
 
   /** Speed shown on the HUD (km/h), same scaling as the original build. */
+  /**
+   * The fastest this car can yaw at its current speed on grip alone -- the
+   * steering block in update() at full lock, before any drift or nitro
+   * multiplier. Used to tell how close to the limit a corner is being
+   * taken (see main.js's tyreSlip); kept in step with update() by hand.
+   */
+  maxYawRate() {
+    const ratio = Math.min(1, this.speed / P.maxSpeed);
+    const turnRate = (P.turnLow + (P.turnHigh - P.turnLow) * Math.pow(ratio, P.turnCurveExp)) * 1.10;
+    const steerScale = 1 - P.steerScaleAtTop * Math.pow(ratio, P.steerScaleExp);
+    return turnRate * steerScale;
+  }
+
   get displaySpeed() {
     return this.speed * P.hudSpeedFactor * (this.boosting ? P.boostMoveScale : 1);
   }

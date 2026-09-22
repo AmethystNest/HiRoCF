@@ -404,8 +404,13 @@ export function buildAudio(ctx) {
     let stopped = false;
 
     return {
-      /** @param speed 0..maxSpeed, @param boosting bool, @param maxSpeed PHYSICS.maxSpeed */
-      update(speed, boosting, maxSpeed) {
+      /**
+       * @param speed 0..maxSpeed, @param boosting bool, @param maxSpeed PHYSICS.maxSpeed
+       * @param level 0..1 multiplier on top of everything else -- how far
+       *              away this car is from the listener (see main.js's
+       *              distanceLevel); 1 is right alongside.
+       */
+      update(speed, boosting, maxSpeed, level = 1) {
         if (stopped) return;
         const r = Math.max(0, Math.min(1, speed / Math.max(1, maxSpeed)));
         const t = ctx.currentTime;
@@ -413,7 +418,7 @@ export function buildAudio(ctx) {
         osc1.frequency.setTargetAtTime(freq, t, 0.07);
         osc2.frequency.setTargetAtTime(freq, t, 0.07);
         filt.frequency.setTargetAtTime(280 + r * 1500 + (boosting ? 700 : 0), t, 0.1);
-        g.gain.setTargetAtTime(baseGain * (0.45 + 0.55 * r) * (boosting ? 1.25 : 1), t, 0.06);
+        g.gain.setTargetAtTime(baseGain * (0.45 + 0.55 * r) * (boosting ? 1.25 : 1) * level, t, 0.06);
       },
       /** Fully silent (grid, pause, finish) without tearing the voice
        *  down and rebuilding it -- gain to 0 is cheaper and click-free
@@ -428,10 +433,84 @@ export function buildAudio(ctx) {
     };
   }
 
+  // --- tyre squeal: the other continuous sound -------------------------
+  /**
+   * Tyres at the limit of grip. What a squeal actually is: rubber
+   * stick-slipping against the road at a few hundred to about a thousand
+   * times a second, which comes out as a strong, slightly unsteady tone
+   * with a hard, narrow band of hiss wrapped round it -- not white noise,
+   * and not a clean whistle either. So: a sawtooth at the stick-slip rate,
+   * narrowed by a resonant band-pass onto its second harmonic (where the
+   * screech sits), with the shared noise buffer through a tighter band-pass
+   * a little above it for the grit. The pitch wanders a few percent on its
+   * own and rises with how hard the tyres are working, which is what keeps
+   * it from sounding like a held note.
+   *
+   * `baseGain` is the voice's ceiling at full slip, same contract as the
+   * engines'.
+   */
+  function makeSqueal(baseGain) {
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.value = 820;
+    const tonal = ctx.createBiquadFilter();
+    tonal.type = 'bandpass'; tonal.frequency.value = 1640; tonal.Q.value = 5;
+    const toneGain = ctx.createGain();
+    toneGain.gain.value = 0.55;
+    osc.connect(tonal); tonal.connect(toneGain);
+
+    const hiss = ctx.createBufferSource();
+    hiss.buffer = noiseBuffer; hiss.loop = true;
+    const grit = ctx.createBiquadFilter();
+    grit.type = 'bandpass'; grit.frequency.value = 2300; grit.Q.value = 9;
+    const gritGain = ctx.createGain();
+    gritGain.gain.value = 1.0;
+    hiss.connect(grit); grit.connect(gritGain);
+
+    const out = ctx.createGain();
+    out.gain.value = 0;
+    toneGain.connect(out);
+    gritGain.connect(out);
+    out.connect(master);
+    osc.start();
+    hiss.start();
+
+    let stopped = false;
+    let wander = 0;
+    return {
+      /**
+       * @param slip   0..1, how far past the grip the tyres are (see
+       *               main.js's tyreSlip).
+       * @param level  0..1 distance multiplier, as for the engines.
+       */
+      update(slip, level = 1) {
+        if (stopped) return;
+        const t = ctx.currentTime;
+        const s = Math.max(0, Math.min(1, slip));
+        wander = wander * 0.9 + (Math.random() - 0.5) * 0.12;
+        const f0 = 760 + 300 * s;
+        osc.frequency.setTargetAtTime(f0 * (1 + wander * 0.35), t, 0.03);
+        tonal.frequency.setTargetAtTime(f0 * 2, t, 0.05);
+        grit.frequency.setTargetAtTime(f0 * 2.8, t, 0.05);
+        // Faster in than out: a squeal starts the instant the tyre lets go
+        // and tails off as it hooks back up.
+        const target = baseGain * s * s * level;
+        out.gain.setTargetAtTime(target, t, target > out.gain.value ? 0.035 : 0.12);
+      },
+      silence() {
+        out.gain.setTargetAtTime(0, ctx.currentTime, 0.08);
+      },
+      stop() {
+        stopped = true;
+        try { osc.stop(); hiss.stop(); } catch { /* already stopped */ }
+      },
+    };
+  }
+
   return {
     get muted() { return muted; },
     setMuted,
     click, countBeep, go, whoosh, crash, scrape, lapChime, finalLap, fanfare,
-    makeEngine, makeV8Engine,
+    makeEngine, makeV8Engine, makeSqueal,
   };
 }

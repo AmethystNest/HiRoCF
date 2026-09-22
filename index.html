@@ -1115,6 +1115,8 @@
         // setTargetAtTime ramp was already scheduled to keep running.
         game.playerEngine?.silence();
         game.rivalEngine?.silence();
+        game.playerSqueal?.silence();
+        game.rivalSqueal?.silence();
       };
       const closePause=()=>{pauseOverlay.hidden=true;app.ticker.start()};
       pauseBtn.addEventListener('pointerdown',e=>{e.preventDefault();game.audio?.click();openPause()});

@@ -141,6 +141,38 @@ const FINISH_CAR_FILL = 0.72;
  */
 const RIVAL_UNDER_ALPHA = 0.3;
 
+/**
+ * How loud a sound made `d` world units from the player is, 0..1. The
+ * inverse-distance law a real point source follows (-6 dB per doubling of
+ * distance), full level inside SOUND_REF_DIST -- about a car and a half,
+ * i.e. alongside -- so a rival right beside the player is exactly as loud
+ * as it always was. At the edge of the screen (~1,100 units) that is about
+ * a third, half a lap away a few percent.
+ */
+const SOUND_REF_DIST = 350;
+function distanceLevel(d) {
+  return d <= SOUND_REF_DIST ? 1 : SOUND_REF_DIST / d;
+}
+
+/**
+ * Tyre squeal thresholds (see Game.tyreSlip), as a fraction of the fastest
+ * the car can yaw at its current speed. Not in g: this game's cornering is
+ * arcade -- a highway sweeper at full speed is ~10 g by the car's own
+ * measured scale -- so any fixed acceleration either squeals on every bend
+ * or on none. Relative to the car's own limit it reads the way a driver
+ * hears it: a bend taken well inside the limit is quiet, one taken near
+ * full lock sings, and one at the limit squeals outright.
+ */
+const SQUEAL_YAW_START = 0.6;
+const SQUEAL_YAW_FULL = 0.95;
+/** Below this share of top speed a tight turn is a manoeuvre, not a squeal. */
+const SQUEAL_SPEED_FROM = 0.3;
+/** Yaw is smoothed over about this long (s) before it counts: steering here
+ *  is buttons, full lock or nothing, so a single tap is always at the limit
+ *  for a frame or two. A squeal needs the corner to be held. */
+const SQUEAL_YAW_TAU = 0.25;
+const SQUEAL_SLIDE_FULL = 0.35;
+
 const SURFACE_SECTORS_BY_STAGE = {
   5: {
     main: 'gt_highway',
@@ -188,6 +220,12 @@ export class Game {
     // them is the car that engine was measured from.
     this.playerEngine = this.audio?.makeV8Engine(0.34) ?? null;
     this.rivalEngine = this.audio?.makeEngine(0.11) ?? null;
+    // Tyre squeal, one voice per car (see makeSqueal and tyreSlip). The
+    // rival's ceiling is lower for the same reason its engine's is: the car
+    // being driven is the foreground, the other one is the scene.
+    this.playerSqueal = this.audio?.makeSqueal(0.16) ?? null;
+    this.rivalSqueal = this.audio?.makeSqueal(0.10) ?? null;
+    this._prevYaw = { player: null, rival: null };  // per car: last angle, smoothed yaw
     this._wasBoosting = { player: false, rival: false };
     // Throttles the ongoing-scrape sound the same way contactfx throttles
     // its spark stream -- a sound fired every single frame of contact
@@ -545,7 +583,9 @@ export class Game {
     // these widths (closest: 295 units of clearance, stage 3).
     this.barrier = new Float32Array(path.count);
     for (const sec of sectors) {
-      const b = visibleBarrierHalf(cfg.roadHalf, cfg.wallHalf, sec.preset);
+      const b = cfg.barrierAtWallHalf
+        ? cfg.wallHalf
+        : visibleBarrierHalf(cfg.roadHalf, cfg.wallHalf, sec.preset);
       for (let k = 0; k < sec.span; k++) this.barrier[path.wrap(sec.from + k)] = b;
     }
     if (mixed) {
@@ -877,6 +917,31 @@ export class Game {
    * Cars that keep no hint (anything driven by something other than their own
    * update()) fall back to a global lookup.
    */
+  /**
+   * How hard `car`'s tyres are working past their grip, 0..1, for its
+   * squeal voice. Two ways a car squeals: cornering near its limit -- its
+   * smoothed yaw rate as a share of the most it can yaw at this speed
+   * (maxYawRate) -- and sliding, where the slip angle the sprite is drawn
+   * at says the tyres are already going sideways. Either on its own is
+   * enough. Gated out at low speed, and a yaw step no car can steer (a
+   * wall or stuck-recovery snap re-aiming it) is not read as cornering.
+   */
+  tyreSlip(car, key, dt) {
+    const st = this._prevYaw[key] ?? (this._prevYaw[key] = { angle: car.angle, yaw: 0 });
+    if (dt <= 0) return 0;
+    let yaw = Math.atan2(Math.sin(car.angle - st.angle), Math.cos(car.angle - st.angle)) / dt;
+    st.angle = car.angle;
+    if (Math.abs(yaw) > 6) yaw = 0;
+    st.yaw += (yaw - st.yaw) * (1 - Math.exp(-dt / SQUEAL_YAW_TAU));
+    const clamp01 = (v) => Math.max(0, Math.min(1, v));
+    const limit = Math.max(1e-3, car.maxYawRate());
+    const cornering = clamp01((Math.abs(st.yaw) / limit - SQUEAL_YAW_START) / (SQUEAL_YAW_FULL - SQUEAL_YAW_START));
+    const slide = clamp01(Math.abs(car.driftVisualAngle || 0) / SQUEAL_SLIDE_FULL);
+    const speedShare = car.speed / (car.maxSpeed ?? PHYSICS.maxSpeed);
+    const moving = clamp01((speedShare - SQUEAL_SPEED_FROM) / 0.15);
+    return Math.max(cornering, slide) * moving;
+  }
+
   syncDeck(car) {
     const idx = car._routeHint ?? this.path.nearest(car.x, car.y).index;
     const layer = this.path.layerAtIndex(idx);
@@ -1092,13 +1157,18 @@ export class Game {
       // The brake pad is the only throttle signal the game has: the car
       // is on power whenever it is not held. See makeV8Engine's overrun.
       this.playerEngine.update(p.speed, p.boosting, PHYSICS.maxSpeed, this.input.brake ? 0 : 1);
-      this.rivalEngine.update(this.rival.speed, this.rival.boosting, PHYSICS.maxSpeed);
+      // Everything the rival makes is heard from where the player is (see
+      // distanceLevel), not at one fixed level wherever it is on the course.
+      const rivalLevel = distanceLevel(Math.hypot(this.rival.x - p.x, this.rival.y - p.y));
+      this.rivalEngine.update(this.rival.speed, this.rival.boosting, PHYSICS.maxSpeed, rivalLevel);
+      this.playerSqueal.update(this.tyreSlip(p, 'player', dt));
+      this.rivalSqueal.update(this.tyreSlip(this.rival, 'rival', dt), rivalLevel);
 
       // Nitro: fires once per press, on the rising edge of `boosting` --
       // same convention as wallImpact/carImpact below, not "every frame
       // the burst is running".
       if (p.boosting && !this._wasBoosting.player) this.audio.whoosh(1);
-      if (this.rival.boosting && !this._wasBoosting.rival) this.audio.whoosh(0.4);
+      if (this.rival.boosting && !this._wasBoosting.rival) this.audio.whoosh(0.4 * rivalLevel);
       this._wasBoosting.player = p.boosting;
       this._wasBoosting.rival = this.rival.boosting;
 
@@ -1108,7 +1178,7 @@ export class Game {
       // bigger than either car scraping a wall alone, without special-
       // casing which case is which.
       if (p.wallImpact || p.carImpact) this.audio.crash(p.contact?.force ?? 1);
-      if (this.rival.wallImpact || this.rival.carImpact) this.audio.crash((this.rival.contact?.force ?? 1) * 0.45);
+      if (this.rival.wallImpact || this.rival.carImpact) this.audio.crash((this.rival.contact?.force ?? 1) * 0.45 * rivalLevel);
 
       // Ongoing scrape: a throttled tick, not a sound every frame of
       // contact -- see contactfx.js's own spark stream for the same
@@ -1128,7 +1198,7 @@ export class Game {
         this._scrapeSfxAccum.rival += dt;
         if (this._scrapeSfxAccum.rival >= scrapeTick) {
           this._scrapeSfxAccum.rival = 0;
-          this.audio.scrape((this.rival.contact.force ?? 0.5) * 0.4);
+          this.audio.scrape((this.rival.contact.force ?? 0.5) * 0.4 * rivalLevel);
         }
       } else {
         this._scrapeSfxAccum.rival = 0;

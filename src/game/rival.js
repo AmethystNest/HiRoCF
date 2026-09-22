@@ -498,6 +498,16 @@ export class RivalCar {
    * Nearest centreline point on this car's own stretch of route, tracked by
    * a rolling index hint -- see TrackPath.nearestLocal.
    */
+  /**
+   * The fastest this car can yaw at its current speed -- the steering line
+   * in update() at full lock. See PlayerCar.maxYawRate; kept in step with
+   * update() by hand.
+   */
+  maxYawRate() {
+    const ratio = Math.min(1, this.speed / this.maxSpeed);
+    return this.turn * 1.02 * (1 - 0.40 * Math.pow(ratio, 1.35));
+  }
+
   /** The barrier the course actually shows at route point `index` (see
    *  main.js's `barrier`); cfg.wallHalf only where none was handed over. */
   barrierAt(index) {
@@ -996,8 +1006,13 @@ export class RivalCar {
     // running for the whole scrape instead of strobing. A racing line that
     // runs the apex stays WALL_LINE_GAP short of this, so driving the line
     // never sparks.
+    // Read by main.js for the crash sound, the same flag the player has.
+    // Never set on the rival until now, so a rival hitting the wall was
+    // silent however close it was.
+    this.wallImpact = false;
     if (over > -2) {
       const impact = this._wallCooldown <= 0;
+      this.wallImpact = impact;
       this._wallCooldown = P.wallGraceWindow;
       setContact(this.contact, {
         impact,
