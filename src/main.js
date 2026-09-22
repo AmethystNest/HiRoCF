@@ -14,6 +14,7 @@ import { RivalCar } from './game/rival.js';
 import { Race, resolveContacts, autoDrivePostRace } from './game/race.js';
 import { clearContact } from './game/contact.js';
 import { buildAudio } from './audio/sfx.js';
+import { makeBgm } from './audio/bgm.js';
 
 const BASE_PLAYER_PHYSICS = { ...PHYSICS };
 
@@ -203,7 +204,7 @@ const WRAPPED = [
 ];
 
 export class Game {
-  constructor(app, tex, cars, propSheet, audioCtx) {
+  constructor(app, tex, cars, propSheet, audioCtx, bgmEl) {
     this.app = app;
     this.tex = tex;
     this.cars = cars;
@@ -226,6 +227,9 @@ export class Game {
     // being driven is the foreground, the other one is the scene.
     this.playerSqueal = this.audio?.makeSqueal(0.16) ?? null;
     this.rivalSqueal = this.audio?.makeSqueal(0.10) ?? null;
+    // Stage music (see bgm.js): loaded per stage by loadStage, started on
+    // GO and faded at the flag by index.html, which owns the race shell.
+    this.bgm = this.audio ? makeBgm(audioCtx, this.audio.music, bgmEl) : null;
     this._prevYaw = { player: null, rival: null };  // per car: last angle, smoothed yaw
     this._wasBoosting = { player: false, rival: false };
     // Throttles the ongoing-scrape sound the same way contactfx throttles
@@ -493,6 +497,7 @@ export class Game {
     this.stageId = stageId;
     this.path = path;
     this.cfg = cfg;
+    this.bgm?.load(stageId);
 
     const mixed = SURFACE_SECTORS_BY_STAGE[stageId];
     const preset = mixed ? mixed.main : (SURFACE_PRESET_BY_STAGE[stageId] || 'circuit');
@@ -1490,7 +1495,7 @@ function conditionCarTexture(texture) {
   return Texture.from(canvas);
 }
 
-export async function boot({ stageId = 1, onReady, audioCtx } = {}) {
+export async function boot({ stageId = 1, onReady, audioCtx, bgmEl } = {}) {
   const app = new Application();
   await app.init({
     background: '#161a1e',
@@ -1557,7 +1562,7 @@ export async function boot({ stageId = 1, onReady, audioCtx } = {}) {
     src.update();
   }
 
-  const game = new Game(app, tex, cars, propSheet, audioCtx);
+  const game = new Game(app, tex, cars, propSheet, audioCtx, bgmEl);
   game.loadStage(stageId);
 
   app.ticker.add((ticker) => {

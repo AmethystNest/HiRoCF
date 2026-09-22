@@ -870,6 +870,12 @@
   // and an AudioContext created (or even just resumed) after an await has
   // already left that window on some engines (Safari/iOS especially).
   let audioCtx=null;
+  // The stage-music <audio> element, for the same reason: iOS only lets an
+  // element play() later from script if it has once played inside a tap,
+  // so START creates it and plays a 0.16 s silent clip on it right there
+  // (see src/audio/bgm.js). Base64 of that clip, 627 bytes of MP3.
+  let bgmEl=null;
+  const SILENT_MP3='data:audio/mpeg;base64,//NAxAAAAANIAAAAAExBTUUDAAkIAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/80LEAAAAA0gAAAAATEFNRQMACQgABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/80DEAAAAA0gAAAAATEFNRQMACQgABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP/zQsQAAAADSAAAAABMQU1FAwAJCAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP/zQMQAAAADSAAAAABMQU1FAwAJCAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//NCxAAAAANIAAAAAExBTUUDAAkIAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 
   // Nothing below this point runs until the player taps START -- boot()
   // does real work (PIXI init, asset decode for every car photo), and
@@ -883,7 +889,7 @@
       const {boot}=await import('./src/main.js');
       const {NITRO,PHYSICS}=await import('./src/config.js');
       const el=(id)=>document.getElementById(id);
-      const {game,app,stages}=await boot({stageId:1,audioCtx});
+      const {game,app,stages}=await boot({stageId:1,audioCtx,bgmEl});
       loading.classList.add('hide');
       const STAGE_IDS=Object.keys(stages).map(Number).sort((a,b)=>a-b);
       const LAST_STAGE=STAGE_IDS[STAGE_IDS.length-1];
@@ -952,7 +958,7 @@
           startCount.classList.remove('punch');
           void startCount.offsetWidth;
           startCount.classList.add('punch');
-          if(label==='GO!')game.audio?.go();
+          if(label==='GO!'){game.audio?.go();game.bgm?.start();}
           else game.audio?.countBeep(+label);
         }
         startCount.classList.toggle('go',go);
@@ -1032,6 +1038,8 @@
           // The finish supersedes it outright.
           lapPopupTimer=0;
           lapPopup.classList.remove('show');
+          // Music out at the flag, clear of the fanfare 1.9 s later.
+          if(finishDelay===0)game.bgm?.fadeOut(2.2);
           finishDelay+=dt;
           // Held back until the finish effect (render/finishfx.js) has run
           // its banner and title and cleared out of the way.
@@ -1064,6 +1072,8 @@
         clearBanners();
         finishOverlay.hidden=true;
         game.loadStage(id);
+        // Every caller is a tap: keep the music element playable for GO.
+        game.bgm?.prime();
         syncStageUI();
         syncPickLabel();
       };
@@ -1117,8 +1127,17 @@
         game.rivalEngine?.silence();
         game.playerSqueal?.silence();
         game.rivalSqueal?.silence();
+        game.bgm?.pause();
       };
-      const closePause=()=>{pauseOverlay.hidden=true;app.ticker.start()};
+      const closePause=()=>{pauseOverlay.hidden=true;app.ticker.start();game.bgm?.resume()};
+      // Leaving the page (app switch, lock screen) stops the race loop but
+      // not an <audio> element: the music would play on over the home
+      // screen. Stop it with the page, and pick it back up on return
+      // unless the pause card is what is waiting there.
+      document.addEventListener('visibilitychange',()=>{
+        if(document.hidden)game.bgm?.pause();
+        else if(pauseOverlay.hidden)game.bgm?.resume();
+      });
       pauseBtn.addEventListener('pointerdown',e=>{e.preventDefault();game.audio?.click();openPause()});
       el('pauseResume').addEventListener('pointerdown',e=>{e.preventDefault();game.audio?.click();closePause()});
       el('pauseRestart').addEventListener('pointerdown',e=>{
@@ -1175,7 +1194,7 @@
         });
       }
 
-      resumeFromTitle=()=>{app.ticker.start()};
+      resumeFromTitle=()=>{app.ticker.start();game.bgm?.prime()};
 
       window.__game=game;window.__app=app;
     } catch(err) {
@@ -1196,6 +1215,10 @@
       catch{audioCtx=null;}
     }
     if(audioCtx&&audioCtx.state==='suspended')audioCtx.resume();
+    if(!bgmEl){
+      try{bgmEl=new Audio(SILENT_MP3);const p=bgmEl.play();if(p&&p.catch)p.catch(()=>{});}
+      catch{bgmEl=null;}
+    }
     if(resumeFromTitle)resumeFromTitle();
     else startGame();
   });

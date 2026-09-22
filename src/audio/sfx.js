@@ -31,7 +31,18 @@ export function buildAudio(ctx) {
   limiter.attack.value = 0.003;
   limiter.release.value = 0.15;
   master.connect(limiter);
-  limiter.connect(ctx.destination);
+  // Last stage before the output, shared with the music bus below: a
+  // safety limiter only, well above where either side sits on its own, so
+  // it touches nothing but the odd peak where music and a crash coincide
+  // -- the two summed straight into the output could otherwise clip.
+  const out = ctx.createDynamicsCompressor();
+  out.threshold.value = -4;
+  out.knee.value = 4;
+  out.ratio.value = 12;
+  out.attack.value = 0.002;
+  out.release.value = 0.1;
+  out.connect(ctx.destination);
+  limiter.connect(out);
 
   let muted = false;
   try {
@@ -41,10 +52,18 @@ export function buildAudio(ctx) {
     // to sound on rather than fail the whole module over a preference.
   }
   master.gain.value = muted ? 0 : 1;
+  // Music has its own bus straight to the output, not through `master`:
+  // the limiter there is set for the game's own sounds, and hot, already
+  // mastered music through it would pump the engine up and down with the
+  // beat. The mute switch covers both.
+  const music = ctx.createGain();
+  music.gain.value = muted ? 0 : 1;
+  music.connect(out);
 
   function setMuted(v) {
     muted = !!v;
     master.gain.setTargetAtTime(muted ? 0 : 1, ctx.currentTime, 0.03);
+    music.gain.setTargetAtTime(muted ? 0 : 1, ctx.currentTime, 0.03);
     try {
       localStorage.setItem('hirocf_muted', muted ? '1' : '0');
     } catch {
@@ -63,120 +82,342 @@ export function buildAudio(ctx) {
     return buf;
   })();
 
-  /** A single oscillator note: attack, then an exponential decay to
-   *  silence. `freqEnd`, if given, sweeps the pitch across the note --
-   *  what turns a plain tone into a "whoosh" or a "horn" rise. `delay`
-   *  schedules it in the future on the AudioContext's own clock, which
-   *  is how every multi-note sound below is sequenced -- sample-accurate,
-   *  and it keeps this module free of setTimeout/JS-timer jitter. */
-  function tone({ freq = 440, freqEnd = null, type = 'sine', dur = 0.15, gain = 0.3, attack = 0.004, delay = 0 }) {
+  // --- one-shot toolkit ------------------------------------------------
+  /**
+   * A shared room for the one-shots: a convolution reverb on a generated
+   * impulse (stereo, decorrelated noise under a 0.5 s exponential decay
+   * that darkens as it goes), fed by a per-sound send. A dry beep is what
+   * made the old cues sound like a toy -- every arcade cabinet's are
+   * mixed into a space. Built once; the IR is 1.6 s.
+   */
+  const reverb = ctx.createConvolver();
+  reverb.buffer = (() => {
+    const sr = ctx.sampleRate, n = Math.round(1.6 * sr);
+    const buf = ctx.createBuffer(2, n, sr);
+    for (let c = 0; c < 2; c++) {
+      const d = buf.getChannelData(c);
+      let lp = 0;
+      for (let i = 0; i < n; i++) {
+        const t = i / sr;
+        // one-pole low-pass whose cutoff falls with time: bright early
+        // reflections, dull tail
+        const k = 0.9 * Math.exp(-t / 0.35) + 0.05;
+        lp += k * ((Math.random() * 2 - 1) - lp);
+        d[i] = lp * Math.exp(-t / 0.5) * (t < 0.012 ? t / 0.012 : 1);
+      }
+    }
+    return buf;
+  })();
+  const reverbReturn = ctx.createGain();
+  reverbReturn.gain.value = 0.55;
+  reverb.connect(reverbReturn);
+  reverbReturn.connect(master);
+
+  /**
+   * Level trim for whichever one-shot is being built (see `trimmed`): each
+   * cue is designed at full size and then set into the mix here, so its
+   * layers keep their balance with each other. Every node a cue makes is
+   * created synchronously inside its own call, so a module-level value
+   * read by outlet() is enough.
+   */
+  let cueLevel = 1;
+  function trimmed(db, fn) {
+    return (...args) => {
+      cueLevel = Math.pow(10, db / 20);
+      try { fn(...args); } finally { cueLevel = 1; }
+    };
+  }
+
+  /** Output stage for one sound: dry to the master, `send` of it to the
+   *  room, panned. Returns the node to connect the sound into. */
+  function outlet({ pan = 0, send = 0 } = {}) {
+    const inp = ctx.createGain();
+    inp.gain.value = cueLevel;
+    let tail = inp;
+    if (pan && ctx.createStereoPanner) {
+      const p = ctx.createStereoPanner();
+      p.pan.value = pan;
+      inp.connect(p);
+      tail = p;
+    }
+    tail.connect(master);
+    if (send > 0) {
+      const s = ctx.createGain();
+      s.gain.value = send;
+      tail.connect(s);
+      s.connect(reverb);
+    }
+    return inp;
+  }
+
+  /**
+   * One synth voice: `waves` oscillators (type, detune in cents, pan) at
+   * `freq`, an optional pitch drop from `freq * pitchFrom` over `pitchTime`
+   * (the "tick" at the front of an arcade bleep), a low-pass that opens to
+   * `cutoff` and falls back to `cutoffEnd`, and an attack/hold/decay
+   * envelope. Everything scheduled on the context clock from `delay`.
+   */
+  function synth({
+    freq, delay = 0, gain = 0.2, attack = 0.004, hold = 0.05, decay = 0.25,
+    waves = [['sawtooth', 0, 0]], cutoff = 4000, cutoffEnd = 800, q = 1,
+    pitchFrom = 1, pitchTime = 0.03, glideTo = null, send = 0.2,
+  }) {
     const t0 = ctx.currentTime + delay;
-    const osc = ctx.createOscillator();
-    osc.type = type;
-    osc.frequency.setValueAtTime(freq, t0);
-    if (freqEnd != null) osc.frequency.exponentialRampToValueAtTime(Math.max(1, freqEnd), t0 + dur);
+    const end = t0 + attack + hold + decay;
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass'; f.Q.value = q;
+    f.frequency.setValueAtTime(cutoff, t0);
+    f.frequency.setTargetAtTime(cutoffEnd, t0 + attack, (hold + decay) / 3);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.linearRampToValueAtTime(gain, t0 + attack);
+    g.gain.setValueAtTime(gain, t0 + attack + hold);
+    g.gain.exponentialRampToValueAtTime(0.0001, end);
+    f.connect(g);
+    g.connect(outlet({ send }));
+    for (const [type, cents, pan] of waves) {
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.detune.value = cents;
+      o.frequency.setValueAtTime(freq * pitchFrom, t0);
+      if (pitchFrom !== 1) o.frequency.exponentialRampToValueAtTime(freq, t0 + pitchTime);
+      if (glideTo) o.frequency.exponentialRampToValueAtTime(glideTo, end);
+      let node = o;
+      if (pan && ctx.createStereoPanner) {
+        const p = ctx.createStereoPanner();
+        p.pan.value = pan;
+        o.connect(p);
+        node = p;
+      }
+      node.connect(f);
+      o.start(t0);
+      o.stop(end + 0.05);
+    }
+  }
+
+  /** Seven-voice supersaw spread across the stereo field: the thick,
+   *  bright stab every arcade racer's cues are made of. */
+  const SUPERSAW = [
+    ['sawtooth', 0, 0], ['sawtooth', -11, -0.5], ['sawtooth', 11, 0.5],
+    ['sawtooth', -23, -0.85], ['sawtooth', 23, 0.85], ['square', -6, -0.25], ['square', 6, 0.25],
+  ];
+
+  /** Sub drop: a sine falling an octave or two, the "boom" under a hit. */
+  function boom({ from = 120, to = 40, dur = 0.45, gain = 0.4, delay = 0 }) {
+    const t0 = ctx.currentTime + delay;
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(from, t0);
+    o.frequency.exponentialRampToValueAtTime(to, t0 + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.linearRampToValueAtTime(gain, t0 + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(g);
+    g.connect(outlet());
+    o.start(t0);
+    o.stop(t0 + dur + 0.05);
+  }
+
+  /** Filtered noise with its filter swept from `f0` to `f1`: whooshes,
+   *  risers, air, debris, cymbal wash. */
+  function sweep({ f0 = 800, f1 = 4000, type = 'bandpass', q = 1, dur = 0.4, gain = 0.2, attack = 0.01, delay = 0, send = 0.2, pan = 0 }) {
+    const t0 = ctx.currentTime + delay;
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuffer; src.loop = true;
+    src.playbackRate.value = 0.8 + Math.random() * 0.4;
+    const f = ctx.createBiquadFilter();
+    f.type = type; f.Q.value = q;
+    f.frequency.setValueAtTime(f0, t0);
+    f.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t0 + dur);
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.0001, t0);
     g.gain.linearRampToValueAtTime(gain, t0 + attack);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    osc.connect(g);
-    g.connect(master);
-    osc.start(t0);
-    osc.stop(t0 + dur + 0.02);
+    src.connect(f); f.connect(g);
+    g.connect(outlet({ send, pan }));
+    src.start(t0, Math.random());
+    src.stop(t0 + dur + 0.05);
   }
 
-  /** A burst of filtered noise: a crash's crunch, a whoosh's air, a
-   *  rumble's grain -- the filter type/frequency is what tells them
-   *  apart, not the source. */
-  function noise({ dur = 0.2, gain = 0.4, filterType = 'bandpass', filterFreq = 1200, q = 0.8 }) {
-    const t0 = ctx.currentTime;
-    const src = ctx.createBufferSource();
-    src.buffer = noiseBuffer;
-    src.loop = true;
-    const filt = ctx.createBiquadFilter();
-    filt.type = filterType;
-    filt.frequency.value = filterFreq;
-    filt.Q.value = q;
+  /** FM bell: sine carrier, sine modulator at a non-integer ratio whose
+   *  index decays faster than the note -- the metallic strike dies first,
+   *  the tone rings on, which is what a bell does. */
+  function bell({ freq, delay = 0, gain = 0.2, dur = 0.9, ratio = 3.5, index = 3, send = 0.45, pan = 0 }) {
+    const t0 = ctx.currentTime + delay;
+    const car = ctx.createOscillator(); car.type = 'sine'; car.frequency.value = freq;
+    const mod = ctx.createOscillator(); mod.type = 'sine'; mod.frequency.value = freq * ratio;
+    const mg = ctx.createGain();
+    mg.gain.setValueAtTime(freq * index, t0);
+    mg.gain.exponentialRampToValueAtTime(freq * 0.05, t0 + dur * 0.5);
+    mod.connect(mg); mg.connect(car.frequency);
     const g = ctx.createGain();
-    g.gain.setValueAtTime(gain, t0);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.linearRampToValueAtTime(gain, t0 + 0.003);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    src.connect(filt);
-    filt.connect(g);
-    g.connect(master);
-    src.start(t0);
-    src.stop(t0 + dur + 0.02);
+    car.connect(g);
+    g.connect(outlet({ send, pan }));
+    car.start(t0); mod.start(t0);
+    car.stop(t0 + dur + 0.05); mod.stop(t0 + dur + 0.05);
   }
+
+  /** Metal: a handful of inharmonic partials struck together and ringing
+   *  down fast -- a panel taking a hit rather than a drum. */
+  function clank({ base = 480, gain = 0.12, dur = 0.28, delay = 0, send = 0.15 }) {
+    const ratios = [1, 2.31, 3.87, 5.43, 7.19];
+    ratios.forEach((r, i) => {
+      const t0 = ctx.currentTime + delay;
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = base * r * (0.97 + Math.random() * 0.06);
+      const g = ctx.createGain();
+      const d = dur / (1 + i * 0.35);
+      g.gain.setValueAtTime(gain / (1 + i * 0.5), t0);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + d);
+      o.connect(g);
+      g.connect(outlet({ send, pan: (i % 2 ? 0.3 : -0.3) }));
+      o.start(t0);
+      o.stop(t0 + d + 0.05);
+    });
+  }
+
+  const hz = (midi) => 440 * Math.pow(2, (midi - 69) / 12);
 
   // --- one-shots, in roughly the order they occur in a race ------------
 
   /** A light UI tick -- menu buttons only (pause, stage pick, VIEW, the
    *  result card's NEXT STAGE), never the driving pads: those fire every
    *  frame they're held, and a click on every one would be a buzz, not
-   *  a tick. */
+   *  a tick. A short glassy blip with a hair of air on it. */
   function click() {
-    tone({ freq: 900, type: 'square', dur: 0.045, gain: 0.10, attack: 0.001 });
+    synth({ freq: 2093, pitchFrom: 1.5, pitchTime: 0.012, waves: [['triangle', 0, 0]], gain: 0.10, attack: 0.001, hold: 0.004, decay: 0.05, cutoff: 9000, cutoffEnd: 5000, send: 0.12 });
+    sweep({ f0: 7000, f1: 5000, type: 'highpass', q: 0.7, dur: 0.03, gain: 0.05, attack: 0.001, send: 0 });
   }
 
-  /** One beep per countdown numeral, pitched a little higher as it counts
-   *  down to zero -- `n` is the numeral just shown (3, 2, 1). */
-  function countBeep(n) {
-    tone({ freq: 480 + (3 - n) * 90, type: 'sine', dur: 0.13, gain: 0.30 });
+  /**
+   * One per countdown numeral (3, 2, 1): the same note each time -- the
+   * arcade convention, so GO's jump an octave up is the event -- as a
+   * supersaw stab with a pitch tick at the front, an octave-down square
+   * underneath for weight, a filter that snaps shut, and room behind it.
+   */
+  const COUNT_NOTE = 76;   // E5
+  function countBeep() {
+    const f = hz(COUNT_NOTE);
+    synth({ freq: f, waves: SUPERSAW, gain: 0.075, attack: 0.003, hold: 0.09, decay: 0.28, cutoff: 7500, cutoffEnd: 1400, q: 2, pitchFrom: 1.06, pitchTime: 0.02, send: 0.35 });
+    synth({ freq: f / 2, waves: [['square', 0, 0]], gain: 0.10, attack: 0.003, hold: 0.08, decay: 0.2, cutoff: 2500, cutoffEnd: 600, send: 0.1 });
+    boom({ from: 160, to: 55, dur: 0.18, gain: 0.22 });
   }
 
-  /** The green light. Distinct in both pitch and shape from the count
-   *  beeps -- a rising horn, not another dot. */
+  /**
+   * GO: the octave above the count, as a full chord (root, fifth, octave)
+   * held and opened up, over a sub drop and a rising air sweep, with a
+   * long tail in the room. Heard as the release of the three beeps before
+   * it rather than as a fourth.
+   */
   function go() {
-    tone({ freq: 520, freqEnd: 880, type: 'sawtooth', dur: 0.30, gain: 0.34 });
+    const r = COUNT_NOTE + 12;
+    [0, 7, 12].forEach((iv, i) => synth({
+      freq: hz(r + iv), waves: SUPERSAW, gain: 0.055 - i * 0.008, attack: 0.004, hold: 0.32, decay: 0.75,
+      cutoff: 9000, cutoffEnd: 2200, q: 1.5, pitchFrom: 1.03, pitchTime: 0.03, send: 0.5,
+    }));
+    synth({ freq: hz(r - 24), waves: [['sawtooth', 0, -0.2], ['sawtooth', 8, 0.2]], gain: 0.10, attack: 0.004, hold: 0.3, decay: 0.6, cutoff: 1800, cutoffEnd: 300, send: 0.2 });
+    boom({ from: 150, to: 38, dur: 0.7, gain: 0.45 });
+    sweep({ f0: 600, f1: 7000, type: 'bandpass', q: 0.9, dur: 0.55, gain: 0.12, attack: 0.02, send: 0.4 });
   }
 
   /**
    * Nitro firing. `strength` scales the player's own press (1) down for
    * the rival's (see main.js) -- the player's own nitro is a foreground
-   * event, the rival's is ambience.
+   * event, the rival's is ambience. A pressurised hiss sweeping up (the
+   * valve), a low thump (the charge hitting), and a filtered rumble that
+   * rolls off with it (the flame).
    */
   function whoosh(strength = 1) {
-    noise({ dur: 0.40, gain: 0.24 * strength, filterType: 'bandpass', filterFreq: 1700, q: 0.6 });
-    tone({ freq: 190, freqEnd: 55, type: 'sawtooth', dur: 0.38, gain: 0.16 * strength, attack: 0.01 });
+    sweep({ f0: 350, f1: 4200, type: 'bandpass', q: 1.3, dur: 0.5, gain: 0.26 * strength, attack: 0.015, send: 0.18 });
+    sweep({ f0: 9000, f1: 3000, type: 'highpass', q: 0.7, dur: 0.22, gain: 0.08 * strength, attack: 0.004, send: 0.1 });
+    boom({ from: 110, to: 42, dur: 0.35, gain: 0.3 * strength });
+    synth({ freq: 55, glideTo: 38, waves: [['sawtooth', 0, -0.3], ['sawtooth', 13, 0.3]], gain: 0.12 * strength, attack: 0.02, hold: 0.12, decay: 0.45, cutoff: 900, cutoffEnd: 180, send: 0.1 });
   }
 
   /** A wall or a rival, hit hard enough to be an impact rather than a
    *  graze. `strength` is player.contact.force convention (0..1) -- see
-   *  contact.js -- scaled down again for the rival's own hits. */
+   *  contact.js -- scaled down again for the rival's own hits. A sub
+   *  thump for the mass, a low-passed crunch for the body, a ring of
+   *  bent metal and a spray of high debris on top. */
   function crash(strength = 1) {
-    noise({ dur: 0.20, gain: 0.46 * strength, filterType: 'lowpass', filterFreq: 900, q: 0.4 });
-    tone({ freq: 95, type: 'sine', dur: 0.16, gain: 0.32 * strength, attack: 0.001 });
+    const s = Math.max(0.05, strength);
+    boom({ from: 95, to: 32, dur: 0.3, gain: 0.42 * s });
+    sweep({ f0: 2600, f1: 350, type: 'lowpass', q: 0.6, dur: 0.28, gain: 0.42 * s, attack: 0.002, send: 0.15 });
+    clank({ base: 380 + Math.random() * 180, gain: 0.07 * s, dur: 0.32, send: 0.18 });
+    sweep({ f0: 6500, f1: 3500, type: 'highpass', q: 0.8, dur: 0.16, gain: 0.10 * s, attack: 0.001, delay: 0.012, send: 0.1 });
   }
 
   /** A quieter, coarser variant for the ongoing scrape rather than the
    *  first hit -- called sparingly by the caller (see main.js's
-   *  contactSfxAccum), not once per frame of contact. */
+   *  contactSfxAccum), not once per frame of contact. Metal on concrete:
+   *  noise through a few narrow, inharmonic bands, which is what gives a
+   *  grind its screech instead of a hiss. */
   function scrape(strength = 1) {
-    noise({ dur: 0.10, gain: 0.14 * strength, filterType: 'bandpass', filterFreq: 2200, q: 1.4 });
+    const jitter = 0.9 + Math.random() * 0.2;
+    [1900, 3150, 4700].forEach((f, i) => sweep({
+      f0: f * jitter, f1: f * jitter * 0.93, type: 'bandpass', q: 9, dur: 0.13, gain: (0.16 - i * 0.03) * strength, attack: 0.004, send: 0.08, pan: i - 1 ? 0.2 : -0.2,
+    }));
+    sweep({ f0: 1200, f1: 600, type: 'lowpass', q: 0.5, dur: 0.1, gain: 0.08 * strength, attack: 0.003, send: 0 });
   }
 
-  /** Checkpoint lap. */
+  /** Checkpoint lap: two bell strikes a fourth apart, bright and quick,
+   *  ringing on in the room -- a pass, not an alarm. */
   function lapChime() {
-    tone({ freq: 784, type: 'triangle', dur: 0.14, gain: 0.26 });
-    tone({ freq: 1047, type: 'triangle', dur: 0.20, gain: 0.26, delay: 0.085 });
+    bell({ freq: hz(83), gain: 0.16, dur: 0.8, pan: -0.15 });                 // B5
+    bell({ freq: hz(88), gain: 0.17, dur: 1.1, delay: 0.09, pan: 0.15 });     // E6
+    synth({ freq: hz(64), waves: SUPERSAW, gain: 0.035, attack: 0.005, hold: 0.06, decay: 0.3, cutoff: 5000, cutoffEnd: 900, send: 0.3, delay: 0.09 });
   }
 
-  /** Final lap. A harder, more urgent double-beep than the lap chime,
-   *  not a prettier version of it -- the visual banner it lines up with
-   *  is red and insistent for the same reason. */
+  /** Final lap. Harder and more urgent than the lap chime, not a
+   *  prettier version of it -- the visual banner it lines up with is red
+   *  and insistent for the same reason: two minor-chord stabs, a boom
+   *  under the first, and a riser into the second. */
   function finalLap() {
-    tone({ freq: 660, type: 'square', dur: 0.10, gain: 0.28 });
-    tone({ freq: 660, type: 'square', dur: 0.10, gain: 0.28, delay: 0.14 });
+    const stab = (delay, root) => [0, 3, 7].forEach((iv) => synth({
+      freq: hz(root + iv), waves: SUPERSAW, gain: 0.05, attack: 0.003, hold: 0.09, decay: 0.3,
+      cutoff: 8000, cutoffEnd: 1500, q: 2, pitchFrom: 1.04, pitchTime: 0.02, send: 0.35, delay,
+    }));
+    stab(0, 69);      // A minor
+    stab(0.2, 69);
+    synth({ freq: hz(45), waves: [['square', 0, 0]], gain: 0.10, attack: 0.003, hold: 0.3, decay: 0.3, cutoff: 1200, cutoffEnd: 300, send: 0.1 });
+    boom({ from: 140, to: 40, dur: 0.4, gain: 0.35 });
+    sweep({ f0: 800, f1: 6000, type: 'bandpass', q: 1.2, dur: 0.22, gain: 0.08, attack: 0.15, send: 0.3 });
   }
 
-  /** The finish. A rising major arpeggio for a win, a falling minor one
-   *  for anything else -- same grade split finishfx.js draws the
-   *  celebration in. */
+  /** The finish. For a win, a rising supersaw arpeggio that lands on a
+   *  held major chord with a cymbal-like wash and a boom; for anything
+   *  else, a slow falling minor pad -- same grade split finishfx.js draws
+   *  the celebration in. */
   function fanfare(win) {
-    const notes = win ? [523, 659, 784, 1047] : [392, 349, 311];
-    const type = win ? 'triangle' : 'sine';
-    const gain = win ? 0.30 : 0.26;
-    const step = win ? 0.10 : 0.15;
-    notes.forEach((freq, i) => tone({ freq, type, dur: win ? 0.28 : 0.42, gain, delay: i * step }));
+    if (win) {
+      const root = 64;   // E4
+      [0, 4, 7, 12].forEach((iv, i) => synth({
+        freq: hz(root + 12 + iv), waves: SUPERSAW, gain: 0.05, attack: 0.003, hold: 0.05, decay: 0.22,
+        cutoff: 7000, cutoffEnd: 1800, q: 1.5, send: 0.35, delay: i * 0.09,
+      }));
+      const land = 0.38;
+      [0, 4, 7, 12, 16].forEach((iv) => synth({
+        freq: hz(root + iv), waves: SUPERSAW, gain: 0.04, attack: 0.01, hold: 0.7, decay: 1.2,
+        cutoff: 6500, cutoffEnd: 1600, q: 1.2, send: 0.5, delay: land,
+      }));
+      synth({ freq: hz(root - 24), waves: [['sawtooth', 0, 0], ['sawtooth', 9, 0]], gain: 0.10, attack: 0.01, hold: 0.7, decay: 1.0, cutoff: 1500, cutoffEnd: 250, send: 0.2, delay: land });
+      boom({ from: 130, to: 36, dur: 0.8, gain: 0.42, delay: land });
+      sweep({ f0: 9000, f1: 5000, type: 'highpass', q: 0.6, dur: 1.6, gain: 0.07, attack: 0.005, delay: land, send: 0.4 });
+      bell({ freq: hz(root + 28), gain: 0.08, dur: 1.4, delay: land, send: 0.6 });
+    } else {
+      const root = 52;   // E3, minor
+      [[0, 0], [3, 0.12], [7, 0.24]].forEach(([iv, d]) => synth({
+        freq: hz(root + 12 + iv), glideTo: hz(root + 11 + iv), waves: SUPERSAW, gain: 0.04, attack: 0.08, hold: 0.5, decay: 1.1,
+        cutoff: 2600, cutoffEnd: 500, q: 1, send: 0.5, delay: d,
+      }));
+      synth({ freq: hz(root - 12), waves: [['sawtooth', 0, 0]], gain: 0.09, attack: 0.05, hold: 0.5, decay: 1.0, cutoff: 700, cutoffEnd: 150, send: 0.2 });
+      boom({ from: 80, to: 30, dur: 0.9, gain: 0.3 });
+    }
   }
 
   // --- engine: the one continuous sound --------------------------------
@@ -966,10 +1207,24 @@ export function buildAudio(ctx) {
     };
   }
 
+  // Where each cue sits in the mix, measured as the loudest 100 ms against
+  // the synthesised cues these replaced: the start and finish cues and the
+  // lap calls 3-8 dB up on those (they were too small to carry, and now
+  // play over music), nitro and impacts only 4-5 dB up, since they fire
+  // over and over in a race and must not wear.
   return {
     get muted() { return muted; },
     setMuted,
-    click, countBeep, go, whoosh, crash, scrape, lapChime, finalLap, fanfare,
+    music,
+    click,
+    countBeep: trimmed(-4.5, countBeep),
+    go: trimmed(-4.5, go),
+    whoosh: trimmed(-5, whoosh),
+    crash: trimmed(-4, crash),
+    scrape,
+    lapChime: trimmed(-2, lapChime),
+    finalLap: trimmed(-3.5, finalLap),
+    fanfare: (win) => trimmed(win ? -6 : 0, fanfare)(win),
     makeEngine, makeV8Engine, makeSampledV8Engine, makeSqueal,
   };
 }

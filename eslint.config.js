@@ -19,6 +19,10 @@ export default [
         requestAnimationFrame: 'readonly',
         addEventListener: 'readonly',
         localStorage: 'readonly',
+        Audio: 'readonly',
+        location: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
       },
     },
     rules: {

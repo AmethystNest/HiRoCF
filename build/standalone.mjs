@@ -7,7 +7,7 @@
  * -- see build/index.artifact.html's own <script type="module"> for why
  * that path fails there (module imports are blocked outside http(s)).
  */
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as esbuild from 'esbuild';
@@ -52,10 +52,24 @@ const result = await esbuild.build({
 rmSync(tmp, { recursive: true, force: true });
 const bundle = result.outputFiles[0].text;
 
+// Stage music, if prepared locally (build/tools/make-bgm.mjs; assets/bgm/ is
+// git-ignored). Each track goes in as inert base64 text in a non-script
+// <script> type, which the browser neither parses nor runs; src/audio/bgm.js
+// turns the current stage's into a blob: URL on demand.
+const bgmDir = join(root, 'assets/bgm');
+const bgm = existsSync(bgmDir)
+  ? readdirSync(bgmDir)
+      .map((f) => /^stage(\d+)\.mp3$/.exec(f))
+      .filter(Boolean)
+      .map((m) => `<script type="application/octet-stream" id="bgm-${m[1]}">${readFileSync(join(bgmDir, m[0])).toString('base64')}</script>`)
+  : [];
+console.log(`bgm tracks embedded: ${bgm.length}`);
+
 const out = `<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"><title>HiRoCF Top-Down Racer</title>
 ${style}
 </head><body${bodyTag}>
 ${body}
+${bgm.join('\n')}
 <script>${bundle}</script>
 </body></html>
 `;

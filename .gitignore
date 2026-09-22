@@ -3,3 +3,7 @@ node_modules/
 .claude/worktrees/
 build/index.artifact.html
 build/index.standalone.html
+
+# Stage BGM: commercial recordings, prepared locally by build/tools/make-bgm.mjs
+# and embedded at build time -- never committed.
+assets/bgm/
