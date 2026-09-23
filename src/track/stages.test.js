@@ -165,7 +165,7 @@ describe('stage 2 course', () => {
     expect(Math.hypot(b[0] - a[0], b[1] - a[1])).toBeLessThan(path.spacing * 1.6);
   });
 
-  it('is a street grid: eight square junctions and nothing tighter', () => {
+  it('is a street grid: fourteen square junctions and nothing tighter', () => {
     const corners = [];
     let run = null;
     for (let i = 0; i < n * 2; i++) {
@@ -174,7 +174,7 @@ describe('stage 2 course', () => {
       else if (run) { if (run.start < n) corners.push(run); run = null; }
       if (i >= n && !run) break;
     }
-    expect(corners.length).toBe(8);
+    expect(corners.length).toBe(14);
     // each one turns a quarter circle, give or take the resampling
     for (const c of corners) {
       const arc = c.len * path.spacing;
@@ -191,7 +191,8 @@ describe('stage 2 course', () => {
   it('is mostly straight, the way city blocks are', () => {
     let straight = 0;
     for (let i = 0; i < n; i++) if (path.curvature[i] < 0.08) straight++;
-    expect(straight / n).toBeGreaterThan(0.7);
+    // (0.65 with the crank, the block and the staircase: fourteen corners)
+    expect(straight / n).toBeGreaterThan(0.6);
   });
 
   it('keeps every pair of stretches clear of the road swath', () => {

@@ -234,20 +234,21 @@ export const RACE = {
  * they are spent as each burst runs out.
  */
 /**
- * Rival strength. NORMAL is the game as every stage was tuned: its
- * multipliers are 1 and change nothing. The others scale only the rival's
- * top speed and acceleration -- what DustRacing2D's difficulty does to its
- * AI as well -- so its line, braking points and drift stay the ones each
- * stage was tuned around. Values measured with the lap harness, see the
- * difficulty test in rival.test.js for what they come to per stage.
+ * Rival strength. Scales only the rival's top speed and acceleration --
+ * what DustRacing2D's difficulty does to its AI as well -- so its line,
+ * braking points and drift stay the ones each stage was tuned around.
+ *
+ * NORMAL is what was EASY (asked for: "today's EASY is the base"), measured
+ * at 8-10% slower a lap than the stages as tuned. HARD is the stages
+ * exactly as tuned (multipliers 1) and opens once every stage is cleared
+ * (records.js). The old HARD (+5% on top) is gone with the old EASY.
  */
 export const DIFFICULTY = {
-  easy: { label: 'EASY', speed: 0.9, accel: 0.85 },
-  normal: { label: 'NORMAL', speed: 1, accel: 1 },
-  hard: { label: 'HARD', speed: 1.05, accel: 1.12 },
+  normal: { label: 'NORMAL', speed: 0.9, accel: 0.85 },
+  hard: { label: 'HARD', speed: 1, accel: 1 },
 };
 
-/** The rival's tuning for a stage at a difficulty (NORMAL: unchanged). */
+/** The rival's tuning for a stage at a difficulty (HARD: as tuned). */
 export function rivalTuning(rival, difficulty = 'normal') {
   const d = DIFFICULTY[difficulty] || DIFFICULTY.normal;
   if (d.speed === 1 && d.accel === 1) return rival;
@@ -298,9 +299,9 @@ export const STAGES = {
     // through them. The wall stays where it was before, at wallHalf, still
     // tested with the car's drawn body like every other stage.
     barrierAtWallHalf: true,
-    // Squeeze the roadside in on the inside of the tight corners rather
-    // than let it fold (see main.js `fold`).
-    foldInside: true,
+    // (No foldInside here: squeezing the kerb in round the inside of the
+    // 520 corners was tried and asked back -- the full-width kerb meeting
+    // in a square corner reads better on a circuit.)
     // 710 -> 689 (-3%): the player's lap here went 17.1 -> 18.0s with the
     // accel change and this rival's only 17.1 -> 17.5s, which turned a
     // dead-even stage into a 0.5s deficit. Measured back to 18.0s.

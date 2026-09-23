@@ -258,7 +258,9 @@ export class Game {
     // it is a different car on every stage -- a saloon, a truck -- and
     // none of them is a V8 like this.
     this.playerEngine = this.audio?.makeSampledV8Engine(0.34) ?? null;
-    this.rivalEngine = this.audio?.makeEngine(0.11) ?? null;
+    // the recorded engine, lower and further off (see sfx.js makeRivalEngine);
+    // 0.26 measures level with the synthesised voice it replaced at 0.11
+    this.rivalEngine = this.audio?.makeRivalEngine(0.26) ?? null;
     // Tyre squeal, one voice per car (see makeSqueal and tyreSlip). The
     // rival's ceiling is lower for the same reason its engine's is: the car
     // being driven is the foreground, the other one is the scene.
@@ -588,10 +590,13 @@ export class Game {
     // Every sector's terrain goes into one container drawn under ALL of
     // the sector roads. They are siblings otherwise, and on a course that
     // crosses over itself the later sector's ground would sit on top of
-    // the earlier sector's road.
+    // the earlier sector's road. It is handed to the piece that lays the
+    // ground plane, as that piece's underlay (see below): parented to the
+    // world before the sectors, as it was, it sat UNDER the ground plane,
+    // which covered it completely -- stage 5's pass never showed its
+    // hillside, only the town's bare earth.
     const terrainLayer = new Container();
     terrainLayer.label = 'terrain';
-    this.world.addChild(terrainLayer);
 
     // The raised road is built into its own container so it can fade as a
     // whole -- see deckRuns() for why it cannot simply be re-laid over a
@@ -712,18 +717,29 @@ export class Game {
       };
     }
 
-    // Ground patches are variation in the ground, so on a single-surface
-    // stage they go in under the road with it. Laid over the finished
+    // Ground patches are variation in the ground, so they go in under the
+    // road with it. Laid over the finished
     // surface, as they were, a patch set beside one leg of a switchback
     // smeared a translucent stain across the next leg's verge and rail.
     let groundUnder = null;
     const patchDef = LAYOUTS[stageId]?.patches;
-    if (patchDef && !mixed) {
+    if (patchDef) {
       groundUnder = buildGroundPatches(path, this.tex, {
-        edge: surfaceExtent(cfg.roadHalf, preset), seed: stageId, widen,
+        edge: mixed
+          ? Math.max(...mixed.sectors.map((sec) => surfaceExtent(cfg.roadHalf, sec.preset)))
+          : surfaceExtent(cfg.roadHalf, preset),
+        seed: stageId, widen,
         count: patchDef.count, names: patchDef.textures,
       });
     }
+
+    // Over the ground plane, under every road: sector terrain, then the
+    // town or the ground patches.
+    const groundExtras = new Container();
+    groundExtras.label = 'ground-extras';
+    groundExtras.addChild(terrainLayer);
+    if (city) groundExtras.addChild(city.under.layer);
+    else if (groundUnder) groundExtras.addChild(groundUnder);
 
     let groundPlaneDone = false;
     for (const sec of sectors) {
@@ -748,7 +764,7 @@ export class Game {
           skipJunctionAt: up ? null : (k) => this.underDeck(
             path.points[k][0], path.points[k][1], k,
           ),
-          underlay: !up && !groundPlaneDone ? (city ? city.under.layer : groundUnder) : null,
+          underlay: !up && !groundPlaneDone ? groundExtras : null,
           gaps: city?.gaps,
           crossroads: city?.crossroads,
         });
@@ -792,13 +808,6 @@ export class Game {
 
     if (city) this.world.addChild(city.barricades);
 
-    if (layout?.patches && mixed) {
-      this.world.addChild(buildGroundPatches(path, this.tex, {
-        edge, seed: stageId, widen,
-        count: layout.patches.count,
-        names: layout.patches.textures,
-      }));
-    }
 
     // Car sizes are authored in SCREEN pixels (carried over from the Canvas
     // build, where cars were drawn unscaled over a scaled world). Convert to

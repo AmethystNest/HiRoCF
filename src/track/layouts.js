@@ -149,14 +149,17 @@ export const LAYOUTS = {
     //
     // The course is one loop of this street grid. Every straight of it lies
     // on one of these lines, so every corner is a real junction (the street
-    // the course turns off carries straight on) and the longer straights are
-    // crossed by streets of their own. Lines are world coordinates, read off
-    // the course's own corners: x = -1460, 1460, 4160, 6980 and y = 0, 3020,
-    // 4020, 6840. The others are laid ~1400-1500 apart between them, which
-    // leaves every block at least 450 deep between its pavements. y = 3020
-    // and y = 4020 only run on the side of x = 1460 where the course uses
-    // them -- carried across, they would run 1,000 apart, a block of nothing
-    // between two pavements. The outermost lines frame the ground plane.
+    // the course turns off carries straight on) and several straights are
+    // crossed by streets of their own. The course's lines are read off its
+    // corners: x = -3680, -1660, -280, 2140, 4160, 4760, 6480 and
+    // y = 0, 2220, 4220, 5640, 6240, 7140, 9160; the outermost lines frame
+    // the ground plane.
+    //
+    // Where two of them run too close to hold a block between them they
+    // are cut short instead of carried on: x = 4160 and x = 4760 are 600
+    // apart, so one runs north of y = 2220 and the other south of 4220;
+    // y = 5640 / 6240 / 7140 likewise stop where the next takes over, and
+    // x = -280 stops at y = 2220 rather than crossing the start line.
     //
     // No kerbside scatter, landmarks or ground patches: the town replaces
     // them. Lighting columns stay (buildProps' LAMP_PITCH), moved onto the
@@ -164,22 +167,24 @@ export const LAYOUTS = {
     cityGrid: {
       streetHalf: 230,
       streets: [
-        { x: -4300, from: -4000, to: 10500 },
-        { x: -1460, from: -4000, to: 10500 },
-        { x: 1460, from: -4000, to: 10500 },
-        { x: 4160, from: -4000, to: 10500 },
-        { x: 6980, from: -4000, to: 10500 },
-        { x: 9800, from: -4000, to: 10500 },
-        { y: -2900, from: -5000, to: 10500 },
-        { y: -1450, from: -5000, to: 10500 },
-        { y: 0, from: -5000, to: 10500 },
-        { y: 1510, from: -5000, to: 10500 },
-        { y: 3020, from: 1460, to: 10500 },
-        { y: 4020, from: -5000, to: 1460 },
-        { y: 5430, from: -5000, to: 10500 },
-        { y: 6840, from: -5000, to: 10500 },
-        { y: 8250, from: -5000, to: 10500 },
-        { y: 9700, from: -5000, to: 10500 },
+        { x: -5500, from: -4000, to: 13000 },
+        { x: -3680, from: -4000, to: 13000 },
+        { x: -1660, from: -4000, to: 13000 },
+        { x: -280, from: 2220, to: 13000 },
+        { x: 2140, from: -4000, to: 13000 },
+        { x: 4160, from: -4000, to: 2220 },
+        { x: 4760, from: 4220, to: 13000 },
+        { x: 6480, from: -4000, to: 13000 },
+        { x: 8300, from: -4000, to: 13000 },
+        { y: -1700, from: -7500, to: 10500 },
+        { y: 0, from: -7500, to: 10500 },
+        { y: 2220, from: -7500, to: 10500 },
+        { y: 4220, from: -7500, to: 10500 },
+        { y: 5640, from: -7500, to: 2140 },
+        { y: 6240, from: 4760, to: 10500 },
+        { y: 7140, from: -7500, to: 4760 },
+        { y: 9160, from: -7500, to: 10500 },
+        { y: 10900, from: -7500, to: 10500 },
       ],
     },
     sections: [],

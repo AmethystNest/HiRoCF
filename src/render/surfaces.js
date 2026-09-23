@@ -227,8 +227,8 @@ export const SURFACE_PRESETS = {
    * quietly push every kerbside prop on the city streets outward too.
    */
   gt_circuit: {
+    // (no terrain band: it would be the ground plane's own earth again)
     ground: 'dirt', groundScale: 2.2, groundTint: 0x767c84,
-    terrain: 1600, terrainRepeat: 7, terrainV: 1 / 0.0011,
     asphalt: { texture: 'road_asphalt', uRepeat: 3.4, vPer: 1 / 540, tint: 0x9aa0a7 },
     ruts: { offset: 92, width: 78, alpha: 0.26, vPer: 1 / 950 },
     edgeLine: { inset: 15, width: 13, tint: 0xffffff, alpha: 0.95 },
@@ -242,8 +242,8 @@ export const SURFACE_PRESETS = {
   },
 
   gt_city: {
+    // (no terrain band: it would be the ground plane's own earth again)
     ground: 'dirt', groundScale: 2.2, groundTint: 0x767c84,
-    terrain: 1600, terrainRepeat: 7, terrainV: 1 / 0.0011,
     asphalt: { texture: 'road_asphalt', uRepeat: 3, vPer: 1 / 520, tint: 0xa6abb2 },
     ruts: { offset: 86, width: 74, alpha: 0.4, vPer: 1 / 900 },
     edgeLine: { inset: 14, width: 11, tint: 0xffffff, alpha: 0.85 },
@@ -262,7 +262,7 @@ export const SURFACE_PRESETS = {
 
   gt_touge: {
     ground: 'grass_dry', groundScale: 1.5, groundTint: 0x87906b,
-    terrain: 1600, terrainRepeat: 6, terrainV: 1 / 0.0009,
+    terrain: 1600,
     asphalt: { texture: 'road_asphalt', uRepeat: 2.6, vPer: 1 / 520, tint: 0xc3bfb8 },
     ruts: { offset: 70, width: 62, alpha: 0.34, vPer: 1 / 900 },
     edgeLine: { inset: 11, width: 9, tint: 0xf0ead8, alpha: 0.8 },
@@ -281,7 +281,8 @@ export const SURFACE_PRESETS = {
 
   gt_highway: {
     ground: 'dirt', groundScale: 2.4, groundTint: 0x4a5058,
-    terrain: 1600, terrainRepeat: 7, terrainV: 1 / 0.0011,
+    // No terrain band of its own: it never showed (see main.js groundExtras)
+    // and the expressway has always run over the town's ground.
     asphalt: { texture: 'road_asphalt', uRepeat: 4.2, vPer: 1 / 600, tint: 0x9fa5aa },
     ruts: { offset: 96, width: 74, alpha: 0.22, vPer: 1 / 1000 },
     edgeLine: { inset: 16, width: 12, tint: 0xf7f7f3, alpha: 0.95 },
@@ -490,12 +491,20 @@ export function buildSurface(path, tex, {
   // built with the deck it paints a swathe of hillside over whatever the
   // bridge is flying above.
   if (P.terrain && !noTerrain) {
-    faded((r, am) => (terrainLayer ?? layer).addChild(ribbonMesh(path, tex[P.ground], {
-      ...r, ...absV,
-      innerOffset: -P.terrain, outerOffset: P.terrain,
-      uInner: 0, uOuter: P.terrainRepeat ?? 9, vPerWorldUnit: 1 / (P.terrainV ?? 900),
-      tint: P.groundTint, alpha: am,
-    })));
+    // Feathered: two wider, fainter copies underneath, so the band's edge
+    // melts into the ground around it instead of stopping on a line.
+    // Mapped flat onto the world at the ground plane's own scale, so it is
+    // the same ground stage 3 lies on rather than a strip of it bent round
+    // every hairpin (which smeared it into radial streaks).
+    const tile = (tex[P.ground]?.width || 256) * (P.groundScale ?? 1.6);
+    for (const [extra, a] of [[520, 0.22], [260, 0.5], [0, 1]]) {
+      const half = P.terrain + extra;
+      faded((r, am) => (terrainLayer ?? layer).addChild(ribbonMesh(path, tex[P.ground], {
+        ...r, planar: tile,
+        innerOffset: -half, outerOffset: half,
+        tint: P.groundTint, alpha: am * a,
+      })));
+    }
   }
 
   // --- elevated expressway under-deck / cast shadow ---
@@ -649,10 +658,10 @@ export function buildSurface(path, tex, {
       crossSites.push([path.wrap(kc - c), 'approach', path.wrap(kc - sg)]);
       crossSites.push([path.wrap(kc + c), 'oncoming', path.wrap(kc + sg)]);
     }
-    // A corner's crossing that would land within a few car lengths of a
-    // crossroads' own goes: on a short block the two were a pair of
-    // crossings and a pair of signals almost on top of each other.
-    const gapIdx = Math.round(700 / path.spacing);
+    // A corner's crossing that would land within ~1,000 of a crossroads'
+    // own goes: on a short block the two were a pair of crossings and a
+    // pair of signals almost on top of each other.
+    const gapIdx = Math.round(1000 / path.spacing);
     const apart = (a, b) => Math.min(path.wrap(a - b), path.wrap(b - a));
     for (let i = sites.length - 1; i >= 0; i--) {
       if (crossSites.some((c) => apart(c[0], sites[i][0]) < gapIdx)) sites.splice(i, 1);
@@ -1581,10 +1590,9 @@ export function buildTunnelStructure(path, { roadHalf = 300, wallHalf = 355 } = 
  * lying across the carriageway, stacked along it, which from above is a
  * ladder of stop lines rather than a crossing.
  *
- * `stop` adds a stop line for one direction of traffic: 'approach' is ours,
- * behind the crossing on the left-hand lane (traffic keeps left; the
- * path's +normal is the driver's RIGHT), 'oncoming' the other way's,
- * beyond it on the right-hand lane.
+ * `stop: 'approach'` adds the driver's stop line, behind the crossing on
+ * the left-hand lane (traffic keeps left; the path's +normal is the
+ * driver's RIGHT).
  */
 function paintCrossing(g, path, k, half, { depth = 240, stripe = 30, gap = 30, stop = null } = {}) {
   const nx = path.normals[k * 2], ny = path.normals[k * 2 + 1];
@@ -1604,8 +1612,10 @@ function paintCrossing(g, path, k, half, { depth = 240, stripe = 30, gap = 30, s
     quad(l0, l0 + stripe, -depth / 2, depth / 2, 0.88);
   }
   const back = depth / 2 + 70;
+  // Only ever the driver's own, BEFORE the crossing. The oncoming lane's
+  // (beyond the crossing, on the right) is where a real one is, but from
+  // this seat it reads as a stop line on the far side of the zebra.
   if (stop === 'approach') quad(-half, -4, -back - 22, -back, 0.9);
-  if (stop === 'oncoming') quad(4, half, back, back + 22, 0.9);
 }
 
 /**

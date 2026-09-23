@@ -628,16 +628,19 @@ export function buildProps(path, sheet, shadowTex, {
   // one single unit inside the reach guard (357 + a 40 reachPad = 397), so
   // every last one of them was silently rejected and the corner signage
   // simply did not exist.
-  const mountain = preset === 'mountain';
-  const chevronName = mountain ? 'chevron_blackyellow' : 'chevron_redwhite';
-  const chevronMinCurve = mountain ? 0.34 : 0.55;     // 0.34 ~= 555 radius
-  const chevronEvery = mountain ? 115 : 190;
-  const chevronLateral = mountain && playerReach != null
-    ? playerReach + 58
-    : edge + 70;
+  // A stretch themed as a mountain pass (stage 5's 'touge' sector) gets
+  // the pass's signage too, not just stage 3.
+  const themeAt = (d) => sections.find((sec) => d >= sec.start && d < sec.end)?.theme;
   for (let i = 0; i < path.count; i++) {
-    if (path.curvature[i] < chevronMinCurve) continue;
     const d = i * path.spacing;
+    const mountain = preset === 'mountain' || themeAt(d) === 'touge';
+    const chevronName = mountain ? 'chevron_blackyellow' : 'chevron_redwhite';
+    const chevronMinCurve = mountain ? 0.34 : 0.55;     // 0.34 ~= 555 radius
+    const chevronEvery = mountain ? 115 : 190;
+    const chevronLateral = mountain && playerReach != null
+      ? playerReach + 58
+      : edge + 70;
+    if (path.curvature[i] < chevronMinCurve) continue;
     if (d % chevronEvery > path.spacing) continue;    // thin them out along the corner
     // outside of the bend = opposite the turn direction
     let turn = path.tangents[path.wrap(i + 3)] - path.tangents[path.wrap(i - 3)];

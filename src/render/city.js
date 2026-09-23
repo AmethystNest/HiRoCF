@@ -415,7 +415,9 @@ export function buildCityUnderlay(path, tex, sheet, shadowTex, def, {
         const dir = inside ? -1 : 1;      // the direction away from the course
         const mid = a + dir * (20 + 120 + 40);
         const [mx, my] = at(s, 0, mid);
-        if (!nearRoute(mx, my, roadHalf + pave + 30)) zebras.push({ s, mid, dir, prio: 0 });
+        // no stop line: from the course it is a line beyond the crossing,
+        // on a street that is closed anyway
+        if (!nearRoute(mx, my, roadHalf + pave + 30)) zebras.push({ s, mid, dir, prio: 0, noStop: true });
       }
       prevIn = inside;
     }
@@ -437,7 +439,7 @@ export function buildCityUnderlay(path, tex, sheet, shadowTex, def, {
     if (!(laid.get(z.s) || []).includes(z.mid)) continue;
     paintZebra(marks, z.s, z.mid, H - 22, at);
     const stopA = z.mid + z.dir * (120 + 60);
-    if (laid.get(z.s).some((m) => m !== z.mid && Math.abs(m - stopA) < 150)) continue;
+    if (z.noStop || laid.get(z.s).some((m) => m !== z.mid && Math.abs(m - stopA) < 150)) continue;
     // approaching the junction means travelling -dir along the street
     const leftSign = z.s.v ? -z.dir : z.dir;
     srect(marks, z.s, 0, leftSign * (H - 18), stopA - 11, stopA + 11, 0xffffff, 0.9);
@@ -533,9 +535,12 @@ function clear(B, x0, y0, x1, y1) {
 function fillBlock(B, cell) {
   const { rng } = B;
   const W = cell.x1 - cell.x0, Hh = cell.y1 - cell.y0;
-  if (W < 160 || Hh < 160) return;
-  // the yards and service ways between the buildings: concrete
+  if (W <= 0 || Hh <= 0) return;
+  // the yards and service ways between the buildings: concrete -- laid on
+  // any sliver of a cell too, or the bare ground shows between two lines
+  // that do not both run here (x = 4160 / 4760 on stage 2)
   B.lots.rect(cell.x0, cell.y0, W, Hh).fill({ color: 0x899096 });
+  if (W < 160 || Hh < 160) return;
   const horiz = W >= Hh;                   // rows run along the long side
   const long0 = horiz ? cell.x0 : cell.y0, long1 = horiz ? cell.x1 : cell.y1;
   const short0 = horiz ? cell.y0 : cell.x0, short1 = horiz ? cell.y1 : cell.x1;

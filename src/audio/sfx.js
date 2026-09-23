@@ -508,21 +508,21 @@ export function buildAudio(ctx) {
    * downshift. `blip` (0..1) is that blip's envelope; each voice applies it
    * as full throttle and extra level for its own sound.
    */
-  function makeGearbox() {
+  function makeGearbox(gearTop = V8_GEAR_TOP) {
     let gear = 0;
     let shiftUntil = 0;
     let blipAt = -1;
     return {
       step(speed, maxSpeed, boosting, t) {
         const sf = Math.max(0, Math.min(1, speed / Math.max(1, maxSpeed)));
-        if (gear < V8_GEAR_TOP.length - 1 && sf > V8_GEAR_TOP[gear]) { gear++; shiftUntil = t + V8_SHIFT_TIME; }
-        else if (gear > 0 && sf < V8_GEAR_TOP[gear - 1] * 0.93) { gear--; blipAt = t; }
+        if (gear < gearTop.length - 1 && sf > gearTop[gear]) { gear++; shiftUntil = t + V8_SHIFT_TIME; }
+        else if (gear > 0 && sf < gearTop[gear - 1] * 0.93) { gear--; blipAt = t; }
         const since = blipAt < 0 ? Infinity : t - blipAt;
         const blip = since < V8_BLIP_RISE ? since / V8_BLIP_RISE
           : since < V8_BLIP_RISE + 6 * V8_BLIP_FALL ? Math.exp(-(since - V8_BLIP_RISE) / V8_BLIP_FALL) : 0;
         const rpm = Math.min(
           V8_REDLINE_RPM,
-          (V8_IDLE_RPM + (V8_REDLINE_RPM - V8_IDLE_RPM) * Math.min(1, sf / V8_GEAR_TOP[gear]))
+          (V8_IDLE_RPM + (V8_REDLINE_RPM - V8_IDLE_RPM) * Math.min(1, sf / gearTop[gear]))
             * (1 + V8_BLIP_OVERSHOOT * blip),
         ) * (boosting ? 1.04 : 1);
         return { sf, rpm, shifting: t < shiftUntil, blip };
@@ -584,8 +584,13 @@ export function buildAudio(ctx) {
   const V8_IDLE_WAVE_TO = 1400;
   const V8_FULL_WAVE_FROM = 2600;
 
-  /** @param baseGain same contract as makeEngine's. */
-  function makeV8Engine(baseGain) {
+  /**
+   * @param baseGain same contract as makeEngine's.
+   * @param opts pitch: multiplier on every frequency (the rival's voice runs
+   *   lower); gearTop: the box (see makeGearbox); out: node to feed instead
+   *   of the master bus.
+   */
+  function makeV8Engine(baseGain, { pitch = 1, gearTop = V8_GEAR_TOP, out = master } = {}) {
     const osc = ctx.createOscillator();
     osc.setPeriodicWave(v8Wave());
     osc.frequency.value = V8_IDLE_RPM / 120;
@@ -626,13 +631,13 @@ export function buildAudio(ctx) {
     noiseGain.gain.value = 0;
     noise.connect(nf); nf.connect(noiseGain);
 
-    toneGain.connect(master);
-    noiseGain.connect(master);
+    toneGain.connect(out);
+    noiseGain.connect(out);
     osc.start();
     idleOsc.start();
     noise.start();
 
-    const box = makeGearbox();
+    const box = makeGearbox(gearTop);
     let stopped = false;
     let wobble = 0;
     let onThrottle = 1;
@@ -668,11 +673,11 @@ export function buildAudio(ctx) {
         // nodes, just the detune the oscillator already has.
         wobble = wobble * 0.86 + (Math.random() - 0.5) * 0.4;
         osc.detune.setTargetAtTime(wobble * 22, t, 0.03);
-        osc.frequency.setTargetAtTime(rpm / 120, t, glide);
+        osc.frequency.setTargetAtTime((rpm / 120) * pitch, t, glide);
         // The idle wave drifts half as far: a settled idle is steadier than
         // an engine under load, and it is steadiness that was asked for.
         idleOsc.detune.setTargetAtTime(wobble * 11, t, 0.03);
-        idleOsc.frequency.setTargetAtTime(rpm / 120, t, glide);
+        idleOsc.frequency.setTargetAtTime((rpm / 120) * pitch, t, glide);
         const full = Math.max(0, Math.min(1, (rpm - V8_IDLE_WAVE_TO) / (V8_FULL_WAVE_FROM - V8_IDLE_WAVE_TO)));
         fullMix.gain.setTargetAtTime(Math.sqrt(full), t, 0.05);
         idleMix.gain.setTargetAtTime(V8_IDLE_WAVE_LEVEL * Math.sqrt(1 - full), t, 0.05);
@@ -687,9 +692,9 @@ export function buildAudio(ctx) {
         const load = (0.35 + 0.65 * sf) * (0.55 + 0.45 * thr) * (1 + V8_BLIP_GAIN * blip);
         const duck = shifting ? V8_SHIFT_DUCK : 1;
         lp.frequency.setTargetAtTime(
-          (700 + rpm * 0.08 + (boosting ? 500 : 0)) * (0.62 + 0.38 * thr), t, blip > 0 ? 0.03 : 0.08,
+          (700 + rpm * 0.08 + (boosting ? 500 : 0)) * (0.62 + 0.38 * thr) * pitch, t, blip > 0 ? 0.03 : 0.08,
         );
-        nf.frequency.setTargetAtTime(800 + rpm * 0.10, t, 0.08);
+        nf.frequency.setTargetAtTime((800 + rpm * 0.10) * pitch, t, 0.08);
         toneGain.gain.setTargetAtTime(baseGain * load * duck * (boosting ? 1.2 : 1) * level, t, glide);
         // 0.10 of the tone, which is where the fit put it: the recording's
         // energy above 5 kHz sits 34 dB under its peak, and a noise layer
@@ -803,7 +808,12 @@ export function buildAudio(ctx) {
    * throughout) is dulled and dropped, the same overrun treatment the
    * synthesised voice gives itself.
    */
-  function makeSampledV8Engine(baseGain) {
+  /**
+   * @param opts pitch / gearTop as makeV8Engine's; the recording is played
+   *   that much lower (every grain transposed, so the engine sounds bigger
+   *   and slower-revving, not like a slowed tape of this one).
+   */
+  function makeSampledV8Engine(baseGain, { pitch = 1, gearTop = V8_GEAR_TOP, distant = false } = {}) {
     const grains = v8Grains();
     const srcMin = grains[0].rpm;
     const srcMax = grains[grains.length - 1].rpm;
@@ -816,11 +826,12 @@ export function buildAudio(ctx) {
     // recording measure within 1-2 dB per band, so the difference was never
     // in the grains, it was in the pitch they were being asked for.
     const toSoundRpm = (rpm) => V8_IDLE_RPM + (rpm - V8_IDLE_RPM) * (srcMax - V8_IDLE_RPM) / (V8_REDLINE_RPM - V8_IDLE_RPM);
-    const synth = makeV8Engine(baseGain);
-    const box = makeGearbox();
-
     const bus = ctx.createGain();
     bus.gain.value = 0;
+    const synthOut = ctx.createGain();
+    const synth = makeV8Engine(baseGain, { pitch, gearTop, out: synthOut });
+    const box = makeGearbox(gearTop);
+
     // Weight, put back. Over a full-throttle run the game spends far longer
     // near the top of each gear than the recording's steady climb does, so
     // the long-term balance came out lighter than the source: 50-100 Hz
@@ -835,7 +846,22 @@ export function buildAudio(ctx) {
     bus.connect(weight);
     weight.connect(boxy);
     boxy.connect(overrun);
-    overrun.connect(master);
+    // Both the recording and its synthesised low end leave through `level`
+    // (distance, for the rival) and, on a `distant` voice, `muffle` too: a
+    // car further off loses its top end before its body. The player's own
+    // voice has no muffle stage at all, so it is exactly what it was.
+    const level = ctx.createGain();
+    const muffle = distant ? ctx.createBiquadFilter() : null;
+    if (muffle) {
+      muffle.type = 'lowpass'; muffle.frequency.value = 6000; muffle.Q.value = 0.5;
+      overrun.connect(muffle);
+      synthOut.connect(muffle);
+      muffle.connect(level);
+    } else {
+      overrun.connect(level);
+      synthOut.connect(level);
+    }
+    level.connect(master);
 
     let stopped = false;
     let nextAt = 0;         // ctx time the next grain starts
@@ -853,8 +879,9 @@ export function buildAudio(ctx) {
     }
 
     return {
-      /** Same contract as makeV8Engine's update. */
-      update(speed, boosting, maxSpeed, throttle = 1) {
+      /** Same contract as makeV8Engine's update, plus `distance` (0..1,
+       *  1 alongside) for a car heard from somewhere else on the road. */
+      update(speed, boosting, maxSpeed, throttle = 1, distance = 1) {
         if (stopped) return;
         const t = ctx.currentTime;
         const dt = lastT ? Math.min(0.1, Math.max(0, t - lastT)) : 0;
@@ -865,6 +892,8 @@ export function buildAudio(ctx) {
         const tau = shifting || blip > 0 ? 0.025 : 0.05;
         rpmNow += (toSoundRpm(rpm) - rpmNow) * (dt > 0 ? 1 - Math.exp(-dt / tau) : 1);
 
+        level.gain.setTargetAtTime(distance, t, 0.08);
+        if (muffle) muffle.frequency.setTargetAtTime(600 + 3200 * distance * distance, t, 0.1);
         const mix = Math.max(0, Math.min(1, (rpmNow - SAMPLE_FADE_LOW) / (SAMPLE_FADE_HIGH - SAMPLE_FADE_LOW)));
         synth.update(speed, boosting, maxSpeed, throttle, Math.sqrt(1 - mix));
 
@@ -900,7 +929,7 @@ export function buildAudio(ctx) {
           }
           run++;
           const g = grains[cursor];
-          const rate = rpmNow / g.rpm;
+          const rate = (rpmNow / g.rpm) * pitch;
           const src = ctx.createBufferSource();
           src.buffer = g.buf;
           src.playbackRate.value = rate;
@@ -1037,6 +1066,35 @@ export function buildAudio(ctx) {
         stopped = true;
         try { osc1.stop(); osc2.stop(); sub.stop(); } catch { /* already stopped */ }
       },
+    };
+  }
+
+  /**
+   * The rival's engine: the same recorded engine as the player's, not the
+   * pair of sawtooths it used to be (asked for: more real, lower). Played
+   * RIVAL_PITCH lower through the rival's own five-speed box, so it is
+   * heard as a different, bigger engine rather than an echo of the
+   * player's; lifting off (its speed falling) gets the recording's overrun
+   * treatment; and with distance it goes quieter and duller at once
+   * (makeSampledV8Engine's `distant`), which is what places a car behind
+   * or ahead rather than merely turning it down.
+   *
+   * Same update() contract as makeEngine had, so the caller is unchanged.
+   */
+  const RIVAL_PITCH = 0.78;
+  function makeRivalEngine(baseGain) {
+    const v = makeSampledV8Engine(baseGain, { pitch: RIVAL_PITCH, gearTop: RIVAL_GEAR_TOP, distant: true });
+    let lastSpeed = 0, thr = 1;
+    return {
+      update(speed, boosting, maxSpeed, level = 1) {
+        // off the throttle while it is slowing for a corner
+        const target = speed < lastSpeed - 0.35 ? 0 : 1;
+        thr += (target - thr) * 0.25;
+        lastSpeed = speed;
+        v.update(speed, boosting, maxSpeed, thr, level);
+      },
+      silence() { v.silence(); },
+      stop() { v.stop(); },
     };
   }
 
@@ -1225,6 +1283,6 @@ export function buildAudio(ctx) {
     lapChime: trimmed(-2, lapChime),
     finalLap: trimmed(-3.5, finalLap),
     fanfare: (win) => trimmed(win ? -6 : 0, fanfare)(win),
-    makeEngine, makeV8Engine, makeSampledV8Engine, makeSqueal,
+    makeEngine, makeRivalEngine, makeV8Engine, makeSampledV8Engine, makeSqueal,
   };
 }

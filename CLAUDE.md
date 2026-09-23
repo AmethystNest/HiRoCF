@@ -16,7 +16,7 @@
 - `build/lib/page.mjs` — standalone / PWA 共通の index.html 分解と bundle。
 - `assets/bgm/stage<N>.mp3` — ステージ BGM。市販曲なので **git 管理外**(`.gitignore`)。`node build/tools/make-bgm.mjs 1=<mp3> 2=<mp3> ...` で音量を揃えて 96kbps(5分超はフェードで切る。単一HTMLを 30MB 未満に収めるため)に再エンコードして置き、`build:standalone` が見つかった分だけ埋め込む。無ければその面は無音で動く。
 
-ステージは前のステージに（どの難易度でも）勝つと解放される。確認用に URL に `?unlockall` を付けると保存内容を変えずに全ステージを開ける（例 `build/index.standalone.html?unlockall`）。
+ステージは前のステージに（どの難易度でも）勝つと解放され、解放済みのステージはタイトル画面から選べる。難易度は NORMAL（ライバル速度・加速を落とした標準）と HARD（各ステージの元の調整そのまま、全ステージクリアで解放）。確認用に URL に `?unlockall` を付けると保存内容を変えずに全ステージと HARD を開ける（例 `build/index.standalone.html?unlockall`）。
 
 ## 開発コマンド
 

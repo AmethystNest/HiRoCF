@@ -74,6 +74,11 @@ function selectSamples(edge, n, tol = 1.5, maxStep = 48) {
  *   uInner / uOuter           : texture U at each edge (>1 tiles across the strip)
  *   vPerWorldUnit             : texture repeats per world unit along the track
  *   dense                     : keep a vertex pair at every centreline point
+ *   planar                    : world units per texture repeat; UVs are
+ *                               then the vertex's own world position, so a
+ *                               wide strip round a tight bend is not
+ *                               smeared into streaks the way along-strip
+ *                               UVs are, and overlapping strips agree
  *   absoluteV                 : a partial ribbon's V counts from index 0 of
  *                               the lap instead of from its own first point,
  *                               so two partial ribbons of the same material
@@ -81,7 +86,7 @@ function selectSamples(edge, n, tol = 1.5, maxStep = 48) {
  */
 export function ribbonGeometry(path, {
   innerOffset, outerOffset, uInner = 0, uOuter = 1, vPerWorldUnit = 1 / 512,
-  fromIndex = null, spanIndices = null, dense = false, absoluteV = false,
+  fromIndex = null, spanIndices = null, dense = false, absoluteV = false, planar = null,
 }) {
   // A partial ribbon (a decal such as the start line) covers a span of the
   // loop; a full one wraps and must close seamlessly.
@@ -132,8 +137,15 @@ export function ribbonGeometry(path, {
     positions[s * 4 + 2] = edge[off * 4 + 2];
     positions[s * 4 + 3] = edge[off * 4 + 3];
 
-    uvs[s * 4 + 0] = uInner; uvs[s * 4 + 1] = v;
-    uvs[s * 4 + 2] = uOuter; uvs[s * 4 + 3] = v;
+    if (planar) {
+      // texture laid flat on the world, as a tiled ground plane is, rather
+      // than bent along the strip (see `planar` above)
+      uvs[s * 4 + 0] = positions[s * 4 + 0] / planar; uvs[s * 4 + 1] = positions[s * 4 + 1] / planar;
+      uvs[s * 4 + 2] = positions[s * 4 + 2] / planar; uvs[s * 4 + 3] = positions[s * 4 + 3] / planar;
+    } else {
+      uvs[s * 4 + 0] = uInner; uvs[s * 4 + 1] = v;
+      uvs[s * 4 + 2] = uOuter; uvs[s * 4 + 3] = v;
+    }
   }
 
   for (let i = 0; i < segs; i++) {

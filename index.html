@@ -591,6 +591,31 @@
   .diffSeg button.on[data-d="easy"]{background:linear-gradient(180deg,#3fae6a,#23794a)}
   .diffSeg button.on[data-d="normal"]{background:linear-gradient(180deg,#3c8fd6,#23619c)}
   .diffSeg button.on[data-d="hard"]{background:linear-gradient(180deg,#e04a3c,#9e2a20)}
+  .diffSeg button.locked{opacity:.38}
+  .diffSeg button.locked::before{content:'';display:inline-block;width:9px;height:10px;margin-right:6px;
+    vertical-align:-1px;background:currentColor;
+    -webkit-mask:var(--lock) center/contain no-repeat;mask:var(--lock) center/contain no-repeat}
+  .diffSeg,.stageChips{--lock:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 14'%3E%3Cpath d='M3 6V4a3 3 0 016 0v2h1v8H2V6zm1.5 0h3V4a1.5 1.5 0 00-3 0z'/%3E%3C/svg%3E")}
+  /* Stage choice on the title: one chip per stage. */
+  .stageChips{display:flex;gap:6px;margin:0 0 6px}
+  .stageChips button{flex:1;min-width:0;height:58px;border-radius:12px;padding:5px 0 4px;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+    border:1px solid rgba(255,255,255,.18);background:rgba(8,10,14,.55);color:#fff;
+    backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+    touch-action:manipulation;-webkit-tap-highlight-color:transparent;
+    transition:background .15s ease,border-color .15s ease}
+  .stageChips button .k{font-size:8px;font-weight:800;letter-spacing:.2em;text-indent:.2em;opacity:.6}
+  .stageChips button .no{font-size:19px;font-weight:900;line-height:1}
+  .stageChips button .st{font-size:9px;letter-spacing:.06em;color:#f2c23e;line-height:1}
+  .stageChips button .st .off{color:rgba(255,255,255,.22)}
+  .stageChips button.on{border-color:rgba(255,80,68,.9);
+    background:linear-gradient(180deg,rgba(255,70,58,.5),rgba(120,22,16,.55))}
+  .stageChips button.locked{opacity:.4}
+  .stageChips button.locked .no{font-size:0}
+  .stageChips button.locked .no::before{content:'';display:inline-block;width:14px;height:16px;
+    background:#fff;-webkit-mask:var(--lock) center/contain no-repeat;mask:var(--lock) center/contain no-repeat}
+  .stageInfo{margin:0 0 10px;font-size:11px;font-weight:800;letter-spacing:.12em;color:#e7ecf1;
+    font-variant-numeric:tabular-nums;text-shadow:0 1px 4px rgba(0,0,0,.7)}
   .diffNote{margin-top:8px;font-size:11px;font-weight:700;letter-spacing:.08em;color:#e7ecf1;
     opacity:.8;text-shadow:0 1px 4px rgba(0,0,0,.7)}
   #stageList .diffSeg{margin:0 0 12px}
@@ -857,6 +882,9 @@
     #titleScreen .startWrap{top:auto;bottom:calc(env(safe-area-inset-bottom) + 14px);transform:none}
     #titleScreen #titleStart{height:52px}
     .diffSeg button{height:32px}
+    .stageChips button{height:44px}
+    .stageChips button .k{display:none}
+    .stageInfo{margin-bottom:7px}
   }
 </style>
 </head>
@@ -868,6 +896,8 @@
     <div class="sub">TOP DOWN RACER</div>
   </div>
   <div class="startWrap">
+    <div class="stageChips" id="titleStages" role="radiogroup" aria-label="stage"></div>
+    <div class="stageInfo" id="titleStageInfo"></div>
     <button id="titleStart">START</button>
     <div class="diffSeg" id="titleDiff" role="radiogroup" aria-label="difficulty"></div>
     <div class="diffNote" id="titleDiffNote"></div>
@@ -983,22 +1013,27 @@
   // stored, for checking a late stage directly.
   const {createRecords,nextStarGap}=await import('./src/game/records.js');
   const records=createRecords(undefined,{unlockAll:new URLSearchParams(location.search).has('unlockall')});
-  const DIFFS=['easy','normal','hard'];
-  const DIFF_NOTE={easy:'ライバル: 遅め',normal:'ライバル: 標準',hard:'ライバル: 速い'};
+  const DIFFS=['normal','hard'];
+  const DIFF_NOTE={normal:'ライバル: 標準',hard:'ライバル: 速い'};
   const diffLabel=d=>String(d).toUpperCase();
   const titleDiffNote=document.getElementById('titleDiffNote');
-  // Set once the game is up: applies a change of difficulty to whatever is
-  // on screen (see startGame).
-  let onDifficulty=null;
+  const fmtMs=ms=>{const m=Math.floor(ms/60000),s=Math.floor((ms%60000)/1000),x=ms%1000;return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(x).padStart(3,'0')}`};
+  // Set once the game is up: applies a change of difficulty / stage to
+  // whatever is on screen (see startGame).
+  let onDifficulty=null,onTitleStage=null;
   const paintDiff=()=>{
     for(const seg of document.querySelectorAll('.diffSeg')){
       for(const b of seg.children){
-        const on=b.dataset.d===records.difficulty;
+        const on=b.dataset.d===records.difficulty,open=records.isDifficultyUnlocked(b.dataset.d);
         b.classList.toggle('on',on);
+        b.classList.toggle('locked',!open);
         b.setAttribute('aria-checked',on?'true':'false');
+        b.setAttribute('aria-disabled',open?'false':'true');
       }
     }
-    titleDiffNote.textContent=DIFF_NOTE[records.difficulty];
+    titleDiffNote.textContent=records.isDifficultyUnlocked('hard')
+      ?DIFF_NOTE[records.difficulty]
+      :`${DIFF_NOTE[records.difficulty]} · HARD は全ステージクリアで解放`;
   };
   for(const seg of document.querySelectorAll('.diffSeg')){
     for(const d of DIFFS){
@@ -1006,15 +1041,45 @@
       b.dataset.d=d;b.textContent=diffLabel(d);b.setAttribute('role','radio');
       b.addEventListener('pointerdown',e=>{
         e.preventDefault();
-        if(records.difficulty===d)return;
+        if(records.difficulty===d||!records.isDifficultyUnlocked(d))return;
         records.difficulty=d;
-        paintDiff();
+        paintDiff();paintStages();
         onDifficulty?.(d);
       });
       seg.appendChild(b);
     }
   }
-  paintDiff();
+  // Stage choice on the title: every stage already won, plus the next one
+  // to win (records.isUnlocked); START races the one picked. It starts on
+  // the first stage not yet won.
+  const titleStages=document.getElementById('titleStages'),titleStageInfo=document.getElementById('titleStageInfo');
+  let titleStage=records.frontier();
+  const paintStages=()=>{
+    for(const b of titleStages.children){
+      const id=+b.dataset.id,open=records.isUnlocked(id),rec=records.get(id);
+      b.classList.toggle('on',id===titleStage);
+      b.classList.toggle('locked',!open);
+      b.setAttribute('aria-checked',id===titleStage?'true':'false');
+      b.setAttribute('aria-disabled',open?'false':'true');
+      b.querySelector('.st').innerHTML=[0,1,2].map(i=>i<rec.stars?'★':'<span class="off">★</span>').join('');
+    }
+    const rec=records.get(titleStage);
+    titleStageInfo.textContent=`STAGE ${titleStage} · BEST ${rec.best!=null?fmtMs(rec.best):'--:--.---'}`;
+  };
+  for(const id of records.stageIds){
+    const b=document.createElement('button');
+    b.dataset.id=id;b.setAttribute('role','radio');
+    b.innerHTML=`<span class="k">STAGE</span><span class="no">${id}</span><span class="st"></span>`;
+    b.addEventListener('pointerdown',e=>{
+      e.preventDefault();
+      if(id===titleStage||!records.isUnlocked(id))return;
+      titleStage=id;
+      paintStages();
+      onTitleStage?.(id);
+    });
+    titleStages.appendChild(b);
+  }
+  paintDiff();paintStages();
 
   const hideTitle=()=>{
     titleScreen.classList.add('leaving');
@@ -1024,6 +1089,7 @@
   // `leaving` after a reflow, or the browser coalesces the two and the
   // fade never runs.
   const showTitle=()=>{
+    paintDiff();paintStages();
     titleScreen.hidden=false;
     void titleScreen.offsetWidth;
     titleScreen.classList.remove('leaving');
@@ -1057,7 +1123,7 @@
       const {boot}=await import('./src/main.js');
       const {NITRO,PHYSICS}=await import('./src/config.js');
       const el=(id)=>document.getElementById(id);
-      const {game,app,stages}=await boot({stageId:1,difficulty:records.difficulty,audioCtx,bgmEl});
+      const {game,app,stages}=await boot({stageId:titleStage,difficulty:records.difficulty,audioCtx,bgmEl});
       loading.classList.add('hide');
       const STAGE_IDS=Object.keys(stages).map(Number).sort((a,b)=>a-b);
       const LAST_STAGE=STAGE_IDS[STAGE_IDS.length-1];
@@ -1158,7 +1224,8 @@
         const tag=out.newBest?'<span class="tag">NEW RECORD</span>':'';
         finishBest.innerHTML=out.best!=null?`${tag}BEST ${fmtTime(out.best/1000)} · ${diffLabel(game.difficulty)}`:'';
         const nextName=out.unlocked!=null?stages[out.unlocked]?.name:null;
-        if(nextName)finishHint.innerHTML=`<span class="open">${nextName} が解放されました</span>`;
+        if(out.hardUnlocked)finishHint.innerHTML='<span class="open">全ステージクリア！ HARD が解放されました</span>';
+        else if(nextName)finishHint.innerHTML=`<span class="open">${nextName} が解放されました</span>`;
         else if(!res.won)finishHint.textContent='勝利で★1';
         else if(out.stars>=3)finishHint.textContent='★★★ 圧勝';
         else{
@@ -1258,6 +1325,7 @@
         finishOverlay.hidden=true;
         game.difficulty=records.difficulty;
         game.loadStage(id);
+        titleStage=id;
         // Every caller is a tap: keep the music element playable for GO.
         game.bgm?.prime();
         syncStageUI();
@@ -1274,7 +1342,6 @@
           b.setAttribute('aria-disabled',open?'false':'true');
           const stars=[0,1,2].map(i=>i<rec.stars?'★':'<span class="off">★</span>').join('');
           b.innerHTML=`<div class="n">${cfg.name} · ${cfg.shortDesc}</div>`
-            +`<div class="c">${cfg.courseName} — ${cfg.courseDesc}</div>`
             +`<div class="r">ライバル: ${cfg.rivalName}</div>`
             +(open
               ?`<div class="rec"><span class="st">${stars}</span><span class="bt">BEST ${rec.best!=null?fmtTime(rec.best/1000):'--:--.---'}</span></div>`
@@ -1300,6 +1367,12 @@
         game.audio?.click();
         if(!stageOverlay.hidden)buildRows();
         if(titleScreen.hidden===false&&!titleScreen.classList.contains('leaving'))goToStage(game.stageId);
+      };
+      // A stage picked on the title is loaded behind it straight away, so
+      // START only has to let it go.
+      onTitleStage=(id)=>{
+        game.audio?.click();
+        if(titleScreen.hidden===false&&!titleScreen.classList.contains('leaving'))goToStage(id);
       };
 
       stageBtn.addEventListener('pointerdown',e=>{

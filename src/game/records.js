@@ -18,7 +18,36 @@
 
 import { DIFFICULTY, STAGES } from '../config.js';
 
-const KEY = 'hirocf_records_v1';
+const KEY = 'hirocf_records_v2';
+// v1 had EASY / NORMAL / HARD. EASY is now NORMAL and NORMAL is now HARD
+// (see config.js DIFFICULTY), so its records are carried across under the
+// new names on first load; the old HARD, harder than anything left, counts
+// as HARD.
+const V1_KEY = 'hirocf_records_v1';
+const V1_MAP = { easy: 'normal', normal: 'hard', hard: 'hard' };
+
+function fromV1(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  // the chosen difficulty goes back to NORMAL: HARD may not be open yet
+  const out = { difficulty: 'normal', stages: {} };
+  for (const [id, st] of Object.entries(raw.stages || {})) {
+    if (!st || typeof st !== 'object') continue;
+    const n = {};
+    for (const [old, r] of Object.entries(st)) {
+      const d = V1_MAP[old];
+      if (!d || !r || typeof r !== 'object') continue;
+      const cur = n[d];
+      const best = [cur?.best, r.best].filter((v) => Number.isFinite(v) && v > 0);
+      n[d] = {
+        best: best.length ? Math.min(...best) : null,
+        stars: Math.max(cur?.stars ?? 0, Number.isInteger(r.stars) ? r.stars : 0),
+        cleared: !!(cur?.cleared || r.cleared === true),
+      };
+    }
+    out.stages[id] = n;
+  }
+  return out;
+}
 
 export const DIFFICULTIES = Object.keys(DIFFICULTY);
 
@@ -87,7 +116,12 @@ export function createRecords(
 ) {
   let data;
   try {
-    data = clean(JSON.parse(storage?.getItem(KEY) ?? 'null'), stageIds);
+    const raw = storage?.getItem(KEY);
+    if (raw != null) data = clean(JSON.parse(raw), stageIds);
+    else {
+      const v1 = storage?.getItem(V1_KEY);
+      data = clean(v1 != null ? fromV1(JSON.parse(v1)) : null, stageIds);
+    }
   } catch {
     data = clean(null, stageIds);
   }
@@ -96,12 +130,22 @@ export function createRecords(
   };
   const rec = (id, d) => data.stages[id]?.[d] ?? { best: null, stars: 0, cleared: false };
 
+  const allCleared = () => stageIds.every((id) => DIFFICULTIES.some((d) => rec(id, d).cleared));
+  const diffOpen = (d) => d !== 'hard' || unlockAll || allCleared();
+
   return {
-    get difficulty() { return data.difficulty; },
+    stageIds,
+    get difficulty() { return diffOpen(data.difficulty) ? data.difficulty : 'normal'; },
     set difficulty(d) {
-      if (!DIFFICULTIES.includes(d) || d === data.difficulty) return;
+      if (!DIFFICULTIES.includes(d) || !diffOpen(d) || d === data.difficulty) return;
       data.difficulty = d;
       save();
+    },
+    /** HARD opens once every stage has been won. */
+    isDifficultyUnlocked(d) { return DIFFICULTIES.includes(d) && diffOpen(d); },
+    /** The stage to carry on from: the first not yet won, else the last. */
+    frontier() {
+      return stageIds.find((id) => !this.cleared(id)) ?? stageIds[stageIds.length - 1];
     },
     /** Best race time (ms), stars and cleared flag for a stage. */
     get(id, d = data.difficulty) { return { ...rec(id, d) }; },
@@ -126,6 +170,7 @@ export function createRecords(
       const i = stageIds.indexOf(id);
       const next = i >= 0 && i < stageIds.length - 1 ? stageIds[i + 1] : null;
       const wasOpen = next != null && this.isUnlocked(next);
+      const hardWasOpen = diffOpen('hard');
       data.stages[id] = {
         ...(data.stages[id] || {}),
         [d]: {
@@ -142,6 +187,7 @@ export function createRecords(
         best: data.stages[id][d].best,
         previousBest: before.best,
         unlocked: next != null && !wasOpen && this.isUnlocked(next) ? next : null,
+        hardUnlocked: !hardWasOpen && diffOpen('hard'),
       };
     },
   };

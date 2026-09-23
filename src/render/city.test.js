@@ -43,9 +43,9 @@ describe('stage 2 town grid', () => {
 
   it('opens a junction at every corner and at every street crossing a straight', () => {
     const crossroads = routeCrossroads(path, streets, def.streetHalf);
-    // x = 1460 over the start straight, y = 1510 twice, y = 5430 twice and
-    // x = 4160 over the bottom straight
-    expect(crossroads.length).toBe(6);
+    // x = 2140 over the start boulevard, y = 4220 twice, y = 2220, x = -1660,
+    // y = 7140, and y = 5640 meeting the south-bound straight from one side
+    expect(crossroads.length).toBe(7);
     const { pos, neg } = streetMouths(path, streets, { roadHalf: ROAD, pave: PAVE, streetHalf: def.streetHalf });
     // count separate mouths: runs of flagged indices per side
     const runs = (m) => {
@@ -53,7 +53,8 @@ describe('stage 2 town grid', () => {
       for (let i = 0; i < m.length; i++) if (m[i] && !m[(i + m.length - 1) % m.length]) n++;
       return n;
     };
-    // a crossroads opens both sides, a corner its outside only
-    expect(runs(pos) + runs(neg)).toBe(crossroads.length * 2 + 8);
+    // a crossroads opens both sides (the one T junction only one), a corner
+    // its outside only
+    expect(runs(pos) + runs(neg)).toBe(crossroads.length * 2 - 1 + 14);
   });
 });

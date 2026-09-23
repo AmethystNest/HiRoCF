@@ -133,26 +133,29 @@ export function buildStage1Path() {
 /**
  * Stage 2 -- a loop of ordinary city streets.
  *
- * What this replaces was a jigsaw: three of its four sides were switchback
- * clusters (short lane, hairpin, short lane, hairpin) strung together with
- * 560-radius sweepers and no straight edges anywhere. It was legible on the
- * minimap and it drove fine, but nothing about the shape said "street" --
- * there was not a single square corner on it, and a lap of continuous
- * curves with no junctions reads as a purpose-built circuit however it is
- * decorated.
- *
- * This is a street grid instead: long blocks joined by square junctions,
- * with two places where the route jogs one block over rather than running
- * straight on. Eight corners, all of them 90 degrees, all of them the same
+ * A street grid: blocks joined by square junctions, every corner the same
  * radius -- and that radius is not a taste decision. The inside of a turn
  * has to stay clear of the road's full built width (roadHalf 230 plus 248
  * of gutter, kerb and pavement = 478) or the pavement ribbon folds through
- * itself at the apex, which is what collapsed the kerb mesh in the first
- * version of this stage. 560 is the tightest a junction can be and still
+ * itself at the apex. 560 is the tightest a junction can be and still
  * clear it.
  *
- * Closure is solved at build time from two free lengths, the same way
- * stage 3 does it -- see buildStage3Path for why that is worth doing.
+ * The first grid version was a jigsaw of two jogs round a rectangle, and
+ * read as monotonous (asked: "change it, lengthen it a little"). This one
+ * is 37% longer (39,300 against 28,600) and every part of it is a
+ * different kind of street driving:
+ *   - the start boulevard, the one long run to top speed;
+ *   - a crank (right-left) straight after it;
+ *   - round a single block: two rights 600 apart, the nearest thing a grid
+ *     has to a hairpin;
+ *   - a staircase of short blocks stepping down to the south-west, left
+ *     and right in turn;
+ *   - the west side home, with a jog of its own near the top.
+ * No two parallel stretches come closer than 1,720 (a block between their
+ * pavements), which render/city.test.js holds the town grid to as well.
+ *
+ * Closure is solved at build time from two free lengths (A due west along
+ * the bottom, B due north up the west side), the same way stage 3 does it.
  */
 
 // Tightest a 90-degree junction can be before the inside of the pavement
@@ -162,15 +165,21 @@ const S2_CORNER = 560;
 function stage2Layout(A, B, dry) {
   const t = new Turtle(0, 0, 0, dry);
   const R = S2_CORNER;
-  t.fwd(3600); t.turn(R, 90);    // south
-  t.fwd(1900); t.turn(R, -90);   // east -- the route jogs a block over
-  t.fwd(1700); t.turn(R, 90);    // south
-  t.fwd(2700); t.turn(R, 90);    // west
-  t.fwd(4400); t.turn(R, 90);    // north
-  t.fwd(1700); t.turn(R, -90);   // west -- and jogs back
-  t.fwd(1800); t.turn(R, 90);    // north
-  t.fwd(A);    t.turn(R, 90);    // east   FREE #1 -- due north
-  t.fwd(B);                      //        FREE #2 -- due east, into the start
+  t.fwd(3600); t.turn(R, 90);    // south      the start boulevard
+  t.fwd(1100); t.turn(R, -90);   // east       crank
+  t.fwd(1200); t.turn(R, 90);    // south
+  t.fwd(2900); t.turn(R, 90);    // west       round the block:
+  t.fwd(600); t.turn(R, 90);     // north        two rights 600 apart
+  t.fwd(900); t.turn(R, -90);    // west
+  t.fwd(1500); t.turn(R, -90);   // south      the staircase
+  t.fwd(1800); t.turn(R, 90);    // west
+  t.fwd(1300); t.turn(R, -90);   // south
+  t.fwd(900); t.turn(R, 90);     // west
+  t.fwd(A); t.turn(R, 90);       // north      FREE #1 -- due west
+  t.fwd(2400); t.turn(R, 90);    // east       the jog on the way home
+  t.fwd(900); t.turn(R, -90);    // north
+  t.fwd(B); t.turn(R, 90);       // east       FREE #2 -- due north
+  t.fwd(1100);                   //            into the start line
   return t;
 }
 

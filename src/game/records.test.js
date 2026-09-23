@@ -37,7 +37,7 @@ describe('records', () => {
     const lost = r.submit(1, 'normal', { won: false, time: 90, gap: 2 });
     expect(lost.unlocked).toBeNull();
     expect(r.isUnlocked(2)).toBe(false);
-    const won = r.submit(1, 'easy', { won: true, time: 95, gap: 1 });
+    const won = r.submit(1, 'normal', { won: true, time: 95, gap: 1 });
     expect(won.unlocked).toBe(2);
     expect(r.isUnlocked(2)).toBe(true);
     // winning again opens nothing new
@@ -60,17 +60,17 @@ describe('records', () => {
   it('persists across loads, including the difficulty chosen', () => {
     const storage = memoryStorage();
     const r = createRecords(IDS, { storage });
+    for (const id of IDS) r.submit(id, 'normal', { won: true, time: 80, gap: 1.5 });
     r.difficulty = 'hard';
-    r.submit(1, 'hard', { won: true, time: 80, gap: 1.5 });
     const again = createRecords(IDS, { storage });
     expect(again.difficulty).toBe('hard');
-    expect(again.get(1, 'hard').best).toBe(80000);
+    expect(again.get(1, 'normal').best).toBe(80000);
     expect(again.isUnlocked(2)).toBe(true);
   });
 
   it('survives storage that is missing, broken or throws', () => {
     const throwing = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); } };
-    for (const storage of [null, throwing, memoryStorage({ hirocf_records_v1: '{not json' })]) {
+    for (const storage of [null, throwing, memoryStorage({ hirocf_records_v2: '{not json' })]) {
       const r = createRecords(IDS, { storage });
       expect(r.isUnlocked(1)).toBe(true);
       expect(() => r.submit(1, 'normal', { won: true, time: 90, gap: 1 })).not.toThrow();
@@ -80,7 +80,7 @@ describe('records', () => {
 
   it('ignores stored values of the wrong shape', () => {
     const storage = memoryStorage({
-      hirocf_records_v1: JSON.stringify({
+      hirocf_records_v2: JSON.stringify({
         difficulty: 'impossible',
         stages: { 1: { normal: { best: -5, stars: 99, cleared: 'yes' } }, 9: { normal: { best: 1 } } },
       }),
@@ -100,17 +100,55 @@ describe('records', () => {
 });
 
 describe('difficulty', () => {
-  it('leaves NORMAL exactly as tuned and scales only speed and acceleration', () => {
+  it('leaves HARD exactly as tuned and eases only speed and acceleration for NORMAL', () => {
     const rival = { maxSpeed: 700, accel: 100, launchAccel: 50, turn: 2, cornerSlow: 0.2 };
-    expect(rivalTuning(rival, 'normal')).toBe(rival);
-    const easy = rivalTuning(rival, 'easy'), hard = rivalTuning(rival, 'hard');
-    expect(easy.maxSpeed).toBeLessThan(700);
-    expect(hard.maxSpeed).toBeGreaterThan(700);
-    expect(hard.launchAccel).toBeGreaterThan(50);
-    for (const t of [easy, hard]) {
-      expect(t.turn).toBe(2);
-      expect(t.cornerSlow).toBe(0.2);
-    }
+    expect(rivalTuning(rival, 'hard')).toBe(rival);
+    const normal = rivalTuning(rival, 'normal');
+    expect(normal.maxSpeed).toBeLessThan(700);
+    expect(normal.launchAccel).toBeLessThan(50);
+    expect(normal.turn).toBe(2);
+    expect(normal.cornerSlow).toBe(0.2);
     expect(rival.maxSpeed).toBe(700);   // the stage's own config is not mutated
+  });
+
+  it('keeps HARD shut until every stage is won, and says when it opens', () => {
+    const r = createRecords(IDS, { storage: memoryStorage() });
+    expect(r.isDifficultyUnlocked('hard')).toBe(false);
+    r.difficulty = 'hard';
+    expect(r.difficulty).toBe('normal');
+    const opened = IDS.map((id) => r.submit(id, 'normal', { won: true, time: 90, gap: 1 }).hardUnlocked);
+    expect(opened).toEqual([false, false, false, false, true]);
+    r.difficulty = 'hard';
+    expect(r.difficulty).toBe('hard');
+    expect(createRecords(IDS, { storage: memoryStorage(), unlockAll: true }).isDifficultyUnlocked('hard')).toBe(true);
+  });
+
+  it('carries v1 records across: EASY -> NORMAL, NORMAL/HARD -> HARD', () => {
+    const storage = memoryStorage({
+      hirocf_records_v1: JSON.stringify({
+        difficulty: 'normal',
+        stages: {
+          1: { easy: { best: 90000, stars: 2, cleared: true }, normal: { best: 95000, stars: 1, cleared: true },
+               hard: { best: 93000, stars: 3, cleared: false } },
+          2: { normal: { best: 70000, stars: 0, cleared: false } },
+        },
+      }),
+    });
+    const r = createRecords(IDS, { storage });
+    expect(r.get(1, 'normal')).toEqual({ best: 90000, stars: 2, cleared: true });
+    expect(r.get(1, 'hard')).toEqual({ best: 93000, stars: 3, cleared: true });
+    expect(r.get(2, 'hard').best).toBe(70000);
+    expect(r.isUnlocked(2)).toBe(true);
+    expect(r.difficulty).toBe('normal');
+  });
+
+  it('carries on from the first stage not yet won', () => {
+    const r = createRecords(IDS, { storage: memoryStorage() });
+    expect(r.frontier()).toBe(1);
+    r.submit(1, 'normal', { won: true, time: 90, gap: 1 });
+    r.submit(2, 'normal', { won: true, time: 90, gap: 1 });
+    expect(r.frontier()).toBe(3);
+    for (const id of IDS) r.submit(id, 'normal', { won: true, time: 90, gap: 1 });
+    expect(r.frontier()).toBe(5);
   });
 });
