@@ -301,10 +301,15 @@ const INTERIOR_FILL = {
     clear: 260, attempts: 480,
     names: ['tree_pine', 'tree_pine', 'tree_green', 'tree_autumn', 'rock_cluster_large', 'rock_cluster_small', 'bush_green'],
   },
+  // Parkland, not a paddock. Hoardings, tents and tyre bundles scattered
+  // at random angles across the middle of the infield read as litter from
+  // above -- none of them has a reason to be out there, facing nothing.
+  // Circuit furniture belongs at the trackside, where the themed sections
+  // already put it; what fills a big infield is trees.
   circuit: {
     clear: 300, attempts: 900,
-    names: ['tree_green', 'tree_green', 'tree_autumn', 'bush_green', 'racing_billboard',
-            'marshal_hut', 'tire_stack_black', 'tire_stack_redwhite', 'pit_tent_blue', 'pit_tent_red'],
+    names: ['tree_green', 'tree_green', 'tree_green', 'tree_autumn', 'tree_pine', 'tree_cherry',
+            'bush_green', 'bush_green', 'bush_whiteflowers'],
   },
   grandtour: {
     clear: 340, attempts: 900,
@@ -341,7 +346,7 @@ function pick(rng, entries) {
  */
 export function buildProps(path, sheet, shadowTex, {
   edge, preset = 'circuit', seed = 1, layout = null, worldScale = 1, wallHalf = null,
-  widen = null,
+  widen = null, lampGlow = true, lampLateral = null, blocked = null,
 }) {
   const rng = mulberry32(seed * 7919 + 13);
   const layer = new Container();
@@ -381,7 +386,9 @@ export function buildProps(path, sheet, shadowTex, {
 
   // A stage may describe its own sections (tied to real track features);
   // otherwise fall back to equal slices of the generic plan for the preset.
-  const sections = layout?.sections?.length
+  // A town (layout.cityGrid, see render/city.js) is dressed by its own
+  // builder; nothing is scattered along the course there.
+  const sections = layout?.cityGrid ? [] : layout?.sections?.length
     ? layout.sections.map((s) => ({
         theme: s.theme, start: s.from * path.length, end: s.to * path.length,
       }))
@@ -432,6 +439,7 @@ export function buildProps(path, sheet, shadowTex, {
     // tell that two bands at different distances from the road never
     // actually overlap on screen.
     if (!opts.force && !fits(p.x, p.y, pad)) return false;
+    if (blocked && blocked(p.x, p.y)) return false;
     // Nothing waives this one. Guard against the prop landing inside a
     // *different* part of the course's reach than the one it was placed
     // relative to -- see the playerReach comment above. Defaults to the
@@ -478,7 +486,7 @@ export function buildProps(path, sheet, shadowTex, {
     // silhouette, without touching the sprite art itself. Positioned near
     // the sprite's top (fixture head), not its base, using the same anchor
     // convention as the sprite above.
-    if (name === 'street_light' || name === 'floodlight') {
+    if (lampGlow && (name === 'street_light' || name === 'floodlight')) {
       const glow = new Graphics();
       const gy = -h * 0.72;
       glow.circle(0, gy, w * 0.95).fill({ color: 0xfff0b8, alpha: 0.10 });
@@ -553,7 +561,7 @@ export function buildProps(path, sheet, shadowTex, {
   if (lampPitch) {
     let side = 1;
     for (let d = 0; d < path.length; d += lampPitch) {
-      add('street_light', d, side, edge + 85, { pad: 70, reachPad: 55 });
+      add('street_light', d, side, lampLateral ?? edge + 85, { pad: 70, reachPad: 55 });
       side = -side;
     }
   }
@@ -578,7 +586,7 @@ export function buildProps(path, sheet, shadowTex, {
   // known pattern -- behind the scatter it lost half its positions to
   // randomly placed bushes, and in front of the lamp posts it took two
   // thirds of theirs.
-  if (preset === 'city') {
+  if (preset === 'city' && !layout?.cityGrid) {
     const names = ['building_office', 'building_apartment', 'building_shop'];
     // Set back past the kerb furniture, not level with it. A first pass put
     // the frontage right against the pavement edge, which is where the
@@ -637,29 +645,6 @@ export function buildProps(path, sheet, shadowTex, {
     while (turn < -Math.PI) turn += Math.PI * 2;
     const side = turn > 0 ? -1 : 1;
     add(chevronName, d, side, chevronLateral, { pad: mountain ? 55 : 90, reachPad: 38 });
-  }
-
-  // --- reserve side-street corridors so scatter props (buildings, bushes,
-  // street furniture) never spawn on top of one -- buildSideStreets() draws
-  // them in a completely separate pass with no idea what buildProps() is
-  // doing, so without this a building or bush can and does land right on
-  // the stub's pavement. Sampling a handful of fake "placed" points down
-  // the corridor is enough for the existing fits() check to keep the whole
-  // lap clear of it, same as any other prop. Width/length defaults must
-  // match buildSideStreets()'s own defaults.
-  for (const s of layout?.sideStreets || []) {
-    const k = path.wrap(path.indexAtDistance(s.at * path.length));
-    const cx = path.points[k][0], cy = path.points[k][1];
-    const nx = path.normals[k * 2], ny = path.normals[k * 2 + 1];
-    const ux = nx * s.side, uy = ny * s.side;
-    const length = s.length ?? 900;
-    const corridorPad = (s.width ?? 220) / 2 + 90;
-    const startDist = edge - 20;
-    const samples = 6;
-    for (let i = 0; i <= samples; i++) {
-      const d = startDist + (length * i) / samples;
-      placed.push({ x: cx + ux * d, y: cy + uy * d, pad: corridorPad });
-    }
   }
 
   // --- mountain preset: rock scatter along the cut slope behind the rail.
@@ -797,82 +782,3 @@ export function buildGroundPatches(path, tex, { edge, seed = 1, count = 90, name
   }
   return layer;
 }
-
-/**
- * Short side-street stubs leading away from the main road, blocked off by a
- * barrier landmark placed at the same spot -- so a closed loop still reads
- * as a slice of a real street grid (other roads you can see but can't take)
- * instead of a purpose-built circuit shape with nothing beyond the kerb.
- *
- * Pure vector math off the path's own normal/tangent at that point (no
- * rotation-angle guessing): the stub is a simple quad from the road edge
- * outward, matching the "look at the centreline" props' dx/dy approach.
- *
- * @param {TrackPath} path
- * @param {object} opts { edge, list: [{ at, side, width, length }] }
- */
-export function buildSideStreets(path, { edge, list = [] }) {
-  const layer = new Container();
-  layer.label = 'sideStreets';
-
-  for (const s of list) {
-    const k = path.wrap(path.indexAtDistance(s.at * path.length));
-    const cx = path.points[k][0], cy = path.points[k][1];
-    const nx = path.normals[k * 2], ny = path.normals[k * 2 + 1];
-    const tx = -ny, ty = nx; // tangent, perpendicular to the normal
-    const ux = nx * s.side, uy = ny * s.side; // unit vector down the stub
-
-    const hw = (s.width ?? 220) / 2;
-    const startDist = edge - 20;                 // slight overlap, no seam at the join
-    // Long enough to read as an actual street receding into the distance,
-    // not a short nub -- a short stub was the "why does this look wrong"
-    // complaint; a real cross street is at least a full block.
-    const length = s.length ?? 900;
-    const farDist = startDist + length;
-
-    const bx = cx + ux * startDist, by = cy + uy * startDist;
-    const fx = cx + ux * farDist, fy = cy + uy * farDist;
-
-    const g = new Graphics();
-    // asphalt-toned (matches the main road's tinted asphalt, not the dark
-    // dirt ground) so it clearly reads as "more street", not a shadow
-    g.poly([
-      bx - tx * hw, by - ty * hw,
-      bx + tx * hw, by + ty * hw,
-      fx + tx * hw, fy + ty * hw,
-      fx - tx * hw, fy - ty * hw,
-    ]).fill({ color: 0x9a9ea3, alpha: 0.95 });
-
-    // thin white edge lines, same idea as the main road's painted edges --
-    // without them the stub reads as a grey slab, not specifically a road
-    const edgeHw = 4;
-    for (const eSide of [1, -1]) {
-      const off = hw - 12;
-      g.poly([
-        bx + tx * eSide * (off - edgeHw), by + ty * eSide * (off - edgeHw),
-        bx + tx * eSide * (off + edgeHw), by + ty * eSide * (off + edgeHw),
-        fx + tx * eSide * (off + edgeHw), fy + ty * eSide * (off + edgeHw),
-        fx + tx * eSide * (off - edgeHw), fy + ty * eSide * (off - edgeHw),
-      ]).fill({ color: 0xffffff, alpha: 0.5 });
-    }
-
-    // dashed yellow centreline, same read as the main road's -- this is
-    // the single biggest cue that this is a street and not just pavement
-    const DASH = 46, GAP = 36, dashHw = 6;
-    for (let d = 0; d < length; d += DASH + GAP) {
-      const d1 = Math.min(length, d + DASH);
-      const p0x = bx + ux * d, p0y = by + uy * d;
-      const p1x = bx + ux * d1, p1y = by + uy * d1;
-      g.poly([
-        p0x - tx * dashHw, p0y - ty * dashHw,
-        p0x + tx * dashHw, p0y + ty * dashHw,
-        p1x + tx * dashHw, p1y + ty * dashHw,
-        p1x - tx * dashHw, p1y - ty * dashHw,
-      ]).fill({ color: 0xd8c26a, alpha: 0.88 });
-    }
-
-    layer.addChild(g);
-  }
-  return layer;
-}
-

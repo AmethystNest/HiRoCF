@@ -2,7 +2,10 @@ import { Application, Assets, Container, Graphics, Sprite, Texture, Rectangle } 
 import { STAGES, PHYSICS, CAR_SIZE, CAR_VISUAL_SCALE, CAR_HULL_SCALE, CAR_HULL_OFFSET, DRIFT_MARK_LIFE } from './config.js';
 import { STAGE_PATHS } from './track/stages.js';
 import { buildSurface, surfaceExtent, visibleBarrierHalf, buildRampStructure, buildTunnelStructure, buildElevatedDeckShadow, elevatedRuns, deckRuns, foldLimits, squeezedBarrier } from './render/surfaces.js';
-import { buildProps, buildGroundPatches, buildSideStreets } from './render/props.js';
+import { buildProps, buildGroundPatches } from './render/props.js';
+import {
+  cityStreets, streetMouths, routeCrossroads, buildBarricades, buildCityUnderlay,
+} from './render/city.js';
 import { buildMiniMap } from './render/minimap.js';
 import { buildFinishFX } from './render/finishfx.js';
 import { buildSideBolts } from './render/boltfx.js';
@@ -621,7 +624,11 @@ export class Game {
     const widen = (k) => halfW[k] - cfg.roadHalf;
     // Inside-of-bend caps (see foldLimits) -- only where a stage's own
     // strips are wide enough against its corners to need them.
-    const fold = mixed ? foldLimits(path) : null;
+    // Stages 1 and 3 opt in too (cfg.foldInside): stage 3's hairpins are
+    // far tighter than its rail sits from the road, and stage 1's 520
+    // corners tighter than its gravel trap, so the inside of each drew as a
+    // spike folded back through itself.
+    const fold = mixed || cfg.foldInside ? foldLimits(path) : null;
 
     // The physics barrier, per route point: where each stretch of road
     // SHOWS something to hit (see visibleBarrierHalf). cfg.wallHalf is left
@@ -669,11 +676,51 @@ export class Game {
         for (let k = a; k < z; k++) {
           const i = path.wrap(sec.from + k);
           const rh = halfW[i], wh = cfg.wallHalf + widen(i), vb = this.barrier[i];
-          pos[i] = squeezedBarrier(sec.preset, fold.pos[i], rh, wh, vb);
-          neg[i] = squeezedBarrier(sec.preset, fold.neg[i], rh, wh, vb);
+          // A wall that stands where something is drawn moves in with the
+          // drawing. Stage 1's (barrierAtWallHalf) stands in open gravel,
+          // short of anything drawn: it only has to move if the squeezed
+          // gravel's own edge comes in past it.
+          const sq = cfg.barrierAtWallHalf
+            ? (lim) => Math.min(vb, squeezedBarrier(sec.preset, lim, rh, wh, surfaceExtent(rh, sec.preset)))
+            : (lim) => squeezedBarrier(sec.preset, lim, rh, wh, vb);
+          pos[i] = sq(fold.pos[i]);
+          neg[i] = sq(fold.neg[i]);
         }
       }
       this.barrierSide = { pos, neg };
+    }
+
+    // Stage 2's town (render/city.js): the street grid the course is part
+    // of, built under the course's surface, with the course's pavement left
+    // open wherever a street meets it.
+    const cityDef = LAYOUTS[stageId]?.cityGrid;
+    let city = null;
+    if (cityDef) {
+      const streets = cityStreets(cityDef);
+      const pave = surfaceExtent(cfg.roadHalf, preset) - cfg.roadHalf;
+      const dims = { roadHalf: cfg.roadHalf, pave, streetHalf: cityDef.streetHalf };
+      const under = buildCityUnderlay(path, this.tex, this.propSheet, this.tex.shadow_blob, cityDef, {
+        ...dims, worldScale: 1 / this.baseZoom, carWidth: CAR_SIZE.player.w, seed: stageId,
+      });
+      city = {
+        streets, under,
+        gaps: streetMouths(path, streets, dims),
+        crossroads: routeCrossroads(path, streets, cityDef.streetHalf),
+        barricades: buildBarricades(path, streets, this.barrier, { pave: cityDef.streetHalf + pave }),
+      };
+    }
+
+    // Ground patches are variation in the ground, so on a single-surface
+    // stage they go in under the road with it. Laid over the finished
+    // surface, as they were, a patch set beside one leg of a switchback
+    // smeared a translucent stain across the next leg's verge and rail.
+    let groundUnder = null;
+    const patchDef = LAYOUTS[stageId]?.patches;
+    if (patchDef && !mixed) {
+      groundUnder = buildGroundPatches(path, this.tex, {
+        edge: surfaceExtent(cfg.roadHalf, preset), seed: stageId, widen,
+        count: patchDef.count, names: patchDef.textures,
+      });
     }
 
     let groundPlaneDone = false;
@@ -699,6 +746,9 @@ export class Game {
           skipJunctionAt: up ? null : (k) => this.underDeck(
             path.points[k][0], path.points[k][1], k,
           ),
+          underlay: !up && !groundPlaneDone ? (city ? city.under.layer : groundUnder) : null,
+          gaps: city?.gaps,
+          crossroads: city?.crossroads,
         });
         if (!up) groundPlaneDone = true;
         (up ? this.elevatedDeck : this.world).addChild(surface);
@@ -738,11 +788,9 @@ export class Game {
       ? Math.max(...mixed.sectors.map((sec) => surfaceExtent(cfg.roadHalf, sec.preset)))
       : surfaceExtent(cfg.roadHalf, preset);
 
-    if (layout?.sideStreets?.length) {
-      this.world.addChild(buildSideStreets(path, { edge, list: layout.sideStreets }));
-    }
+    if (city) this.world.addChild(city.barricades);
 
-    if (layout?.patches) {
+    if (layout?.patches && mixed) {
       this.world.addChild(buildGroundPatches(path, this.tex, {
         edge, seed: stageId, widen,
         count: layout.patches.count,
@@ -773,6 +821,16 @@ export class Game {
 
     const props = buildProps(path, this.propSheet, this.tex.shadow_blob, {
       edge, preset, seed: stageId, layout, worldScale: s, wallHalf: cfg.wallHalf, widen,
+      // A lamp's glow is a pool of light on the ground at night; by day
+      // (stages 1-3) it read as a pale stain on the pavement or gravel.
+      lampGlow: stageId >= 4,
+      // In the town, the lamps stand on the forecourt in front of the
+      // buildings, and not in the mouth of a side street.
+      lampLateral: city ? edge + 26 : null,
+      blocked: city
+        ? (x, y) => city.streets.some((st) => Math.abs((st.v ? x : y) - st.c) <= cityDef.streetHalf + (edge - cfg.roadHalf) + 30
+          && (st.v ? y : x) >= st.a0 && (st.v ? y : x) <= st.a1)
+        : null,
     });
     // Ground-level scenery goes UNDER the raised deck. Parented after the
     // ground road and before the deck, so a viaduct crossing the city
@@ -793,7 +851,8 @@ export class Game {
     // check runs per prop per frame.
     this._propCull = [props.layer, props.deckLayer, props.overhead, props.deckOverhead]
       .flatMap((c) => c.children)
-      .map((c) => ({ node: c, x: c.position.x, y: c.position.y, r: c.cullRadius || 0 }));
+      .map((c) => ({ node: c, x: c.position.x, y: c.position.y, r: c.cullRadius || 0 }))
+      .concat(city ? city.under.cull : []);
 
     // actors sit above the surface
     this.actors = new Container();

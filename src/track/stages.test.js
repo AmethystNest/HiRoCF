@@ -207,24 +207,8 @@ describe('stage 2 course', () => {
     }
     expect(worst).toBeGreaterThan(S2_EDGE * 2);
   });
-
-  it('places every hand-authored decoration on a straight, not in a junction', () => {
-    // This is the one that goes stale: layouts.js pins side streets, their
-    // barriers and the parked cars to lap fractions, and regenerating the
-    // course silently moves what those fractions point at. A stub or a
-    // parked car in the middle of a turn sits across the road at an angle
-    // that fights it.
-    const layout = LAYOUTS[2];
-    const spots = [
-      ...(layout.sideStreets || []).map((s) => s.at),
-      ...(layout.landmarks || []).map((l) => l.at),
-    ];
-    expect(spots.length).toBeGreaterThan(10);
-    for (const at of spots) {
-      const i = path.wrap(Math.round(at * n));
-      expect(path.curvature[i]).toBeLessThan(0.08);
-    }
-  });
+  // (Its town is derived from the grid the course lies on rather than pinned
+  // to lap fractions -- see render/city.test.js.)
 });
 
 describe('stage 3 course', () => {

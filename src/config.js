@@ -272,6 +272,9 @@ export const STAGES = {
     // through them. The wall stays where it was before, at wallHalf, still
     // tested with the car's drawn body like every other stage.
     barrierAtWallHalf: true,
+    // Squeeze the roadside in on the inside of the tight corners rather
+    // than let it fold (see main.js `fold`).
+    foldInside: true,
     // 710 -> 689 (-3%): the player's lap here went 17.1 -> 18.0s with the
     // accel change and this rival's only 17.1 -> 17.5s, which turned a
     // dead-even stage into a 0.5s deficit. Measured back to 18.0s.
@@ -303,6 +306,9 @@ export const STAGES = {
     courseDesc: 'ヘアピン8箇所 / つづら折りの登坂 / 渓谷ストレート',
     rivalName: 'ガムテープデスマッチ',
     roadHalf: 190, wallHalf: 260,
+    // The hairpins' inside rail is squeezed in toward the road instead of
+    // folding into a spike (see main.js `fold`), and the wall with it.
+    foldInside: true,
     playerPhysics: {
       // moveScale is deliberately NOT overridden here any more -- pace is
       // one value for every stage (see PHYSICS.moveScale). What stays below

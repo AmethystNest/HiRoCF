@@ -35,7 +35,10 @@ export const SURFACE_PRESETS = {
   city: {
     ground: 'dirt',
     groundScale: 2.2,
-    groundTint: 0x767c84,
+    // The town's lots and yards (stage 2 is the only stage on this preset,
+    // and its blocks are built over it -- see render/city.js): concrete,
+    // not the dark earth it was when there was nothing past the pavement.
+    groundTint: 0xa9afb6,
     asphalt: { texture: 'road_asphalt', uRepeat: 3, vPer: 1 / 520, tint: 0xa6abb2 },
     ruts: { offset: 82, width: 74, alpha: 0.4, vPer: 1 / 900 },
     edgeLine: { inset: 14, width: 11, tint: 0xffffff, alpha: 0.85 },
@@ -333,6 +336,7 @@ export function buildSurface(path, tex, {
   roadHalf, wallHalf, preset = 'circuit', range = null, ground = true, terrainLayer = null,
   noTerrain = false, skipJunctionAt = null, sector = null, fold = null,
   baseHalf = typeof roadHalf === 'number' ? roadHalf : null,
+  underlay = null, gaps = null, crossroads = null,
 }) {
   const P = SURFACE_PRESETS[preset] || SURFACE_PRESETS.circuit;
   const layer = new Container();
@@ -416,7 +420,32 @@ export function buildSurface(path, tex, {
     }
     : (k, off) => off;
   const G = (fn) => (k) => guard(k, fn(k));
-  const absV = S ? { absoluteV: true } : {};
+  // Where a street meets the course (city.js streetMouths) that side's
+  // pavement, kerb and edge paint are left out, so the street's own asphalt
+  // -- in the underlay -- shows through: the junction is open. `rg` is the
+  // range a ribbon would otherwise cover; this is the runs of it to draw.
+  const sideRuns = (rg, side) => {
+    const mask = gaps ? (side > 0 ? gaps.pos : gaps.neg) : null;
+    if (!mask || !rg) return rg ? [rg] : [];
+    const from = rg.fromIndex ?? 0, spanN = rg.spanIndices ?? path.count;
+    const out = [];
+    let st = -1;
+    for (let o = 0; o <= spanN; o++) {
+      const keep = o < spanN && !mask[path.wrap(from + o)];
+      if (keep && st < 0) st = o;
+      else if (!keep && st >= 0) {
+        out.push({ ...rg, fromIndex: path.wrap(from + st), spanIndices: o - st });
+        st = -1;
+      }
+    }
+    return out;
+  };
+  // Any partial ribbon counts its texture V from the lap's index 0, so two
+  // pieces of the same material meet without a jump in the pattern: stage
+  // 4's road is built in pieces at every deck-level change, and with V
+  // restarting per piece the wheel-track wear and the lane dashes stepped
+  // at each one, drawn as a hard-edged darker box across the lanes.
+  const absV = range ? { absoluteV: true } : {};
 
   // --- ground: one world-space tiling plane covering the track bounds ---
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -436,6 +465,9 @@ export function buildSurface(path, tex, {
   if (P.groundTint) groundSprite.tint = P.groundTint;
   layer.addChild(groundSprite);
   }
+  // Whatever the course runs through (stage 2's town, see city.js) goes
+  // over the ground and under everything of the course's own.
+  if (underlay) layer.addChild(underlay);
 
   // --- per-sector terrain ---
   // The ground plane is one sprite over the whole course, which is right
@@ -500,7 +532,7 @@ export function buildSurface(path, tex, {
     for (const sgn of [-1, 1]) {
       const at = (k) => sgn * P.ruts.offset * (RH(k) / rh0);
       layer.addChild(ribbonMesh(path, tex.rut_overlay, {
-        ...OWN,
+        ...OWN, ...absV,
         innerOffset: (k) => at(k) - P.ruts.width / 2, outerOffset: (k) => at(k) + P.ruts.width / 2,
         uInner: 0, uOuter: 1, vPerWorldUnit: P.ruts.vPer, alpha: P.ruts.alpha,
       }));
@@ -509,9 +541,9 @@ export function buildSurface(path, tex, {
 
   // --- contact shading on the asphalt beside the boundary ---
   if (OWN) {
-    for (const side of [1, -1]) {
+    for (const side of [1, -1]) for (const run of sideRuns(OWN, side)) {
       layer.addChild(ribbonMesh(path, tex.edge_shadow, {
-        ...OWN,
+        ...run, ...absV,
         innerOffset: (k) => side * RH(k), outerOffset: (k) => side * (RH(k) - 110),
         uInner: 0, uOuter: 1, vPerWorldUnit: 1 / 2048, alpha: 0.9,
       }));
@@ -524,10 +556,10 @@ export function buildSurface(path, tex, {
 
   // --- painted edge lines ---
   if (P.edgeLine && OWN) {
-    for (const side of [1, -1]) {
+    for (const side of [1, -1]) for (const run of sideRuns(OWN, side)) {
       const inner = (k) => side * (RH(k) - P.edgeLine.inset);
       markings.addChild(ribbonMesh(path, Texture.WHITE, {
-        ...OWN,
+        ...run,
         innerOffset: inner, outerOffset: (k) => inner(k) - side * P.edgeLine.width,
         tint: P.edgeLine.tint, alpha: P.edgeLine.alpha,
       }));
@@ -538,7 +570,7 @@ export function buildSurface(path, tex, {
   if (P.centreLine && OWN) {
     const cl = P.centreLine;
     markings.addChild(ribbonMesh(path, cl.texture ? tex[cl.texture] : Texture.WHITE, {
-      ...OWN,
+      ...OWN, ...absV,
       innerOffset: -cl.width / 2, outerOffset: cl.width / 2,
       uInner: 0, uOuter: 1, vPerWorldUnit: cl.vPer ?? 1 / 1024,
       tint: cl.tint, alpha: cl.alpha ?? 0.92,
@@ -551,7 +583,7 @@ export function buildSurface(path, tex, {
   if (P.highwayLanes && OWN) {
     for (const sgn of [-1, 1]) {
       markings.addChild(ribbonMesh(path, tex.dash_white, {
-        ...OWN,
+        ...OWN, ...absV,
         innerOffset: (k) => (sgn * RH(k)) / 3 - 6, outerOffset: (k) => (sgn * RH(k)) / 3 + 6,
         uInner: 0, uOuter: 1, vPerWorldUnit: 1 / 165, alpha: 0.94,
       }));
@@ -581,7 +613,7 @@ export function buildSurface(path, tex, {
   // for the side-street stubs in props.js.
   if (P.startMarker === 'crosswalk' && inSpan(0)) {
     const g = new Graphics();
-    paintCrossing(g, path, 0, RH(0) - (P.edgeLine?.inset ?? 14) - 4, { stopLine: false });
+    paintCrossing(g, path, 0, RH(0) - (P.edgeLine?.inset ?? 14) - 4);
     markings.addChild(g);
   }
 
@@ -601,23 +633,46 @@ export function buildSurface(path, tex, {
     const g = new Graphics();
     const gantry = new Graphics();
     const setback = Math.round(210 / path.spacing);
+    // [crossing index, which stop line, signal index]
+    const sites = [];
     for (const [enter, exit] of cornerRuns(path, 0.16)) {
       if (Math.abs(turnBetween(path, enter, exit)) < (60 * Math.PI) / 180) continue;
-      for (const k of [path.wrap(enter - setback), path.wrap(exit + setback)]) {
-        if (!inOwn(k)) continue;
-        // A junction the viaduct flies over gets no signals. The gantry is
-        // drawn above the cars, which necessarily puts it above the deck
-        // too, so a signal head left here shows through the bridge from
-        // the carriageway on top of it.
-        if (skipJunctionAt?.(k)) continue;
-        const half = RH(k) - (P.edgeLine?.inset ?? 14) - 4;
-        // post at the back of the pavement, head reaching back in over the road
-        const signalOut = RH(k) + 250;
-        const signalReach = RH(k) - 120;
-        paintCrossing(g, path, k, half, { stopLine: true });
-        paintSignalShadow(g, path, k, signalOut, signalReach);
-        paintSignalOverhead(gantry, path, k, signalOut, signalReach);
-      }
+      sites.push([path.wrap(enter - setback), 'approach', path.wrap(enter - setback)]);
+      sites.push([path.wrap(exit + setback), 'oncoming', path.wrap(exit + setback)]);
+    }
+    // A street crossing a straight (`crossroads`, from city.js): a crossing
+    // on each side of it, level with the cross street's pavement, and the
+    // signal on the corner just beyond that pavement.
+    const crossSites = [];
+    for (const kc of crossroads || []) {
+      const c = Math.round(360 / path.spacing), sg = Math.round(530 / path.spacing);
+      crossSites.push([path.wrap(kc - c), 'approach', path.wrap(kc - sg)]);
+      crossSites.push([path.wrap(kc + c), 'oncoming', path.wrap(kc + sg)]);
+    }
+    // A corner's crossing that would land within a few car lengths of a
+    // crossroads' own goes: on a short block the two were a pair of
+    // crossings and a pair of signals almost on top of each other.
+    const gapIdx = Math.round(700 / path.spacing);
+    const apart = (a, b) => Math.min(path.wrap(a - b), path.wrap(b - a));
+    for (let i = sites.length - 1; i >= 0; i--) {
+      if (crossSites.some((c) => apart(c[0], sites[i][0]) < gapIdx)) sites.splice(i, 1);
+    }
+    sites.push(...crossSites);
+    for (const [k, stop, ks] of sites) {
+      if (!inOwn(k)) continue;
+      // A junction the viaduct flies over gets no signals. The gantry is
+      // drawn above the cars, which necessarily puts it above the deck
+      // too, so a signal head left here shows through the bridge from
+      // the carriageway on top of it.
+      if (skipJunctionAt?.(k)) continue;
+      const half = RH(k) - (P.edgeLine?.inset ?? 14) - 4;
+      // post at the back of the pavement, head reaching back in over the
+      // road -- on the driver's left (-normal), as traffic keeps left
+      const signalOut = -(RH(ks) + 250);
+      const signalReach = -(RH(ks) - 120);
+      paintCrossing(g, path, k, half, { stop });
+      paintSignalShadow(g, path, ks, signalOut, signalReach);
+      paintSignalOverhead(gantry, path, ks, signalOut, signalReach);
     }
     markings.addChild(g);
     layer.overhead.addChild(gantry);
@@ -693,9 +748,9 @@ export function buildSurface(path, tex, {
   }
   for (let i = bounds.length - 1; i >= 0; i--) {
     const { band, to } = bounds[i];
-    for (const side of [1, -1]) {
+    for (const side of [1, -1]) for (const run of sideRuns(R, side)) {
       layer.addChild(ribbonMesh(path, band.texture ? tex[band.texture] : Texture.WHITE, {
-        ...R, ...absV,
+        ...run, ...absV,
         innerOffset: G((k) => side * (RH(k) - OVERLAP)),
         outerOffset: G((k) => side * (RH(k) + to * taper(k))),
         uInner: 0,
@@ -716,9 +771,9 @@ export function buildSurface(path, tex, {
   if (P.bandEdge) {
     const total = (P.bands || []).reduce((a, b) => a + b.width, 0);
     const outer = (k) => RH(k) + total * taper(k);
-    for (const side of [1, -1]) {
+    for (const side of [1, -1]) for (const run of sideRuns(R, side)) {
       layer.addChild(ribbonMesh(path, Texture.WHITE, {
-        ...R,
+        ...run,
         innerOffset: G((k) => side * (outer(k) - P.bandEdge.width * taper(k))),
         outerOffset: G((k) => side * outer(k)),
         tint: P.bandEdge.tint, alpha: P.bandEdge.alpha,
@@ -1519,32 +1574,38 @@ export function buildTunnelStructure(path, { roadHalf = 300, wallHalf = 355 } = 
 
 
 /**
- * Zebra bars painted across the road at one centreline index, optionally
- * with a stop line just before them. Used for the start/finish marker on a
- * street stage and for every junction arm (see `junctionMarks`).
+ * A zebra crossing painted across the road at one centreline index.
+ *
+ * The stripes run WITH the traffic, side by side across the road -- the
+ * way a pedestrian crossing is painted. They used to be drawn as bars
+ * lying across the carriageway, stacked along it, which from above is a
+ * ladder of stop lines rather than a crossing.
+ *
+ * `stop` adds a stop line for one direction of traffic: 'approach' is ours,
+ * behind the crossing on the left-hand lane (traffic keeps left; the
+ * path's +normal is the driver's RIGHT), 'oncoming' the other way's,
+ * beyond it on the right-hand lane.
  */
-function paintCrossing(g, path, k, half, { bars = 6, barLen = 50, gap = 40, stopLine = false } = {}) {
+function paintCrossing(g, path, k, half, { depth = 240, stripe = 30, gap = 30, stop = null } = {}) {
   const nx = path.normals[k * 2], ny = path.normals[k * 2 + 1];
   const tx = -ny, ty = nx;
   const cx = path.points[k][0], cy = path.points[k][1];
-  const span = bars * barLen + (bars - 1) * gap;
-  const bar = (d0, d1, alpha) => {
-    const p0x = cx + tx * d0, p0y = cy + ty * d0;
-    const p1x = cx + tx * d1, p1y = cy + ty * d1;
-    g.poly([
-      p0x - nx * half, p0y - ny * half,
-      p0x + nx * half, p0y + ny * half,
-      p1x + nx * half, p1y + ny * half,
-      p1x - nx * half, p1y - ny * half,
-    ]).fill({ color: 0xffffff, alpha });
-  };
-  for (let i = 0; i < bars; i++) {
-    const d0 = -span / 2 + i * (barLen + gap);
-    bar(d0, d0 + barLen, 0.88);
+  // a quad from lateral l0..l1 and along a0..a1
+  const quad = (l0, l1, a0, a1, alpha) => g.poly([
+    cx + nx * l0 + tx * a0, cy + ny * l0 + ty * a0,
+    cx + nx * l1 + tx * a0, cy + ny * l1 + ty * a0,
+    cx + nx * l1 + tx * a1, cy + ny * l1 + ty * a1,
+    cx + nx * l0 + tx * a1, cy + ny * l0 + ty * a1,
+  ]).fill({ color: 0xffffff, alpha });
+  const n = Math.max(1, Math.floor((2 * half + gap) / (stripe + gap)));
+  const span = n * stripe + (n - 1) * gap;
+  for (let i = 0; i < n; i++) {
+    const l0 = -span / 2 + i * (stripe + gap);
+    quad(l0, l0 + stripe, -depth / 2, depth / 2, 0.88);
   }
-  // the stop line sits on the approach side of the crossing, which is the
-  // side further back along the route
-  if (stopLine) bar(-span / 2 - 46, -span / 2 - 26, 0.9);
+  const back = depth / 2 + 70;
+  if (stop === 'approach') quad(-half, -4, -back - 22, -back, 0.9);
+  if (stop === 'oncoming') quad(4, half, back, back + 22, 0.9);
 }
 
 /**
@@ -1613,7 +1674,7 @@ function signalQuad(g, at, lat0, lat1, a0, a1, colour, alpha) {
 /** The gantry's shadow on the road, offset from the structure itself. */
 function paintSignalShadow(g, path, k, out, reach) {
   const at = signalFrame(path, k);
-  const dLat = -46, dAlong = 34;   // offset of the shadow from the structure
+  const dLat = -46 * Math.sign(out), dAlong = 34;   // offset of the shadow from the structure
   const q = (l0, l1, a0, a1, alpha) =>
     signalQuad(g, at, l0 + dLat, l1 + dLat, a0 + dAlong, a1 + dAlong, 0x0a0d10, alpha);
   q(out - 16, out + 16, -16, 16, 0.22);

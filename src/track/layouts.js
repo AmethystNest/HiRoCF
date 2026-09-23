@@ -144,87 +144,45 @@ export const LAYOUTS = {
   },
 
   2: {
-    // Ordinary city streets, not a circuit -- no marshal towers, no race-day
-    // floodlights, no tow trucks/ambulances standing by, no painted kerb or
-    // start chequer (surfaces.js: city preset has no kerb band and
-    // paintStart:false). Every section uses the same 'street' theme;
-    // corners get no special "runoff" treatment because a street corner
-    // isn't a gravel trap. See buildStage2Path in track/stages.js for the
-    // shape -- a grid of blocks joined by square junctions, with two places
-    // where the route jogs a block over. side +1 is the outside of the
-    // loop, -1 the infield, same convention as stage 1.
+    // Ordinary city streets, not a circuit -- see buildStage2Path in
+    // track/stages.js for the course, and render/city.js for the town.
     //
-    // Every `at` below is the MIDPOINT of one of the course's straight
-    // blocks, read back off the built path rather than eyeballed, so
-    // nothing lands on a junction where a stub or a parked car would sit
-    // across the turn. The straights, by lap fraction, are
-    // 0.00-0.12, 0.16-0.22, 0.26-0.31, 0.35-0.44, 0.47-0.62,
-    // 0.66-0.71, 0.75-0.80, 0.84-0.94 and 0.97-1.00.
-    sections: [
-      { from: 0.00, to: 1.00, theme: 'street' },
-    ],
-    // Cross streets you can see but can't take -- a closed loop otherwise
-    // has nothing beyond the kerb, which is what reads as a purpose-built
-    // circuit no matter how it's decorated. Each stub is capped by a
-    // barrier landmark at the same at/side, part way down it.
-    sideStreets: [
-      { at: 0.045, side: 1 },
-      { at: 0.190, side: -1 },
-      { at: 0.390, side: 1 },
-      { at: 0.520, side: -1 },
-      { at: 0.600, side: 1 },
-      { at: 0.775, side: -1 },
-      { at: 0.887, side: 1 },
-    ],
-    landmarks: [
-      // Barriers blocking the side streets above -- placed well down each
-      // stub (lateral 560, roughly 2/3 of the way along its 900-unit
-      // length) rather than right at the mouth, so there's real visible
-      // street with its own centreline before the closure, not a barrier
-      // sitting in the junction. A cone a little further back reads as an
-      // advance warning.
-      { name: 'fence_panel', at: 0.045, side: 1, lateral: 560 },
-      { name: 'concrete_barrier', at: 0.190, side: -1, lateral: 560 },
-      { name: 'fence_panel', at: 0.390, side: 1, lateral: 560 },
-      { name: 'concrete_barrier', at: 0.520, side: -1, lateral: 560 },
-      { name: 'fence_panel', at: 0.600, side: 1, lateral: 560 },
-      { name: 'concrete_barrier', at: 0.775, side: -1, lateral: 560 },
-      { name: 'fence_panel', at: 0.887, side: 1, lateral: 560 },
-      { name: 'cone', at: 0.047, side: 1, lateral: 500 },
-      { name: 'cone', at: 0.192, side: -1, lateral: 500 },
-      { name: 'cone', at: 0.392, side: 1, lateral: 500 },
-      { name: 'cone', at: 0.522, side: -1, lateral: 500 },
-      { name: 'cone', at: 0.602, side: 1, lateral: 500 },
-      { name: 'cone', at: 0.777, side: -1, lateral: 500 },
-      { name: 'cone', at: 0.889, side: 1, lateral: 500 },
-
-      // Parked civilian traffic along the kerb -- plain generic cars, never
-      // the rival roster, so the street doesn't look full of parked race
-      // cars. lateral 140 was solved from measured world-space footprints,
-      // not guessed: at this stage's worldScale the parked-car sprite is
-      // ~211 wide (VEHICLE_PROPS draws them at 1.2x the player's own
-      // width) and the player sprite itself is ~176 wide, so a player
-      // hugging wallHalf(320) reaches out to 320 + 176/2 = 408 world units
-      // -- but a world-unit gap barely above that (the first attempt, ~30
-      // units) is only ~12 screen px at this zoom and still reads as
-      // touching. lateral 140 puts a clearly visible gap on screen,
-      // confirmed by placing the player at wallHalf next to one of these
-      // cars and reading back both sprites' actual positions/widths; it
-      // does put the car partly past the paved edge into the dirt-margin
-      // texture, which is fine since the wall keeps the player from ever
-      // reaching that spot anyway, and bushes/buildings already scatter
-      // into that same zone.
-      { name: 'car_civilian_white', at: 0.085, side: -1, lateral: 140 },
-      { name: 'car_civilian_silver', at: 0.283, side: 1, lateral: 140 },
-      { name: 'car_civilian_navy', at: 0.360, side: -1, lateral: 140 },
-      { name: 'car_civilian_maroon', at: 0.425, side: 1, lateral: 140 },
-      { name: 'car_civilian_white', at: 0.490, side: -1, lateral: 140 },
-      { name: 'car_civilian_silver', at: 0.565, side: 1, lateral: 140 },
-      { name: 'car_civilian_navy', at: 0.683, side: -1, lateral: 140 },
-      { name: 'car_civilian_maroon', at: 0.845, side: 1, lateral: 140 },
-      { name: 'car_civilian_white', at: 0.920, side: -1, lateral: 140 },
-    ],
-    patches: { count: 40, textures: ['patch_dirt', 'patch_dry', 'patch_dark'] },
+    // The course is one loop of this street grid. Every straight of it lies
+    // on one of these lines, so every corner is a real junction (the street
+    // the course turns off carries straight on) and the longer straights are
+    // crossed by streets of their own. Lines are world coordinates, read off
+    // the course's own corners: x = -1460, 1460, 4160, 6980 and y = 0, 3020,
+    // 4020, 6840. The others are laid ~1400-1500 apart between them, which
+    // leaves every block at least 450 deep between its pavements. y = 3020
+    // and y = 4020 only run on the side of x = 1460 where the course uses
+    // them -- carried across, they would run 1,000 apart, a block of nothing
+    // between two pavements. The outermost lines frame the ground plane.
+    //
+    // No kerbside scatter, landmarks or ground patches: the town replaces
+    // them. Lighting columns stay (buildProps' LAMP_PITCH), moved onto the
+    // forecourt so they stand in front of the buildings instead of in them.
+    cityGrid: {
+      streetHalf: 230,
+      streets: [
+        { x: -4300, from: -4000, to: 10500 },
+        { x: -1460, from: -4000, to: 10500 },
+        { x: 1460, from: -4000, to: 10500 },
+        { x: 4160, from: -4000, to: 10500 },
+        { x: 6980, from: -4000, to: 10500 },
+        { x: 9800, from: -4000, to: 10500 },
+        { y: -2900, from: -5000, to: 10500 },
+        { y: -1450, from: -5000, to: 10500 },
+        { y: 0, from: -5000, to: 10500 },
+        { y: 1510, from: -5000, to: 10500 },
+        { y: 3020, from: 1460, to: 10500 },
+        { y: 4020, from: -5000, to: 1460 },
+        { y: 5430, from: -5000, to: 10500 },
+        { y: 6840, from: -5000, to: 10500 },
+        { y: 8250, from: -5000, to: 10500 },
+        { y: 9700, from: -5000, to: 10500 },
+      ],
+    },
+    sections: [],
   },
 
   3: {
