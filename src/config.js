@@ -97,7 +97,15 @@ export const PHYSICS = {
   // (the AI's aim and corner-scan lookaheads, the elevated-deck fade
   // radius); divide a latch speed by it.
   paceScale: MOVE_SCALE / PACE_REF,
-  driftTurnBoost: 1.42,
+  // Turn rate in a drift, by how deep the slide is: at the first instant
+  // of one (no slip angle yet) x driftTurnMin, at the full slip angle for
+  // the speed x driftTurnMax, eased between. Was a flat x1.42 from the
+  // moment BRAKE was pressed, so the slide itself -- holding it in,
+  // letting it straighten, catching it -- changed nothing about the line;
+  // now a held slide tightens the car's line and a released or caught one
+  // opens it again.
+  driftTurnMin: 1.15,
+  driftTurnMax: 1.65,
   driftSlip: 0.50,
   // The drift's speed limit, as the DIAL reads it (displaySpeed, km/h --
   // nitro's over-read included, since that is the number on screen): a

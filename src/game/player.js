@@ -219,7 +219,15 @@ export class PlayerCar {
       this.driftSign = 0;
     }
 
-    if (this.drifting) turnRate *= P.driftTurnBoost;
+    // How deep the slide is, as a share of the full slip angle at this
+    // speed (the same fullSlip as below, last frame's angle): the turn rate
+    // grows with it (see driftTurnMin/Max).
+    this.driftDepth = 0;
+    if (this.drifting) {
+      const full = P.driftSlip * 0.42 * Math.min(1, this.speed / P.maxSpeed);
+      this.driftDepth = full > 1e-4 ? Math.min(1, Math.abs(this.driftSlipAngle) / full) : 0;
+      turnRate *= P.driftTurnMin + (P.driftTurnMax - P.driftTurnMin) * this.driftDepth;
+    }
     if (this.boosting) turnRate *= P.boostTurnMul;
 
     const steerScale = 1 - P.steerScaleAtTop * Math.pow(ratio, P.steerScaleExp);
