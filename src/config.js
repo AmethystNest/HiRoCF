@@ -152,7 +152,9 @@ export const PHYSICS = {
   boostRampUp: 0.8,
   boostRampDown: 0.6,
   boostDuration: 2.45,
-  boostRecover: 9,
+  // Meter fill rate (% of a charge per second): 100 / 4.5 = ~22 s to a
+  // charge. It was 9 (~11 s); asked to take twice as long.
+  boostRecover: 4.5,
 
   // derived / incidental values from the same build
   launchBoostBelow: 220,
