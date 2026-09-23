@@ -912,7 +912,12 @@
       addEventListener('keyup',e=>{if(e.key==='ArrowLeft'||e.key==='a')game.input.left=false;if(e.key==='ArrowRight'||e.key==='d')game.input.right=false;if(e.key==='ArrowDown'||e.key==='s')game.input.brake=false});
       const speedEl=el('speed'),nitroBtn=el('nitro'),nitroCnt=el('nitroCnt'),nitroWrap=el('nitroWrap'),
         nitroBurstEl=el('nitroBurst'),nitroLabel=el('nitroLabel'),
-        nitroCells=Array.from(el('nitroCells').children).map(c=>({box:c,fill:c.firstElementChild})),
+        nitroCells=(()=>{
+          // One cell per charge the car can bank (NITRO.maxStock).
+          const box=el('nitroCells');
+          while(box.children.length>NITRO.maxStock)box.lastElementChild.remove();
+          return Array.from(box.children).map(c=>({box:c,fill:c.firstElementChild}));
+        })(),
         lapEl=el('lap'),posEl=el('pos'),timeEl=el('time');
       // One cell per banked charge: filled cells are charges in hand, the cell
       // after them is the meter working toward the next. The label doubles as

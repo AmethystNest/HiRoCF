@@ -99,14 +99,13 @@ export const PHYSICS = {
   paceScale: MOVE_SCALE / PACE_REF,
   driftTurnBoost: 1.42,
   driftSlip: 0.50,
-  // 328 at PACE_REF. A drift latches while BRAKE and steering are held
-  // above this speed and drops the moment speed falls back under it, and
-  // the speed a given corner is actually taken at is inversely
-  // proportional to moveScale -- a faster world holds the same radius at a
-  // proportionally LOWER `speed` value. Pinning this to a fixed number is
-  // what broke the slide at the apex of every hairpin on the two previous
-  // pace raises, so it is derived now rather than re-found by hand.
-  driftMinSpeed: Math.round((328 * PACE_REF) / MOVE_SCALE),
+  // The drift's speed limit, as the DIAL reads it (displaySpeed, km/h --
+  // nitro's over-read included, since that is the number on screen): a
+  // drift can start only above it and ends the moment the dial falls to it.
+  // Set by ear on the dial rather than derived from pace: it was a `speed`
+  // threshold (driftMinSpeed, 221 at this pace, i.e. ~102 on the dial; 246
+  // / ~113 on stage 3) and the ask was "release at 150 on the meter".
+  driftDial: 150,
   boostMoveScale: 1.38,
   boostDuration: 2.45,
   boostRecover: 9,
@@ -185,7 +184,9 @@ export const RACE = {
  * they are spent as each burst runs out.
  */
 export const NITRO = {
-  maxStock: 3,
+  // One charge, as the single boost was: three banked charges that could
+  // be chained was tried and asked back.
+  maxStock: 1,
   // Nothing on the grid: the first charge has to be earned off the line.
   startStock: 0,
   chainWindow: 1.0,
@@ -256,17 +257,8 @@ export const STAGES = {
       // moveScale is deliberately NOT overridden here any more -- pace is
       // one value for every stage (see PHYSICS.moveScale). What stays below
       // is touge-specific handling, not speed.
-      // Lowered from 435 with the switchback course, then from 400 with
-      // the 1.66 -> 1.82 moveScale step. A drift latches while BRAKE and
-      // steering are held above this speed and drops the moment speed
-      // falls back under it -- and at 435 the slide broke exactly at the
-      // apex of every hairpin. The threshold has to sit under the speed
-      // the corners are actually taken at, and that speed is not a fixed
-      // number: a faster moveScale means the same hairpin is held at a
-      // proportionally LOWER `speed` value, so this has to come down with
-      // it (400 * 1.66 / 1.82) or the same bug comes straight back. 365
-      // still leaves a drift impossible to hold at walking pace.
-      driftMinSpeed: Math.round((365 * PACE_REF) / MOVE_SCALE),
+      // (Its own drift threshold went with the move to one on the dial,
+      // PHYSICS.driftDial, for every stage.)
       launchBoostBelow: 300,
       launchBoostMul: 1.28,
       accelScaleMin: 0.115,

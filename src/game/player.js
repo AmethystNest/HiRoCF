@@ -197,12 +197,15 @@ export class PlayerCar {
 
     const steer = (input.right ? 1 : 0) - (input.left ? 1 : 0);
 
-    // Drift starts immediately when speed is high enough and BRAKE + steering
-    // are pressed together. Once active it remains latched until the car
-    // straightens, unless speed falls below the drift threshold.
+    // Drift starts immediately when the dial reads over P.driftDial and
+    // BRAKE + steering are pressed together -- or steering alone while the
+    // nitro is burning, which at that speed is enough to break the rear
+    // loose on its own. Once active it remains latched until the car
+    // straightens, unless the dial falls back to the threshold.
+    const fastEnough = this.displaySpeed > P.driftDial;
     const driftTrigger =
-      this.speed >= P.driftMinSpeed &&
-      !!input.brake &&
+      fastEnough &&
+      (!!input.brake || this.boosting) &&
       steer !== 0;
     if (!this.drifting && driftTrigger) {
       this.drifting = true;
@@ -210,8 +213,8 @@ export class PlayerCar {
     }
 
     // Low speed cannot sustain a drift. Drop back to grip as soon as the
-    // speed falls below the same threshold used to enter the drift.
-    if (this.drifting && this.speed < P.driftMinSpeed) {
+    // dial falls to the same threshold used to enter the drift.
+    if (this.drifting && !fastEnough) {
       this.drifting = false;
       this.driftSign = 0;
     }
@@ -244,7 +247,7 @@ export class PlayerCar {
 
       // Do not terminate just because BRAKE was released. Only end once the
       // car has genuinely straightened, or speed has fallen very low.
-      if ((recovering && Math.abs(this.driftSlipAngle) < 0.022) || this.speed < P.driftMinSpeed * 0.58) {
+      if (recovering && Math.abs(this.driftSlipAngle) < 0.022) {
         this.drifting = false;
         this.driftSlipAngle = 0;
         this.driftSign = 0;
