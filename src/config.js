@@ -133,7 +133,23 @@ export const PHYSICS = {
   // each other, in almost every corner of this game, so the order of the
   // two (the previous rule) could not tell a grip corner from a drift;
   // how long the brake is held can.
-  driftHoldTime: 0.25,
+  //
+  // 0.25 -> 0.15 with the pre-slide below: at 0.25, the brake held that
+  // long took ~50 km/h off the dial, so from 200 a drift fell under 150
+  // before it had begun, and above that nothing visible happened for a
+  // quarter-second -- the "hesitation" before every drift.
+  driftHoldTime: 0.15,
+  // While BRAKE and steering are held but the drift has not committed
+  // yet, the rear already steps out toward this share of the full angle;
+  // let go before driftHoldTime and it settles straight back (grip).
+  driftPreSlide: 0.45,
+  // How fast the slip angle goes to where it is being taken (1/s): into a
+  // slide (was 9), and the drawn body following the slip (was 10).
+  driftSlipResponse: 14,
+  driftVisualResponse: 16,
+  // BRAKE's deceleration while drifting, as a share of the normal: in a
+  // drift it is holding the angle, not stopping the car.
+  driftBrakeMul: 0.5,
   // Share of its speed a drift sheds per second at full depth (scaled by
   // how deep the slide is): the price of the extra rotation, so a corner
   // grip can make is faster taken on grip. Kept small on purpose.

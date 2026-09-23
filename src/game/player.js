@@ -198,7 +198,7 @@ export class PlayerCar {
     const targetMax = Math.min(P.maxSpeed, this.speedTarget);
 
     if (input.brake) {
-      this.speed -= P.brake * P.brakeMul * dt;
+      this.speed -= P.brake * P.brakeMul * (this.drifting ? P.driftBrakeMul : 1) * dt;
     } else {
       const gap = targetMax - this.speed;
       if (gap > 0) {
@@ -253,8 +253,11 @@ export class PlayerCar {
     // How deep the slide is, as a share of the full slip angle at this
     // speed (the same fullSlip as below, last frame's angle): the turn rate
     // grows with it (see driftTurnMin/Max).
+    // Committing (BRAKE and steering down, not yet held long enough): the
+    // rear is already stepping out, see driftPreSlide.
+    const preSlide = !this.drifting && fastEnough && steer !== 0 && this._coHold > 0;
     this.driftDepth = 0;
-    if (this.drifting) {
+    if (this.drifting || preSlide) {
       const full = this.fullDriftAngle();
       this.driftDepth = full > 1e-4 ? Math.min(1, Math.abs(this.driftSlipAngle) / full) : 0;
       turnRate *= P.driftTurnMin + (P.driftTurnMax - P.driftTurnMin) * this.driftDepth;
@@ -284,7 +287,7 @@ export class PlayerCar {
       else slipTarget = 0;
 
       const recovering = steer !== this.driftSign;
-      const response = recovering ? (steer === 0 ? 5.2 : 7.4) : 9.0;
+      const response = recovering ? (steer === 0 ? 5.2 : 7.4) : P.driftSlipResponse;
       this.driftSlipAngle += (slipTarget - this.driftSlipAngle) * (1 - Math.exp(-dt * response));
 
       moveAngle -= this.driftSlipAngle;
@@ -298,13 +301,17 @@ export class PlayerCar {
         this.driftSlipAngle = 0;
         this.driftSign = 0;
       }
+    } else if (preSlide) {
+      const target = (steer > 0 ? 1 : -1) * this.fullDriftAngle() * P.driftPreSlide;
+      this.driftSlipAngle += (target - this.driftSlipAngle) * (1 - Math.exp(-dt * P.driftSlipResponse));
+      moveAngle -= this.driftSlipAngle;
     } else {
       this.driftSlipAngle += (0 - this.driftSlipAngle) * (1 - Math.exp(-dt * 7));
     }
 
     // The sprite follows the actual slip state, so visual drift persists for
     // exactly as long as the physical slide does.
-    this.driftVisualAngle += (this.driftSlipAngle * P.driftVisualGain - this.driftVisualAngle) * (1 - Math.exp(-dt * 10));
+    this.driftVisualAngle += (this.driftSlipAngle * P.driftVisualGain - this.driftVisualAngle) * (1 - Math.exp(-dt * P.driftVisualResponse));
 
     this.x += Math.cos(moveAngle) * moveSpeed * dt;
     this.y += Math.sin(moveAngle) * moveSpeed * dt;
