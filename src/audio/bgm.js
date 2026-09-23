@@ -4,9 +4,9 @@
  * Where the tracks come from: build/standalone.mjs embeds each prepared
  * track (assets/bgm/stage<N>.mp3, see build/tools/make-bgm.mjs) as a
  * <script type="application/octet-stream" id="bgm-<N>"> holding its
- * base64, which the browser keeps as inert text. The dev page, served
- * over http, has no such element and plays assets/bgm/stage<N>.mp3
- * directly instead. A stage with neither (any build made without the
+ * base64, which the browser keeps as inert text. The dev page and the
+ * PWA build (build/pwa.mjs), served over http(s), have no such element and
+ * play assets/bgm/stage<N>.mp3 directly instead. A stage with neither (any build made without the
  * local tracks) is simply silent -- nothing here names which stages have
  * music.
  *
@@ -63,8 +63,12 @@ export function makeBgm(ctx, bus, el) {
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
       return { url: URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' })), owned: true };
     }
+    // A page built without music says so (build/pwa.mjs without
+    // --with-bgm), rather than have every stage ask the server for a track
+    // it knows is not there.
     if (typeof location !== 'undefined' && /^https?:/.test(location.protocol)
-        && !document.querySelector('script[type="application/octet-stream"][id^="bgm-"]')) {
+        && !document.querySelector('script[type="application/octet-stream"][id^="bgm-"]')
+        && !document.querySelector('meta[name="hirocf-bgm"][content="none"]')) {
       return { url: `assets/bgm/stage${stageId}.mp3`, owned: false };
     }
     return null;

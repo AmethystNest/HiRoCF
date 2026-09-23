@@ -12,6 +12,8 @@
   - `render/` — 路面・リボン・ミニマップ・プロップ・エフェクト
 - `build/standalone.mjs` — esbuild で `src/` を単一 HTML(`build/index.standalone.html`)にまとめる。配布物はこれ。
 - `build/artifact.mjs` — Claude Artifact ホスト用の別ビルド(head 構成が異なるだけ)。
+- `build/pwa.mjs` — PWA ビルド。`dist/`(git 管理外)に静的サイトとして出力する。画像は bundle から抜き出して WebP 化(地面タイルは可逆、車・プロップは near-lossless)、manifest・アイコン(`build/pwa/icons/`)・Service Worker(`build/pwa/sw.js`: 起動に要る全ファイルをビルド単位でキャッシュ、BGM は初回再生時にキャッシュして Range 要求に 206 で応答)を付ける。**https で配信しないと SW が動かない**(localhost は可)。`npm run build:pwa` は BGM なし(公開配信してよい)、`npm run build:pwa:bgm` は BGM 入り(**非公開の配信先専用**)。画像変換に `sharp` を使う。
+- `build/lib/page.mjs` — standalone / PWA 共通の index.html 分解と bundle。
 - `assets/bgm/stage<N>.mp3` — ステージ BGM。市販曲なので **git 管理外**(`.gitignore`)。`node build/tools/make-bgm.mjs 1=<mp3> 2=<mp3> ...` で音量を揃えて 96kbps(5分超はフェードで切る。単一HTMLを 30MB 未満に収めるため)に再エンコードして置き、`build:standalone` が見つかった分だけ埋め込む。無ければその面は無音で動く。
 
 ステージは前のステージに（どの難易度でも）勝つと解放される。確認用に URL に `?unlockall` を付けると保存内容を変えずに全ステージを開ける（例 `build/index.standalone.html?unlockall`）。
@@ -25,6 +27,7 @@ npm test                 # vitest run
 npm run lint              # eslint src
 npm run format            # prettier --write .
 npm run build:standalone  # build/index.standalone.html を生成
+npm run build:pwa         # dist/ に PWA(BGM なし)を生成。build:pwa:bgm で BGM 入り
 ```
 
 ## このセッションの実行環境

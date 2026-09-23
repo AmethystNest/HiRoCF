@@ -7,52 +7,12 @@
  * -- see build/index.artifact.html's own <script type="module"> for why
  * that path fails there (module imports are blocked outside http(s)).
  */
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync, readdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import * as esbuild from 'esbuild';
+import { root, readPage, bundleBoot } from './lib/page.mjs';
 
-const root = new URL('..', import.meta.url).pathname;
-const src = readFileSync(join(root, 'index.html'), 'utf8');
-
-const style = src.slice(src.indexOf('<style>'), src.indexOf('</style>') + 8);
-// The repo page puts state on <body> (the control pads start hidden), and
-// this build writes its own body tag, so carry the attributes across or
-// that state is silently dropped in the standalone only.
-const bodyTag = /<body([^>]*)>/.exec(src)?.[1] ?? '';
-const bodyStart = src.indexOf('<div id="app"></div>');
-const scriptStart = src.indexOf('<script type="module">');
-const scriptEnd = src.indexOf('</script>', scriptStart) + '</script>'.length;
-const body = src.slice(bodyStart, scriptStart);
-let boot = src.slice(scriptStart + '<script type="module">'.length, scriptEnd - '</script>'.length);
-
-// Turn the three dynamic imports (chosen for the artifact build, which loads
-// into an already-running host page) into static ones so esbuild inlines
-// them instead of emitting a second chunk.
-boot = boot
-  .replace(/const \{boot\}\s*=\s*await import\('\.\/src\/main\.js'\);\s*/, '')
-  .replace(/const \{NITRO,PHYSICS\}\s*=\s*await import\('\.\/src\/config\.js'\);\s*/, '')
-  .replace(/const \{createRecords,nextStarGap\}\s*=\s*await import\('\.\/src\/game\/records\.js'\);\s*/, '');
-
-const tmp = mkdtempSync(join(tmpdir(), 'hirocf-standalone-'));
-const entryPath = join(tmp, 'entry.js');
-writeFileSync(
-  entryPath,
-  `import { boot } from '${join(root, 'src/main.js')}';\n` +
-    `import { NITRO, PHYSICS } from '${join(root, 'src/config.js')}';\n` +
-    `import { createRecords, nextStarGap } from '${join(root, 'src/game/records.js')}';\n` +
-    boot,
-);
-
-const result = await esbuild.build({
-  entryPoints: [entryPath],
-  bundle: true,
-  format: 'iife',
-  minify: true,
-  write: false,
-});
-rmSync(tmp, { recursive: true, force: true });
-const bundle = result.outputFiles[0].text;
+const { style, bodyTag, body, boot } = readPage();
+const bundle = await bundleBoot(boot);
 
 // Stage music, if prepared locally (build/tools/make-bgm.mjs; assets/bgm/ is
 // git-ignored). Each track goes in as inert base64 text in a non-script
