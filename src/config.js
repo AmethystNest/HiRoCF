@@ -127,14 +127,17 @@ export const PHYSICS = {
   // wheel released, by how deep the slide still is: the car was stopping
   // dead in yaw the instant the button came up, mid-slide.
   driftCarryYaw: 0.45,
+  // How long BRAKE and steering have to be held down together before the
+  // car breaks into a drift (s). Shorter presses slow the car on grip.
+  // Steering and braking arrive together, or within a frame or two of
+  // each other, in almost every corner of this game, so the order of the
+  // two (the previous rule) could not tell a grip corner from a drift;
+  // how long the brake is held can.
+  driftHoldTime: 0.25,
   // Share of its speed a drift sheds per second at full depth (scaled by
   // how deep the slide is): the price of the extra rotation, so a corner
   // grip can make is faster taken on grip. Kept small on purpose.
   driftScrub: 0.05,
-  // How far BRAKE may lead the steering and still count as pressed
-  // together (s). Pressed in that order any later, it is braking into a
-  // corner on grip; see the drift trigger in player.js.
-  driftPairWindow: 0.08,
   // Brake deceleration as a multiple of `brake`; was a hard-coded 1.30.
   brakeMul: 0.95,
   // The drift's speed limit, as the DIAL reads it (displaySpeed, km/h --
@@ -145,6 +148,12 @@ export const PHYSICS = {
   // / ~113 on stage 3) and the ask was "release at 150 on the meter".
   driftDial: 150,
   boostMoveScale: 1.38,
+  // The nitro's effect -- its movement scale, its extra acceleration and
+  // its turn-rate change -- eases in over boostRampUp and back out over
+  // boostRampDown (s) instead of switching: at full strength from the
+  // first frame it was a lurch forward, and a lurch back when it ran out.
+  boostRampUp: 0.8,
+  boostRampDown: 0.6,
   boostDuration: 2.45,
   boostRecover: 9,
 
@@ -156,7 +165,11 @@ export const PHYSICS = {
   steerScaleAtTop: 0.46,
   steerScaleExp: 1.35,
   turnCurveExp: 1.55,
-  boostTurnMul: 0.82,
+  // Turn rate while the nitro burns, eased in with it. Was 0.82 -- LESS
+  // turn at 1.38x the movement, a 1.68x wider radius -- which made a burst
+  // unusable anywhere but a straight; asked to turn more instead. At 1.25
+  // the radius is 1.10x the unboosted car's at the same speed.
+  boostTurnMul: 1.25,
   minSteerSpeed: 18,
   speedTargetBase: 670,
   speedTargetSpread: 90,

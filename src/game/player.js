@@ -45,8 +45,8 @@ export class PlayerCar {
     // and would otherwise hide any slip: the car would visibly slide
     // sideways but never look tilted while doing it.
     this.driftVisualAngle = 0;
-    // Latched player drift state: BRAKE hit while already steering starts a
-    // slide (braking first and then steering stays on grip). Once started,
+    // Latched player drift state: BRAKE and steering held together for
+    // driftHoldTime starts a slide (shorter presses stay on grip). Once started,
     // releasing the brake does not cancel it; the slide stays active until
     // the slip angle has naturally returned close to straight.
     this.driftSlipAngle = 0;
@@ -96,10 +96,9 @@ export class PlayerCar {
     this.driftSlipAngle = 0;
     this.driftVisualAngle = 0;
     this.driftSign = 0;
-    // button history for the drift trigger's press-order test
-    this._brakeWasDown = false;
-    this._brakeHeld = 0;
-    this._prevSteer = 0;
+    // how long BRAKE and steering have been held together (drift trigger)
+    this._coHold = 0;
+    this.boostMix = 0;
   }
 
   /**
@@ -138,8 +137,19 @@ export class PlayerCar {
     return P.driftAngleMax * (1 - P.driftAngleSpeedShare + P.driftAngleSpeedShare * ratio);
   }
 
+  /** The nitro's effect eased in and out (0..1), see boostRampUp/Down. */
+  get boostEase() {
+    const t = this.boostMix ?? 0;
+    return t * t * (3 - 2 * t);
+  }
+
+  /** Movement (and dial) multiplier from the nitro at this instant. */
+  get boostFactor() {
+    return 1 + (P.boostMoveScale - 1) * this.boostEase;
+  }
+
   get displaySpeed() {
-    return this.speed * P.hudSpeedFactor * (this.boosting ? P.boostMoveScale : 1);
+    return this.speed * P.hudSpeedFactor * this.boostFactor;
   }
 
   update(dt, input) {
@@ -158,6 +168,14 @@ export class PlayerCar {
         this.boosting = false;
         this.boostTimer = 0;
       }
+    }
+    // how far in the nitro's effect is (see boostRampUp/Down)
+    {
+      const rate = this.boosting ? 1 / P.boostRampUp : -1 / P.boostRampDown;
+      this.boostMix = Math.max(0, Math.min(1, (this.boostMix ?? 0) + rate * dt));
+    }
+    if (this.boosting) {
+      // (recharge is frozen for as long as a burst is running)
     } else if (this.nitroStock < NITRO.maxStock) {
       // The meter is frozen for as long as a burst is running, as it was
       // with the single boost. That is what a chain costs: three charges
@@ -194,9 +212,9 @@ export class PlayerCar {
       // Nitro adds actual acceleration as well as movement scaling. It is
       // strongest at low speed so firing one out of a slow corner clearly
       // launches the car instead of only draining the gauge.
-      if (this.boosting) {
+      if (this.boostEase > 0) {
         const boostAccelScale = 0.35 + 0.95 * (1 - Math.min(1, this.speed / P.maxSpeed));
-        this.speed += P.accel * 1.55 * boostAccelScale * dt;
+        this.speed += P.accel * 1.55 * boostAccelScale * this.boostEase * dt;
       }
     }
     // A slide costs speed, in proportion to how deep it is (driftScrub);
@@ -211,26 +229,15 @@ export class PlayerCar {
 
     const steer = (input.right ? 1 : 0) - (input.left ? 1 : 0);
 
-    // Drift or grip is decided by the ORDER of the two buttons. Turning in
-    // and then hitting BRAKE (or both at once) throws the car into a drift;
-    // braking first and then turning in is braking into a corner, and stays
-    // on grip for as long as BRAKE stays down. Until this, any moment with
-    // both held started a drift, so there was no way to brake into a
-    // corner without one. Only above P.driftDial on the dial; and with the
-    // nitro burning, steering alone is enough to break the rear loose.
-    const brakeDown = !!input.brake;
-    const brakeEdge = brakeDown && !this._brakeWasDown;
-    this._brakeHeld = brakeDown ? (brakeEdge ? 0 : this._brakeHeld + dt) : 0;
-    this._brakeWasDown = brakeDown;
-    const steerEdge = steer !== 0 && steer !== this._prevSteer;
-    this._prevSteer = steer;
+    // Drift or grip is decided by how LONG BRAKE and steering are held down
+    // together: past P.driftHoldTime the car breaks into a drift, and any
+    // shorter press only slows it on grip. (Two earlier rules: any moment
+    // with both held -- no grip braking at all; then the order of the two
+    // -- but they arrive together in nearly every corner of this game.)
+    // Only above P.driftDial on the dial.
+    this._coHold = input.brake && steer !== 0 ? (this._coHold ?? 0) + dt : 0;
     const fastEnough = this.displaySpeed > P.driftDial;
-    const driftTrigger =
-      fastEnough &&
-      steer !== 0 &&
-      (this.boosting ||
-        (brakeEdge) ||
-        (brakeDown && steerEdge && this._brakeHeld <= P.driftPairWindow));
+    const driftTrigger = fastEnough && steer !== 0 && this._coHold >= P.driftHoldTime;
     if (!this.drifting && driftTrigger) {
       this.drifting = true;
       this.driftSign = steer > 0 ? 1 : -1;
@@ -252,7 +259,7 @@ export class PlayerCar {
       this.driftDepth = full > 1e-4 ? Math.min(1, Math.abs(this.driftSlipAngle) / full) : 0;
       turnRate *= P.driftTurnMin + (P.driftTurnMax - P.driftTurnMin) * this.driftDepth;
     }
-    if (this.boosting) turnRate *= P.boostTurnMul;
+    turnRate *= 1 + (P.boostTurnMul - 1) * this.boostEase;
 
     const steerScale = 1 - P.steerScaleAtTop * Math.pow(ratio, P.steerScaleExp);
     if (this.speed > P.minSteerSpeed) {
@@ -265,7 +272,7 @@ export class PlayerCar {
     }
 
     // --- movement, with latched drift slip ---
-    const moveSpeed = this.speed * P.moveScale * (this.boosting ? P.boostMoveScale : 1);
+    const moveSpeed = this.speed * P.moveScale * this.boostFactor;
     let moveAngle = this.angle;
     let slipTarget = 0;
     if (this.drifting) {
