@@ -127,6 +127,14 @@ export const PHYSICS = {
   // wheel released, by how deep the slide still is: the car was stopping
   // dead in yaw the instant the button came up, mid-slide.
   driftCarryYaw: 0.45,
+  // Share of its speed a drift sheds per second at full depth (scaled by
+  // how deep the slide is): the price of the extra rotation, so a corner
+  // grip can make is faster taken on grip. Kept small on purpose.
+  driftScrub: 0.05,
+  // How far BRAKE may lead the steering and still count as pressed
+  // together (s). Pressed in that order any later, it is braking into a
+  // corner on grip; see the drift trigger in player.js.
+  driftPairWindow: 0.08,
   // Brake deceleration as a multiple of `brake`; was a hard-coded 1.30.
   brakeMul: 0.95,
   // The drift's speed limit, as the DIAL reads it (displaySpeed, km/h --

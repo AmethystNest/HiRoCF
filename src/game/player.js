@@ -45,7 +45,8 @@ export class PlayerCar {
     // and would otherwise hide any slip: the car would visibly slide
     // sideways but never look tilted while doing it.
     this.driftVisualAngle = 0;
-    // Latched player drift state: brake + steer starts a slide. Once started,
+    // Latched player drift state: BRAKE hit while already steering starts a
+    // slide (braking first and then steering stays on grip). Once started,
     // releasing the brake does not cancel it; the slide stays active until
     // the slip angle has naturally returned close to straight.
     this.driftSlipAngle = 0;
@@ -95,6 +96,10 @@ export class PlayerCar {
     this.driftSlipAngle = 0;
     this.driftVisualAngle = 0;
     this.driftSign = 0;
+    // button history for the drift trigger's press-order test
+    this._brakeWasDown = false;
+    this._brakeHeld = 0;
+    this._prevSteer = 0;
   }
 
   /**
@@ -194,6 +199,9 @@ export class PlayerCar {
         this.speed += P.accel * 1.55 * boostAccelScale * dt;
       }
     }
+    // A slide costs speed, in proportion to how deep it is (driftScrub);
+    // last frame's depth, as for the turn rate below.
+    if (this.drifting) this.speed -= this.speed * P.driftScrub * (this.driftDepth ?? 0) * dt;
     this.speed = Math.max(0, Math.min(P.maxSpeed, this.speed));
 
     // --- steering ---
@@ -203,16 +211,26 @@ export class PlayerCar {
 
     const steer = (input.right ? 1 : 0) - (input.left ? 1 : 0);
 
-    // Drift starts immediately when the dial reads over P.driftDial and
-    // BRAKE + steering are pressed together -- or steering alone while the
-    // nitro is burning, which at that speed is enough to break the rear
-    // loose on its own. Once active it remains latched until the car
-    // straightens, unless the dial falls back to the threshold.
+    // Drift or grip is decided by the ORDER of the two buttons. Turning in
+    // and then hitting BRAKE (or both at once) throws the car into a drift;
+    // braking first and then turning in is braking into a corner, and stays
+    // on grip for as long as BRAKE stays down. Until this, any moment with
+    // both held started a drift, so there was no way to brake into a
+    // corner without one. Only above P.driftDial on the dial; and with the
+    // nitro burning, steering alone is enough to break the rear loose.
+    const brakeDown = !!input.brake;
+    const brakeEdge = brakeDown && !this._brakeWasDown;
+    this._brakeHeld = brakeDown ? (brakeEdge ? 0 : this._brakeHeld + dt) : 0;
+    this._brakeWasDown = brakeDown;
+    const steerEdge = steer !== 0 && steer !== this._prevSteer;
+    this._prevSteer = steer;
     const fastEnough = this.displaySpeed > P.driftDial;
     const driftTrigger =
       fastEnough &&
-      (!!input.brake || this.boosting) &&
-      steer !== 0;
+      steer !== 0 &&
+      (this.boosting ||
+        (brakeEdge) ||
+        (brakeDown && steerEdge && this._brakeHeld <= P.driftPairWindow));
     if (!this.drifting && driftTrigger) {
       this.drifting = true;
       this.driftSign = steer > 0 ? 1 : -1;
