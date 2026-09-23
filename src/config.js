@@ -104,9 +104,31 @@ export const PHYSICS = {
   // letting it straighten, catching it -- changed nothing about the line;
   // now a held slide tightens the car's line and a released or caught one
   // opens it again.
+  // 1.65 -> 1.72 with the deeper slip below: every degree of slip is a
+  // degree the heading turns that the line does not, so the same rotation
+  // needs a little more of it. Measured, 1 s of held drift turns the line
+  // 193 / 117 / 53 degrees at 160 / 250 / 330 on the dial (grip: 125 / 80
+  // / 43), where the 12-degree drift at x1.65 did 194 / 118 / 56.
   driftTurnMin: 1.15,
-  driftTurnMax: 1.65,
-  driftSlip: 0.50,
+  driftTurnMax: 1.72,
+  // Slip angle at full commitment, radians: driftAngleMax at top speed,
+  // (1 - driftAngleSpeedShare) of it at a standstill, linear between. Was
+  // 0.21 x speed share alone -- 5 degrees at 160 on the dial, 12 at the
+  // top -- which read as running slightly crooked rather than sliding.
+  driftAngleMax: 0.30,
+  driftAngleSpeedShare: 0.35,
+  // How much further the body is DRAWN round than the physics slips it.
+  // The slip is what moves the car off its heading, and every degree of it
+  // built up is a degree the line swings wide on entry; the drawn angle is
+  // what reads as a drift. Exaggerating only the second is what arcade
+  // racers do, and the collision hull follows the drawn body.
+  driftVisualGain: 1.5,
+  // Share of the full drift turn rate the car keeps rotating at with the
+  // wheel released, by how deep the slide still is: the car was stopping
+  // dead in yaw the instant the button came up, mid-slide.
+  driftCarryYaw: 0.45,
+  // Brake deceleration as a multiple of `brake`; was a hard-coded 1.30.
+  brakeMul: 0.95,
   // The drift's speed limit, as the DIAL reads it (displaySpeed, km/h --
   // nitro's over-read included, since that is the number on screen): a
   // drift can start only above it and ends the moment the dial falls to it.

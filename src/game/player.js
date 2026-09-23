@@ -127,6 +127,12 @@ export class PlayerCar {
     return turnRate * steerScale;
   }
 
+  /** Slip angle of a fully committed drift at the current speed (rad). */
+  fullDriftAngle() {
+    const ratio = Math.min(1, this.speed / P.maxSpeed);
+    return P.driftAngleMax * (1 - P.driftAngleSpeedShare + P.driftAngleSpeedShare * ratio);
+  }
+
   get displaySpeed() {
     return this.speed * P.hudSpeedFactor * (this.boosting ? P.boostMoveScale : 1);
   }
@@ -169,7 +175,7 @@ export class PlayerCar {
     const targetMax = Math.min(P.maxSpeed, this.speedTarget);
 
     if (input.brake) {
-      this.speed -= P.brake * 1.30 * dt;
+      this.speed -= P.brake * P.brakeMul * dt;
     } else {
       const gap = targetMax - this.speed;
       if (gap > 0) {
@@ -224,21 +230,28 @@ export class PlayerCar {
     // grows with it (see driftTurnMin/Max).
     this.driftDepth = 0;
     if (this.drifting) {
-      const full = P.driftSlip * 0.42 * Math.min(1, this.speed / P.maxSpeed);
+      const full = this.fullDriftAngle();
       this.driftDepth = full > 1e-4 ? Math.min(1, Math.abs(this.driftSlipAngle) / full) : 0;
       turnRate *= P.driftTurnMin + (P.driftTurnMax - P.driftTurnMin) * this.driftDepth;
     }
     if (this.boosting) turnRate *= P.boostTurnMul;
 
     const steerScale = 1 - P.steerScaleAtTop * Math.pow(ratio, P.steerScaleExp);
-    if (this.speed > P.minSteerSpeed) this.angle += steer * turnRate * steerScale * dt;
+    if (this.speed > P.minSteerSpeed) {
+      this.angle += steer * turnRate * steerScale * dt;
+      // Wheel released mid-slide: the car carries on rotating with the
+      // slide, easing off as the slide does, instead of stopping dead.
+      if (this.drifting && steer === 0) {
+        this.angle += this.driftSign * turnRate * steerScale * P.driftCarryYaw * this.driftDepth * dt;
+      }
+    }
 
     // --- movement, with latched drift slip ---
     const moveSpeed = this.speed * P.moveScale * (this.boosting ? P.boostMoveScale : 1);
     let moveAngle = this.angle;
     let slipTarget = 0;
     if (this.drifting) {
-      const fullSlip = this.driftSign * P.driftSlip * 0.42 * Math.min(1, this.speed / P.maxSpeed);
+      const fullSlip = this.driftSign * this.fullDriftAngle();
 
       // Keep the slide while steering into it. Releasing the wheel lets the
       // rear progressively settle; counter-steering settles it more quickly.
@@ -266,7 +279,7 @@ export class PlayerCar {
 
     // The sprite follows the actual slip state, so visual drift persists for
     // exactly as long as the physical slide does.
-    this.driftVisualAngle += (this.driftSlipAngle - this.driftVisualAngle) * (1 - Math.exp(-dt * 10));
+    this.driftVisualAngle += (this.driftSlipAngle * P.driftVisualGain - this.driftVisualAngle) * (1 - Math.exp(-dt * 10));
 
     this.x += Math.cos(moveAngle) * moveSpeed * dt;
     this.y += Math.sin(moveAngle) * moveSpeed * dt;
