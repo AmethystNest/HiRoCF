@@ -233,6 +233,32 @@ export const RACE = {
  * into one unbroken 3 x boostDuration run with nothing lost, but only if
  * they are spent as each burst runs out.
  */
+/**
+ * Rival strength. NORMAL is the game as every stage was tuned: its
+ * multipliers are 1 and change nothing. The others scale only the rival's
+ * top speed and acceleration -- what DustRacing2D's difficulty does to its
+ * AI as well -- so its line, braking points and drift stay the ones each
+ * stage was tuned around. Values measured with the lap harness, see the
+ * difficulty test in rival.test.js for what they come to per stage.
+ */
+export const DIFFICULTY = {
+  easy: { label: 'EASY', speed: 0.9, accel: 0.85 },
+  normal: { label: 'NORMAL', speed: 1, accel: 1 },
+  hard: { label: 'HARD', speed: 1.05, accel: 1.12 },
+};
+
+/** The rival's tuning for a stage at a difficulty (NORMAL: unchanged). */
+export function rivalTuning(rival, difficulty = 'normal') {
+  const d = DIFFICULTY[difficulty] || DIFFICULTY.normal;
+  if (d.speed === 1 && d.accel === 1) return rival;
+  return {
+    ...rival,
+    maxSpeed: rival.maxSpeed * d.speed,
+    accel: rival.accel * d.accel,
+    ...(rival.launchAccel != null ? { launchAccel: rival.launchAccel * d.accel } : {}),
+  };
+}
+
 export const NITRO = {
   // One charge, as the single boost was: three banked charges that could
   // be chained was tried and asked back.

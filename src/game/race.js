@@ -78,6 +78,8 @@ export class Race {
     // player crosses the line into it (never for the final finish crossing,
     // which the finish overlay already announces), cleared once read.
     this.lapAnnounce = null;
+    // Set once, when the player's race is over (see resultFor).
+    this.result = null;
   }
 
   addCar(car, { isPlayer = false, name = '' } = {}) {
@@ -119,7 +121,36 @@ export class Race {
         e.progress.finishTime = this.time;
       }
     }
-    if (this.player?.progress.finished) this.state = 'finished';
+    if (this.player?.progress.finished) {
+      this.state = 'finished';
+      this.result = this.resultFor(this.player);
+    }
+  }
+
+  /**
+   * The finished entry's result against the field, frozen at the moment it
+   * crosses the line: `won`, and `gap` -- seconds to the nearest car on the
+   * other side of it. A car that finished first is timed exactly; one still
+   * on the road is timed by the distance it has left at its own average
+   * pace over the race, which is what "won by 2.1 s" means to a player
+   * watching the rival come round the last corner.
+   */
+  resultFor(entry) {
+    const others = this.entries.filter((e) => e !== entry);
+    const won = others.every((o) => !o.progress.finished);
+    const t = entry.progress.finishTime ?? this.time;
+    let gap = Infinity;
+    for (const o of others) {
+      let g;
+      if (o.progress.finished) g = t - o.progress.finishTime;
+      else {
+        const covered = o.progress.total + this.startBack;
+        const pace = this.time > 0 ? covered / this.time : 0;
+        g = pace > 0 ? (entry.progress.total - o.progress.total) / pace : Infinity;
+      }
+      gap = Math.min(gap, g);
+    }
+    return { won, time: t, gap: Number.isFinite(gap) ? gap : null };
   }
 }
 

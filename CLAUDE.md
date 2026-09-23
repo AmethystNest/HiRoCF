@@ -7,12 +7,14 @@
 - `index.html` — ページ全体、HUD、タッチ操作。`src/main.js` を ES モジュールとして読み込む。
 - `src/` — ゲーム本体(ES モジュール、開発中はバンドラ不要)
   - `main.js`, `config.js`, `pixi.js`(バンドル済み PixiJS)
-  - `game/` — プレイヤー物理、ライバル AI、レース進行
+  - `game/` — プレイヤー物理、ライバル AI、レース進行、記録（`records.js`: ベストタイム・★・ステージ解放・難易度を localStorage に保存。使えない環境でも落ちずにその回だけ保持）
   - `track/` — コース中心線、ステージレイアウト
   - `render/` — 路面・リボン・ミニマップ・プロップ・エフェクト
 - `build/standalone.mjs` — esbuild で `src/` を単一 HTML(`build/index.standalone.html`)にまとめる。配布物はこれ。
 - `build/artifact.mjs` — Claude Artifact ホスト用の別ビルド(head 構成が異なるだけ)。
 - `assets/bgm/stage<N>.mp3` — ステージ BGM。市販曲なので **git 管理外**(`.gitignore`)。`node build/tools/make-bgm.mjs 1=<mp3> 2=<mp3> ...` で音量を揃えて 96kbps(5分超はフェードで切る。単一HTMLを 30MB 未満に収めるため)に再エンコードして置き、`build:standalone` が見つかった分だけ埋め込む。無ければその面は無音で動く。
+
+ステージは前のステージに（どの難易度でも）勝つと解放される。確認用に URL に `?unlockall` を付けると保存内容を変えずに全ステージを開ける（例 `build/index.standalone.html?unlockall`）。
 
 ## 開発コマンド
 

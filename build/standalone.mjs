@@ -26,12 +26,13 @@ const scriptEnd = src.indexOf('</script>', scriptStart) + '</script>'.length;
 const body = src.slice(bodyStart, scriptStart);
 let boot = src.slice(scriptStart + '<script type="module">'.length, scriptEnd - '</script>'.length);
 
-// Turn the two dynamic imports (chosen for the artifact build, which loads
+// Turn the three dynamic imports (chosen for the artifact build, which loads
 // into an already-running host page) into static ones so esbuild inlines
 // them instead of emitting a second chunk.
 boot = boot
   .replace(/const \{boot\}\s*=\s*await import\('\.\/src\/main\.js'\);\s*/, '')
-  .replace(/const \{NITRO,PHYSICS\}\s*=\s*await import\('\.\/src\/config\.js'\);\s*/, '');
+  .replace(/const \{NITRO,PHYSICS\}\s*=\s*await import\('\.\/src\/config\.js'\);\s*/, '')
+  .replace(/const \{createRecords,nextStarGap\}\s*=\s*await import\('\.\/src\/game\/records\.js'\);\s*/, '');
 
 const tmp = mkdtempSync(join(tmpdir(), 'hirocf-standalone-'));
 const entryPath = join(tmp, 'entry.js');
@@ -39,6 +40,7 @@ writeFileSync(
   entryPath,
   `import { boot } from '${join(root, 'src/main.js')}';\n` +
     `import { NITRO, PHYSICS } from '${join(root, 'src/config.js')}';\n` +
+    `import { createRecords, nextStarGap } from '${join(root, 'src/game/records.js')}';\n` +
     boot,
 );
 

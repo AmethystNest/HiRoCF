@@ -1,5 +1,5 @@
 import { Application, Assets, Container, Graphics, Sprite, Texture, Rectangle } from './pixi.js';
-import { STAGES, PHYSICS, CAR_SIZE, CAR_VISUAL_SCALE, CAR_HULL_SCALE, CAR_HULL_OFFSET, DRIFT_MARK_LIFE } from './config.js';
+import { STAGES, PHYSICS, rivalTuning, CAR_SIZE, CAR_VISUAL_SCALE, CAR_HULL_SCALE, CAR_HULL_OFFSET, DRIFT_MARK_LIFE } from './config.js';
 import { STAGE_PATHS } from './track/stages.js';
 import { buildSurface, surfaceExtent, visibleBarrierHalf, buildRampStructure, buildTunnelStructure, buildElevatedDeckShadow, elevatedRuns, deckRuns, foldLimits, squeezedBarrier } from './render/surfaces.js';
 import { buildProps, buildGroundPatches } from './render/props.js';
@@ -299,6 +299,8 @@ export class Game {
     // camera must not move them.
     this.camZoom = 1;
     this.stageId = null;
+    // Rival strength (config.js DIFFICULTY), applied at the next loadStage.
+    this.difficulty = 'normal';
 
     this.finishFX = buildFinishFX();
     app.stage.addChild(this.finishFX.view);
@@ -977,7 +979,7 @@ export class Game {
     this.actors.addChild(this.playerSprite);
 
     // --- rival ---
-    this.rival = new RivalCar(path, cfg, cfg.rival);
+    this.rival = new RivalCar(path, cfg, rivalTuning(cfg.rival, this.difficulty));
     // The AI clamps its own racing line so the car stays on the road; that
     // clamp needs the body's real half-width, which only exists once the
     // world scale does. Stage 4's box truck is wide enough that the old
@@ -1633,7 +1635,7 @@ function conditionCarTexture(texture) {
   return Texture.from(canvas);
 }
 
-export async function boot({ stageId = 1, onReady, audioCtx, bgmEl } = {}) {
+export async function boot({ stageId = 1, difficulty = 'normal', onReady, audioCtx, bgmEl } = {}) {
   const app = new Application();
   await app.init({
     background: '#161a1e',
@@ -1701,6 +1703,7 @@ export async function boot({ stageId = 1, onReady, audioCtx, bgmEl } = {}) {
   }
 
   const game = new Game(app, tex, cars, propSheet, audioCtx, bgmEl);
+  game.difficulty = difficulty;
   game.loadStage(stageId);
 
   app.ticker.add((ticker) => {

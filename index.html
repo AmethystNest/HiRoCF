@@ -463,7 +463,7 @@
      budget main.js frames the car below. */
   #finishOverlay{align-items:flex-start;padding-top:clamp(12px,5.6vh,54px)}
   #finishCard{position:relative;border-radius:24px;min-width:min(78vw,300px);
-    padding:clamp(14px,3.2vh,30px) clamp(18px,3.2vh,30px) clamp(12px,2.8vh,26px);
+    padding:clamp(12px,2.6vh,26px) clamp(18px,3.2vh,30px) clamp(10px,2.2vh,22px);
     background:linear-gradient(180deg,rgba(18,23,29,.96),rgba(7,9,12,.97));
     border:1px solid rgba(255,255,255,.14);
     box-shadow:0 26px 70px rgba(0,0,0,.66),inset 0 1px 0 rgba(255,255,255,.14);
@@ -491,7 +491,7 @@
   /* The result word, in the same chrome as VS and the countdown: raked,
      brushed, sheen swept across it as it lands -- steel for a loss, and
      the same treatment in gold for a win. */
-  #finishCard .place{font-size:clamp(34px,7.6vh,66px);font-weight:900;line-height:1;
+  #finishCard .place{font-size:clamp(30px,6.4vh,58px);font-weight:900;line-height:1;
     margin:clamp(2px,.7vh,6px) 0 2px;letter-spacing:-.01em;
     transform:skewX(-9deg);
     background-image:
@@ -549,6 +549,52 @@
                rgba(24,30,38,.9);
     box-shadow:0 10px 24px rgba(0,0,0,.44),inset 0 1px 0 rgba(255,255,255,.26)}
   #finishCard button:active{transform:scale(.97);border-color:rgba(255,255,255,.7)}
+  /* Rating: three stars, earned ones landing in turn after the card. */
+  #finishCard .stars{display:flex;justify-content:center;gap:6px;margin:clamp(2px,.6vh,6px) 0 0}
+  #finishCard .stars i{width:clamp(18px,2.7vh,24px);height:clamp(18px,2.7vh,24px);display:block;
+    background:rgba(255,255,255,.14);
+    -webkit-mask:var(--star) center/contain no-repeat;mask:var(--star) center/contain no-repeat}
+  #finishCard .stars i.on{background:linear-gradient(180deg,#ffe98a,#f2b92e);
+    filter:drop-shadow(0 0 6px rgba(255,210,80,.6));
+    animation:starIn .42s cubic-bezier(.2,1.6,.4,1) backwards}
+  #finishCard .stars i.on:nth-child(1){animation-delay:.72s}
+  #finishCard .stars i.on:nth-child(2){animation-delay:.9s}
+  #finishCard .stars i.on:nth-child(3){animation-delay:1.08s}
+  @keyframes starIn{from{transform:scale(0) rotate(-40deg);opacity:0}to{transform:none;opacity:1}}
+  #finishCard{--star:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 1.8l3.1 6.6 7.2.9-5.3 5 1.4 7.1L12 17.9l-6.4 3.5 1.4-7.1-5.3-5 7.2-.9z'/%3E%3C/svg%3E")}
+  #finishCard .best{margin:0 0 4px;font-size:11px;font-weight:800;letter-spacing:.14em;
+    font-variant-numeric:tabular-nums;color:rgba(230,238,246,.62)}
+  #finishCard .best .tag{display:inline-block;margin-right:6px;padding:2px 7px;border-radius:6px;
+    font-size:9px;letter-spacing:.2em;color:#1a1204;background:linear-gradient(180deg,#ffe98a,#f2b92e);
+    animation:tagPulse 1.1s ease-in-out 1.2s 3}
+  @keyframes tagPulse{50%{box-shadow:0 0 12px rgba(255,214,90,.8)}}
+  #finishCard .hint{min-height:1em;margin:0 0 clamp(6px,1.3vh,12px);font-size:11px;font-weight:700;
+    letter-spacing:.06em;color:rgba(230,238,246,.72)}
+  #finishCard .hint .open{color:#7fe0ff;font-weight:900}
+  /* The stars, best time and hint rows added ~60px; the card still has
+     to fit FINISH_CARD_BAND (main.js), so it gives back what it can: the
+     WIN line and padding are a little smaller, and the RACE TIME caption
+     goes, as it already did in landscape -- the clock under the stars
+     and the BEST line under the clock say what it is. */
+  #finishCard .rtWrap{margin:clamp(3px,.8vh,8px) 0 clamp(3px,.6vh,6px)}
+  #finishCard .rtLabel{display:none}
+
+  /* Difficulty: one segmented control, on the title and the stage list. */
+  .diffSeg{display:flex;gap:0;margin:12px auto 0;padding:3px;border-radius:13px;
+    background:rgba(8,10,14,.55);border:1px solid rgba(255,255,255,.16);
+    backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+  .diffSeg button{flex:1;height:38px;border:0;border-radius:10px;background:transparent;
+    color:rgba(255,255,255,.62);font-weight:900;font-size:12px;letter-spacing:.14em;
+    touch-action:manipulation;-webkit-tap-highlight-color:transparent;
+    transition:background .15s ease,color .15s ease}
+  .diffSeg button.on{color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.3)}
+  .diffSeg button.on[data-d="easy"]{background:linear-gradient(180deg,#3fae6a,#23794a)}
+  .diffSeg button.on[data-d="normal"]{background:linear-gradient(180deg,#3c8fd6,#23619c)}
+  .diffSeg button.on[data-d="hard"]{background:linear-gradient(180deg,#e04a3c,#9e2a20)}
+  .diffNote{margin-top:8px;font-size:11px;font-weight:700;letter-spacing:.08em;color:#e7ecf1;
+    opacity:.8;text-shadow:0 1px 4px rgba(0,0,0,.7)}
+  #stageList .diffSeg{margin:0 0 12px}
+
   /* Landscape phones. Even at its clamp floors the portrait card is
      ~197px, which is over half of a 360px-tall viewport and back on top
      of the car. Here the stage line and the RACE TIME caption go (the
@@ -564,6 +610,13 @@
     #finishCard .rtWrap{margin:3px 0 7px}
     #finishCard .rt{font-size:17px}
     #finishCard button{height:33px;font-size:12px;border-radius:12px}
+    /* Landscape has width to spare and no height: the stars go up into
+       the card's corner, and the best time and the hint share one row
+       on a wider card. */
+    #finishCard{min-width:min(560px,74vw)}
+    #finishCard .stars{position:absolute;top:10px;right:14px;margin:0;gap:4px}
+    #finishCard .stars i{width:17px;height:17px}
+    #finishCard .best,#finishCard .hint{display:inline-block;vertical-align:middle;font-size:10px;margin:0 5px 7px}
   }
 
   /* --- lap banner ------------------------------------------------------
@@ -687,9 +740,9 @@
                rgba(12,30,44,.92)!important}
   #pauseCard .sub{margin-top:14px;font-size:10px;letter-spacing:.2em;opacity:.4;font-weight:700}
 
-  /* Testing-only jump-to-any-stage picker. Not part of the shipped game
-     -- kept in for now at the user's request, pending a "this is done"
-     sign-off, rather than removed outright like the previous pass did. */
+  /* Stage select: every stage, locked until the one before it is won
+     (src/game/records.js), with the best time and stars at the chosen
+     difficulty. */
   #stageOverlay{z-index:40}
   #stageList{
     width:min(420px,88vw);max-height:78vh;overflow:auto;-webkit-overflow-scrolling:touch;
@@ -708,6 +761,17 @@
   #stageList .row .n{font-size:15px;font-weight:900;letter-spacing:.06em}
   #stageList .row .c{font-size:11px;opacity:.72;margin-top:3px;letter-spacing:.06em}
   #stageList .row .r{font-size:11px;opacity:.85;margin-top:3px}
+  #stageList .row .rec{display:flex;align-items:center;gap:10px;margin-top:6px;font-size:11px;
+    font-weight:800;letter-spacing:.08em;font-variant-numeric:tabular-nums}
+  #stageList .row .rec .st{color:#f2c23e;letter-spacing:.1em}
+  #stageList .row .rec .st .off{color:rgba(255,255,255,.2)}
+  #stageList .row .rec .bt{opacity:.75}
+  #stageList .row.locked{opacity:.5}
+  #stageList .row.locked .n::before{content:'';display:inline-block;width:11px;height:12px;
+    margin-right:7px;vertical-align:-1px;background:currentColor;
+    -webkit-mask:var(--lock) center/contain no-repeat;mask:var(--lock) center/contain no-repeat}
+  #stageList{--lock:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 14'%3E%3Cpath d='M3 6V4a3 3 0 016 0v2h1v8H2V6zm1.5 0h3V4a1.5 1.5 0 00-3 0z'/%3E%3C/svg%3E")}
+  #stageList .row .lk{font-size:11px;margin-top:5px;color:#ffb35c;font-weight:800}
   #stageList .close{
     display:block;width:100%;margin-top:6px;height:42px;border-radius:13px;
     border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);
@@ -784,6 +848,16 @@
                     0 0 0 9px rgba(255,59,48,0)}
   }
 
+  /* Short screens (landscape phones): the title menu, now three rows deep,
+     would
+     sit centred straight over the logo, so it is anchored to the bottom
+     edge instead. */
+  @media (max-height:520px){
+    #titleScreen .titleBlock{margin-top:0}
+    #titleScreen .startWrap{top:auto;bottom:calc(env(safe-area-inset-bottom) + 14px);transform:none}
+    #titleScreen #titleStart{height:52px}
+    .diffSeg button{height:32px}
+  }
 </style>
 </head>
 <body class="pre-race">
@@ -793,7 +867,11 @@
     <h1><span class="w">Hi</span><span class="r">R</span><span class="w">o</span><span class="r">CF</span></h1>
     <div class="sub">TOP DOWN RACER</div>
   </div>
-  <div class="startWrap"><button id="titleStart">START</button></div>
+  <div class="startWrap">
+    <button id="titleStart">START</button>
+    <div class="diffSeg" id="titleDiff" role="radiogroup" aria-label="difficulty"></div>
+    <div class="diffNote" id="titleDiffNote"></div>
+  </div>
 </div>
 
 <div class="hud">
@@ -834,6 +912,7 @@
 <div class="overlay" id="stageOverlay" hidden>
   <div id="stageList">
     <h3>ステージ選択</h3>
+    <div class="diffSeg" id="stageDiff" role="radiogroup" aria-label="difficulty"></div>
     <div id="stageRows"></div>
     <button class="close" id="stageClose">閉じる</button>
   </div>
@@ -884,7 +963,10 @@
     <div class="ribbon" id="finishRibbon">FINISHED</div>
     <h2 id="finishStage">STAGE 1 CLEAR</h2>
     <div class="place" id="finishPlace">WIN</div>
+    <div class="stars" id="finishStars" aria-label="rating"><i></i><i></i><i></i></div>
     <div class="rtWrap"><span class="rtLabel">RACE TIME</span><span class="rt" id="finishTime">00:00.000</span></div>
+    <div class="best" id="finishBest"></div>
+    <div class="hint" id="finishHint"></div>
     <button id="retryBtn">NEXT STAGE</button>
   </div>
 </div>
@@ -894,6 +976,45 @@
   const loading=document.getElementById('loading');
   const titleScreen=document.getElementById('titleScreen');
   const titleStart=document.getElementById('titleStart');
+
+  // Records, stars, unlocks and the chosen difficulty (src/game/records.js).
+  // Loaded before the game boots so the title can offer the difficulty
+  // last chosen. ?unlockall opens every stage without touching what is
+  // stored, for checking a late stage directly.
+  const {createRecords,nextStarGap}=await import('./src/game/records.js');
+  const records=createRecords(undefined,{unlockAll:new URLSearchParams(location.search).has('unlockall')});
+  const DIFFS=['easy','normal','hard'];
+  const DIFF_NOTE={easy:'ライバル: 遅め',normal:'ライバル: 標準',hard:'ライバル: 速い'};
+  const diffLabel=d=>String(d).toUpperCase();
+  const titleDiffNote=document.getElementById('titleDiffNote');
+  // Set once the game is up: applies a change of difficulty to whatever is
+  // on screen (see startGame).
+  let onDifficulty=null;
+  const paintDiff=()=>{
+    for(const seg of document.querySelectorAll('.diffSeg')){
+      for(const b of seg.children){
+        const on=b.dataset.d===records.difficulty;
+        b.classList.toggle('on',on);
+        b.setAttribute('aria-checked',on?'true':'false');
+      }
+    }
+    titleDiffNote.textContent=DIFF_NOTE[records.difficulty];
+  };
+  for(const seg of document.querySelectorAll('.diffSeg')){
+    for(const d of DIFFS){
+      const b=document.createElement('button');
+      b.dataset.d=d;b.textContent=diffLabel(d);b.setAttribute('role','radio');
+      b.addEventListener('pointerdown',e=>{
+        e.preventDefault();
+        if(records.difficulty===d)return;
+        records.difficulty=d;
+        paintDiff();
+        onDifficulty?.(d);
+      });
+      seg.appendChild(b);
+    }
+  }
+  paintDiff();
 
   const hideTitle=()=>{
     titleScreen.classList.add('leaving');
@@ -936,7 +1057,7 @@
       const {boot}=await import('./src/main.js');
       const {NITRO,PHYSICS}=await import('./src/config.js');
       const el=(id)=>document.getElementById(id);
-      const {game,app,stages}=await boot({stageId:1,audioCtx,bgmEl});
+      const {game,app,stages}=await boot({stageId:1,difficulty:records.difficulty,audioCtx,bgmEl});
       loading.classList.add('hide');
       const STAGE_IDS=Object.keys(stages).map(Number).sort((a,b)=>a-b);
       const LAST_STAGE=STAGE_IDS[STAGE_IDS.length-1];
@@ -980,6 +1101,7 @@
       const vsOverlay=el('vsOverlay'),vsStage=el('vsStage'),vsRival=el('vsRival'),signalOverlay=el('signalOverlay');
       const startLamps=[el('sig1'),el('sig2'),el('sig3'),el('sig4'),el('sig5')];
       const startCount=el('startCount'),startCountText=el('startCountText'),startCue=el('startCue');
+      const finishStars=el('finishStars'),finishBest=el('finishBest'),finishHint=el('finishHint');
       const finishOverlay=el('finishOverlay'),finishStage=el('finishStage'),finishPlace=el('finishPlace'),finishTime=el('finishTime'),finishCard=el('finishCard'),finishRibbon=el('finishRibbon'),lapPopup=el('lapPopup'),lapPopupMain=el('lapPopupMain'),lapPopupSub=el('lapPopupSub'),stageBtn=el('retryBtn');
 
       // --- start lights ---
@@ -1015,7 +1137,7 @@
         startCount.classList.remove('go','punch');
       };
       const syncStageUI=()=>{
-        vsStage.textContent=game.cfg.name;
+        vsStage.textContent=`${game.cfg.name} · ${diffLabel(game.difficulty)}`;
         vsRival.textContent=game.cfg.rivalName;
         finishStage.textContent=`${game.cfg.name} CLEAR`;
         stageBtn.textContent=game.stageId<LAST_STAGE?'NEXT STAGE':'RETRY FINAL STAGE';
@@ -1026,6 +1148,24 @@
       syncStageUI();
       const fmtTime=s=>{const ms=Math.max(0,Math.floor(s*1000)),m=Math.floor(ms/60000),sec=Math.floor((ms%60000)/1000),cs=ms%1000;return `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}.${String(cs).padStart(3,'0')}`};
       let shownFinish=false,finishDelay=0,lapPopupTimer=0;
+      // The race's result into the records, and what it earned onto the
+      // card: stars, the best time (flagged when this is it), and either
+      // the stage it opened or what the next star needs.
+      const paintRecord=(res)=>{
+        const out=records.submit(game.stageId,game.difficulty,res);
+        [...finishStars.children].forEach((s,i)=>s.classList.toggle('on',i<out.stars));
+        finishStars.setAttribute('aria-label',`${out.stars} / 3`);
+        const tag=out.newBest?'<span class="tag">NEW RECORD</span>':'';
+        finishBest.innerHTML=out.best!=null?`${tag}BEST ${fmtTime(out.best/1000)} · ${diffLabel(game.difficulty)}`:'';
+        const nextName=out.unlocked!=null?stages[out.unlocked]?.name:null;
+        if(nextName)finishHint.innerHTML=`<span class="open">${nextName} が解放されました</span>`;
+        else if(!res.won)finishHint.textContent='勝利で★1';
+        else if(out.stars>=3)finishHint.textContent='★★★ 圧勝';
+        else{
+          const need=nextStarGap(res,out.stars);
+          finishHint.textContent=`次の★: ${need.toFixed(1)}秒差で勝利（今回 ${(res.gap??0).toFixed(1)}秒差）`;
+        }
+      };
       // The final lap gets its own banner AND leaves the HUD flagged until
       // the race ends -- a banner that has already faded cannot answer "which
       // lap am I on" three corners later, which is what makes the last lap
@@ -1097,6 +1237,7 @@
             finishStage.textContent=won?`${game.cfg.name} CLEAR`:`${game.cfg.name} RESULT`;
             finishPlace.textContent=won?'WIN':'LOSE';
             finishTime.textContent=fmtTime(game.playerEntry.progress.finishTime??race.time);
+            paintRecord(race.result??{won,time:game.playerEntry.progress.finishTime??race.time,gap:null});
             stageBtn.textContent=(won&&game.stageId<LAST_STAGE)?'NEXT STAGE':(won?'RETRY FINAL STAGE':'RETRY');
             finishOverlay.hidden=false;
             // Side lightning lands WITH the card, not back at the line
@@ -1115,6 +1256,7 @@
         shownFinish=false;finishDelay=0;lapPopupTimer=0;
         clearBanners();
         finishOverlay.hidden=true;
+        game.difficulty=records.difficulty;
         game.loadStage(id);
         // Every caller is a tap: keep the music element playable for GO.
         game.bgm?.prime();
@@ -1126,12 +1268,20 @@
         for(const id of STAGE_IDS){
           const cfg=stages[id];
           const b=document.createElement('button');
-          b.className='row'+(id===game.stageId?' current':'');
+          const open=records.isUnlocked(id),rec=records.get(id);
+          const prev=STAGE_IDS[STAGE_IDS.indexOf(id)-1];
+          b.className='row'+(id===game.stageId?' current':'')+(open?'':' locked');
+          b.setAttribute('aria-disabled',open?'false':'true');
+          const stars=[0,1,2].map(i=>i<rec.stars?'★':'<span class="off">★</span>').join('');
           b.innerHTML=`<div class="n">${cfg.name} · ${cfg.shortDesc}</div>`
             +`<div class="c">${cfg.courseName} — ${cfg.courseDesc}</div>`
-            +`<div class="r">ライバル: ${cfg.rivalName}</div>`;
+            +`<div class="r">ライバル: ${cfg.rivalName}</div>`
+            +(open
+              ?`<div class="rec"><span class="st">${stars}</span><span class="bt">BEST ${rec.best!=null?fmtTime(rec.best/1000):'--:--.---'}</span></div>`
+              :`<div class="lk">${stages[prev]?.name??''} に勝つと解放</div>`);
           b.addEventListener('pointerdown',ev=>{
             ev.preventDefault();
+            if(!records.isUnlocked(id)){game.audio?.click();return;}
             game.audio?.click();
             stageOverlay.hidden=true;
             goToStage(id);
@@ -1142,6 +1292,15 @@
       stagePick.addEventListener('pointerdown',e=>{e.preventDefault();game.audio?.click();buildRows();stageOverlay.hidden=false});
       stageClose.addEventListener('pointerdown',e=>{e.preventDefault();game.audio?.click();stageOverlay.hidden=true});
       syncPickLabel();
+      // A new difficulty is used from the next race. On the title the grid
+      // behind it is reloaded straight away, so START races at it; in the
+      // stage list only the rows' records follow it -- the race already
+      // under way keeps the rival it started with.
+      onDifficulty=()=>{
+        game.audio?.click();
+        if(!stageOverlay.hidden)buildRows();
+        if(titleScreen.hidden===false&&!titleScreen.classList.contains('leaving'))goToStage(game.stageId);
+      };
 
       stageBtn.addEventListener('pointerdown',e=>{
         e.preventDefault();
@@ -1161,7 +1320,7 @@
         // a stopped race with their own choices on screen.
         if(!pauseOverlay.hidden||!finishOverlay.hidden||!stageOverlay.hidden)return;
         if(titleScreen.hidden===false)return;
-        pauseStage.textContent=`${game.cfg.name} · ${game.cfg.rivalName}`;
+        pauseStage.textContent=`${game.cfg.name} · ${game.cfg.rivalName} · ${diffLabel(game.difficulty)}`;
         pauseOverlay.hidden=false;
         app.ticker.stop();
         // The ticker freezing does not silence the engine drone on its

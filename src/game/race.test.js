@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hullCircles, resolveContacts } from './race.js';
+import { hullCircles, resolveContacts, Race } from './race.js';
 
 // resolveContacts decides who is who from the constructor name, so the
 // stand-ins here carry the real names. Everything else it touches (x, y,
@@ -90,5 +90,31 @@ describe('resolveContacts mass', () => {
     const rival = new RivalCar({ x: CAR.h / 2 + TRUCK.h / 2 - 40, y: 0, angle: 0, speed: 300, contactMass: 9 });
     resolveContacts([player, rival], [CAR, TRUCK]);
     expect(rival.speed).toBeLessThan(330);
+  });
+});
+
+describe('race result', () => {
+  // a straight "path": progress is driven by hand, so only length matters
+  const path = { length: 1000 };
+  const race = (playerTotal, rivalTotal, rivalFinish = null) => {
+    const r = new Race(path, { totalLaps: 3, startBack: 0 });
+    const p = r.addCar({}, { isPlayer: true }), o = r.addCar({});
+    r.time = 60;
+    Object.assign(p.progress, { total: playerTotal, finished: true, finishTime: 60 });
+    Object.assign(o.progress, { total: rivalTotal, finished: rivalFinish != null, finishTime: rivalFinish });
+    return r.resultFor(p);
+  };
+
+  it('times a win by the distance the rival still has, at its own pace', () => {
+    // 2900 covered in 60 s is 48.3/s; 100 short is 2.07 s behind
+    const res = race(3000, 2900);
+    expect(res.won).toBe(true);
+    expect(res.gap).toBeCloseTo(100 / (2900 / 60), 5);
+  });
+
+  it('times a loss exactly from the rival\'s own finish', () => {
+    const res = race(3000, 3050, 57.5);
+    expect(res.won).toBe(false);
+    expect(res.gap).toBeCloseTo(2.5, 5);
   });
 });

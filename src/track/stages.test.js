@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { STAGE_PATHS, buildStage2Path, buildStage3Path, buildStage4Path, buildStage5Path } from './stages.js';
-import { LAYOUTS } from './layouts.js';
 
 // Stage 4 road geometry, from config.js + the highway surface preset:
 // roadHalf 360 plus bands (26 + 78) = 464 per side.
