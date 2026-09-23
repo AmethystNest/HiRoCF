@@ -28,11 +28,7 @@
     text-shadow:0 2px 5px rgba(0,0,0,.75)}
   .hud .top{position:absolute;top:max(10px,env(safe-area-inset-top));left:14px;right:14px;
     display:flex;justify-content:space-between;align-items:flex-start;font-size:14px}
-  /* Clear of the WHOLE nitro block, not just of its top bar. The gauge
-     stack below is 46px tall (cells + burst meter + label) starting
-     14px above the pads, so anything under +60 here lands on top of it
-     -- at +40 the speed readout was sitting directly across the nitro
-     cells and neither could be read. */
+  /* Clear of the whole nitro block (bar + caption) below it. */
   /* + var(--rowH) + 9px: the NITRO bar sits a row above the right-hand
      pads (see #actSide), so everything stacked over the pads goes up by
      that row. */
@@ -42,46 +38,49 @@
   .hud .nitroWrap{position:absolute;left:50%;transform:translateX(-50%);
     bottom:calc(env(safe-area-inset-bottom) + var(--ctrlH) + var(--rowH) + 23px);
     width:min(54vw,238px)}
-  /* A glass gauge housing rather than bare bars floating on the road --
-     same top-lit-glass family as the buttons/pads, so the meter reads as
-     part of the instrument cluster instead of a stray HUD widget. */
-  .hud .nitroCells{display:flex;gap:6px;padding:5px 6px;border-radius:10px;
-    background:radial-gradient(120% 160% at 50% -30%, rgba(255,255,255,.10), rgba(255,255,255,.015) 60%),
-               rgba(10,13,17,.34);
-    border:1px solid rgba(255,255,255,.14);
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.10),inset 0 -2px 5px rgba(0,0,0,.3);
-    backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
-  .hud .nitroCell{position:relative;flex:1;height:10px;border-radius:4px;
-    background:rgba(255,255,255,.08);
-    box-shadow:inset 0 1px 2px rgba(0,0,0,.5),inset 0 0 0 1px rgba(255,255,255,.10);
-    overflow:hidden}
-  .hud .nitroCell i{display:block;height:100%;transform-origin:left center;transform:scaleX(0);
-    background:linear-gradient(90deg,#1f7fc4,#2f9ae8 45%,#7fe6ff)}
-  /* A fixed diagonal sheen over the fill -- reads as a glossy, lit bar
-     rather than a flat rectangle, the same trick the button glass uses,
-     just linear instead of radial since the cell is so thin. */
-  .hud .nitroCell i::after{content:'';position:absolute;inset:0;
-    background:linear-gradient(180deg,rgba(255,255,255,.55),rgba(255,255,255,0) 55%)}
-  .hud .nitroCell.full i{background:linear-gradient(90deg,#3fb2ff,#54c8ff 45%,#d3faff)}
-  .hud .nitroCell.full{box-shadow:inset 0 1px 2px rgba(0,0,0,.4),inset 0 0 0 1px rgba(150,225,255,.4),
-    0 0 10px rgba(120,220,255,.55);animation:nitroFullPulse 1.6s ease-in-out infinite}
-  @keyframes nitroFullPulse{
-    0%,100%{box-shadow:inset 0 1px 2px rgba(0,0,0,.4),inset 0 0 0 1px rgba(150,225,255,.4),0 0 8px rgba(120,220,255,.4)}
-    50%{box-shadow:inset 0 1px 2px rgba(0,0,0,.4),inset 0 0 0 1px rgba(190,240,255,.75),0 0 16px rgba(120,220,255,.85)}
-  }
-  /* Burst meter: only up while a charge is actually running. Normalised to
-     one charge and clamped, so a chained run simply holds full until the
-     last charge starts draining. */
-  .hud .nitroBurst{position:relative;height:5px;margin-top:5px;border-radius:3px;overflow:hidden;
-    background:rgba(255,255,255,.08);
-    box-shadow:inset 0 1px 2px rgba(0,0,0,.45),inset 0 0 0 1px rgba(255,255,255,.10);
-    opacity:0;transition:opacity .12s ease}
-  .hud .nitroWrap.firing .nitroBurst{opacity:1}
-  .hud .nitroBurst i{display:block;height:100%;transform-origin:left center;transform:scaleX(0);
-    background:linear-gradient(90deg,#d9820f,#ffb23a 45%,#ffe9a8)}
-  .hud .nitroBurst i::after{content:'';position:absolute;inset:0;
-    background:linear-gradient(180deg,rgba(255,255,255,.5),rgba(255,255,255,0) 55%)}
-  .hud .nitroLabel{font-size:9px;opacity:.72;text-align:center;margin-top:4px;letter-spacing:.16em}
+  /* The nitro gauge: one slanted bar, the charge's one and only state
+     shown three ways -- filling (deep blue, a bright leading edge running
+     out along it), READY (full, lit, a sheen sweeping through it and the
+     housing breathing), and BOOST (the same bar turned to flame, streaks
+     streaming back through it as it drains). Slanted and ticked like the
+     tach sweep on a race dash rather than a progress bar. */
+  .hud .nitroBar{position:relative;height:13px;transform:skewX(-22deg);border-radius:3px;overflow:hidden;
+    background:linear-gradient(180deg,rgba(255,255,255,.10),rgba(255,255,255,.02) 60%),rgba(6,10,16,.58);
+    border:1px solid rgba(140,200,255,.26);
+    box-shadow:inset 0 1px 3px rgba(0,0,0,.65),0 2px 10px rgba(0,0,0,.4);
+    transition:border-color .2s ease,box-shadow .2s ease}
+  /* etched ticks every tenth, over the fill */
+  .hud .nitroBar::after{content:'';position:absolute;inset:0;pointer-events:none;
+    background:repeating-linear-gradient(90deg,transparent 0 calc(10% - 1.5px),rgba(0,0,0,.42) calc(10% - 1.5px) 10%),
+               linear-gradient(180deg,rgba(255,255,255,.28),rgba(255,255,255,0) 50%)}
+  .hud .nitroBar i{position:absolute;left:0;top:0;bottom:0;width:0;
+    background:linear-gradient(90deg,#0d2f6e,#1d6fd6 55%,#46bdf5)}
+  /* the leading edge: a hot line with a glow, riding the tip of the fill */
+  .hud .nitroBar i::after{content:'';position:absolute;right:0;top:0;bottom:0;width:3px;
+    background:#dff7ff;box-shadow:0 0 8px 2px rgba(110,210,255,.9)}
+  .hud .nitroWrap.ready .nitroBar{border-color:rgba(170,235,255,.85);
+    animation:nitroBreathe 1.3s ease-in-out infinite}
+  .hud .nitroWrap.ready .nitroBar i{background:linear-gradient(90deg,#1f7cf0,#4fcaff 55%,#dcf8ff)}
+  .hud .nitroWrap.ready .nitroBar i::before{content:'';position:absolute;inset:0;
+    background:linear-gradient(100deg,transparent 35%,rgba(255,255,255,.8) 50%,transparent 65%);
+    background-size:260% 100%;animation:nitroSheen 1.5s linear infinite}
+  .hud .nitroWrap.ready .nitroBar i::after{opacity:0}
+  .hud .nitroWrap.firing .nitroBar{border-color:rgba(255,196,120,.9);
+    box-shadow:inset 0 1px 3px rgba(0,0,0,.6),0 0 16px rgba(255,130,30,.75),0 2px 10px rgba(0,0,0,.4)}
+  .hud .nitroWrap.firing .nitroBar i{
+    background:repeating-linear-gradient(115deg,rgba(255,255,255,.28) 0 5px,rgba(255,255,255,0) 5px 13px),
+               linear-gradient(90deg,#b8320a,#ff7a18 40%,#ffc347 75%,#fff1c2);
+    background-size:26px 100%,100% 100%;animation:nitroStream .32s linear infinite}
+  .hud .nitroWrap.firing .nitroBar i::after{background:#fff4d2;box-shadow:0 0 10px 3px rgba(255,160,50,.95)}
+  @keyframes nitroBreathe{
+    0%,100%{box-shadow:inset 0 1px 3px rgba(0,0,0,.6),0 0 6px rgba(90,200,255,.35),0 2px 10px rgba(0,0,0,.4)}
+    50%{box-shadow:inset 0 1px 3px rgba(0,0,0,.6),0 0 18px rgba(90,200,255,.85),0 2px 10px rgba(0,0,0,.4)}}
+  @keyframes nitroSheen{from{background-position:130% 0}to{background-position:-130% 0}}
+  @keyframes nitroStream{from{background-position:0 0,0 0}to{background-position:-26px 0,0 0}}
+  .hud .nitroLabel{font-size:9px;font-weight:800;text-align:center;margin-top:5px;letter-spacing:.3em;
+    color:rgba(200,225,245,.62);transition:color .2s ease,text-shadow .2s ease}
+  .hud .nitroWrap.ready .nitroLabel{color:#bfefff;text-shadow:0 0 8px rgba(100,210,255,.9)}
+  .hud .nitroWrap.firing .nitroLabel{color:#ffd79a;text-shadow:0 0 8px rgba(255,150,40,.9)}
   .hud .nitroWrap.firing .nitroLabel{opacity:1;color:#ffd489;text-shadow:0 0 8px rgba(255,180,60,.7)}
   /* Below the icon row now, not directly under LAP/POS -- see .iconRow. */
   .hud .note{position:absolute;left:14px;top:calc(max(10px,env(safe-area-inset-top)) + 90px);
@@ -198,24 +197,38 @@
       rgba(60,36,12,.62);
     box-shadow:0 0 0 5px rgba(255,170,60,.14),0 0 30px rgba(255,170,60,.6),
                inset 0 1px 0 rgba(255,235,200,.6)}
-  /* NITRO stays dim until a press would actually fire -- stock in hand and,
-     mid-burst, inside the chain window. That is the no-wasted-press rule
-     from config.js NITRO, shown rather than explained. */
-  #nitro{border-color:rgba(120,205,255,.34)}
-  #nitro.ready{border-color:rgba(143,222,255,.9);
-    background:
-      radial-gradient(125% 100% at 50% -10%, rgba(150,225,255,.42), rgba(60,150,220,.16) 62%),
-      rgba(12,30,44,.5);
-    box-shadow:0 8px 22px rgba(0,0,0,.38),0 0 22px rgba(73,183,255,.42),
-               inset 0 1px 0 rgba(200,240,255,.5)}
-  #nitro:active,#nitro.pressed{border-color:rgba(190,240,255,1);
-    background:
-      radial-gradient(125% 100% at 50% -10%, rgba(200,244,255,.62), rgba(80,180,240,.3) 62%),
-      rgba(18,52,74,.62);
-    box-shadow:0 0 0 5px rgba(73,183,255,.14),0 0 32px rgba(73,183,255,.66),
-               inset 0 1px 0 rgba(225,250,255,.6)}
-  #nitro .cnt{font-size:1.05em;opacity:.9;letter-spacing:0;font-variant-numeric:tabular-nums}
-  #nitro.ready .cnt{opacity:1;text-shadow:0 0 12px rgba(143,222,255,.9)}
+  /* NITRO: the button is its own gauge. The charge fills it from the left
+     (dim while it builds), it lights up with a sheen running through it
+     once a press would fire, and it turns to streaming flame, draining,
+     while the burst runs. No count: there is only ever the one charge. */
+  #actSide #nitro{position:relative;overflow:hidden;gap:8px;letter-spacing:.14em;
+    border-color:rgba(120,190,255,.28);color:rgba(215,232,248,.55)}
+  #nitro .nFill{position:absolute;left:0;top:0;bottom:0;width:0;z-index:0;pointer-events:none;
+    background:linear-gradient(90deg,rgba(20,70,160,.55),rgba(50,150,230,.45))}
+  #nitro .nFill::after{content:'';position:absolute;right:0;top:0;bottom:0;width:2px;
+    background:rgba(190,235,255,.9);box-shadow:0 0 8px rgba(110,210,255,.9)}
+  #nitro .bolt,#nitro .nTxt{position:relative;z-index:1}
+  #nitro .bolt{width:14px;height:20px;display:block}
+  #actSide #nitro.ready{color:#fff;border-color:rgba(160,230,255,.95);
+    background:radial-gradient(125% 100% at 50% -10%, rgba(170,235,255,.40), rgba(60,150,230,.14) 62%),rgba(10,30,50,.5);
+    animation:nitroBtnBreathe 1.3s ease-in-out infinite}
+  #nitro.ready .nFill{background:linear-gradient(90deg,rgba(40,130,240,.62),rgba(120,220,255,.62))}
+  #nitro.ready .nFill::after{opacity:0}
+  #nitro.ready .nFill::before{content:'';position:absolute;inset:0;
+    background:linear-gradient(100deg,transparent 35%,rgba(255,255,255,.55) 50%,transparent 65%);
+    background-size:260% 100%;animation:nitroSheen 1.5s linear infinite}
+  #nitro.ready .bolt{filter:drop-shadow(0 0 5px rgba(140,225,255,.95))}
+  #actSide #nitro.firing{color:#fff7e6;border-color:rgba(255,200,120,.95);
+    box-shadow:0 8px 22px rgba(0,0,0,.38),0 0 26px rgba(255,130,30,.6),inset 0 1px 0 rgba(255,230,190,.5)}
+  #nitro.firing .nFill{
+    background:repeating-linear-gradient(115deg,rgba(255,255,255,.22) 0 6px,rgba(255,255,255,0) 6px 15px),
+               linear-gradient(90deg,rgba(190,60,10,.85),rgba(255,130,30,.8) 55%,rgba(255,210,110,.8));
+    background-size:30px 100%,100% 100%;animation:nitroStream .32s linear infinite}
+  #nitro.firing .nFill::after{background:#fff1cf;box-shadow:0 0 10px rgba(255,160,50,.95)}
+  #nitro.firing .bolt{filter:drop-shadow(0 0 5px rgba(255,170,60,.95))}
+  @keyframes nitroBtnBreathe{
+    0%,100%{box-shadow:0 8px 22px rgba(0,0,0,.38),0 0 10px rgba(73,183,255,.3),inset 0 1px 0 rgba(200,240,255,.5)}
+    50%{box-shadow:0 8px 22px rgba(0,0,0,.38),0 0 26px rgba(73,183,255,.75),inset 0 1px 0 rgba(200,240,255,.5)}}
   #brake:active,#brake.pressed{border-color:rgba(255,190,190,.95);
     background:
       radial-gradient(125% 100% at 50% -10%, rgba(255,190,190,.5), rgba(210,80,80,.22) 62%),
@@ -791,19 +804,14 @@
   <div class="note" id="note">v2.0 · PIXI RENDER CORE</div>
   <div class="speed"><span id="speed">0</span><small>km/h</small></div>
   <div class="nitroWrap" id="nitroWrap">
-    <div class="nitroCells" id="nitroCells">
-      <div class="nitroCell"><i></i></div>
-      <div class="nitroCell"><i></i></div>
-      <div class="nitroCell"><i></i></div>
-    </div>
-    <div class="nitroBurst"><i id="nitroBurst"></i></div>
+    <div class="nitroBar"><i id="nitroFill"></i></div>
     <div class="nitroLabel" id="nitroLabel">NITRO</div>
   </div>
 </div>
 
 <div class="controls">
   <div class="side"><button id="left">◀</button><button id="right">▶</button></div>
-  <div class="side" id="actSide"><button id="nitro">NITRO<span class="cnt" id="nitroCnt">×0</span></button><button id="brake">BRAKE</button><button id="drift"><svg viewBox="0 0 30 18" fill="none" aria-hidden="true"><path d="M3 15c6-1 9-4 11-8s5-6 11-6" stroke="#ffd18a" stroke-width="2.4" stroke-linecap="round"/><path d="M3 10c4-.6 6-2.6 7.5-5" stroke="#ffd18a" stroke-width="2" stroke-linecap="round" opacity=".55"/></svg><span>DRIFT</span></button></div>
+  <div class="side" id="actSide"><button id="nitro"><span class="nFill" id="nitroBtnFill"></span><svg class="bolt" viewBox="0 0 14 20" aria-hidden="true"><path d="M9 1 1.5 11.5H6L4.5 19 12.5 8H8z" fill="currentColor"/></svg><span class="nTxt" id="nitroTxt">NITRO</span></button><button id="brake">BRAKE</button><button id="drift"><svg viewBox="0 0 30 18" fill="none" aria-hidden="true"><path d="M3 15c6-1 9-4 11-8s5-6 11-6" stroke="#ffd18a" stroke-width="2.4" stroke-linecap="round"/><path d="M3 10c4-.6 6-2.6 7.5-5" stroke="#ffd18a" stroke-width="2" stroke-linecap="round" opacity=".55"/></svg><span>DRIFT</span></button></div>
 </div>
 <div class="iconRow">
   <button id="pauseBtn" class="iconBtn" aria-label="pause">
@@ -949,33 +957,25 @@
       nitroControl.addEventListener('pointerup',releaseNitro);nitroControl.addEventListener('pointercancel',releaseNitro);nitroControl.addEventListener('lostpointercapture',releaseNitro);
       addEventListener('keydown',e=>{if(e.key==='ArrowLeft'||e.key==='a')game.input.left=true;if(e.key==='ArrowRight'||e.key==='d')game.input.right=true;if(e.key==='ArrowDown'||e.key==='s')game.input.brake=true;if(e.key==='x'||e.key==='Shift')game.input.drift=true;if(e.key===' ')game.player.tryNitro()});
       addEventListener('keyup',e=>{if(e.key==='ArrowLeft'||e.key==='a')game.input.left=false;if(e.key==='ArrowRight'||e.key==='d')game.input.right=false;if(e.key==='ArrowDown'||e.key==='s')game.input.brake=false;if(e.key==='x'||e.key==='Shift')game.input.drift=false});
-      const speedEl=el('speed'),nitroBtn=el('nitro'),nitroCnt=el('nitroCnt'),nitroWrap=el('nitroWrap'),
-        nitroBurstEl=el('nitroBurst'),nitroLabel=el('nitroLabel'),
-        nitroCells=(()=>{
-          // One cell per charge the car can bank (NITRO.maxStock).
-          const box=el('nitroCells');
-          while(box.children.length>NITRO.maxStock)box.lastElementChild.remove();
-          return Array.from(box.children).map(c=>({box:c,fill:c.firstElementChild}));
-        })(),
+      const speedEl=el('speed'),nitroBtn=el('nitro'),nitroWrap=el('nitroWrap'),
+        nitroFill=el('nitroFill'),nitroBtnFill=el('nitroBtnFill'),nitroLabel=el('nitroLabel'),nitroTxt=el('nitroTxt'),
         lapEl=el('lap'),posEl=el('pos'),timeEl=el('time');
-      // One cell per banked charge: filled cells are charges in hand, the cell
-      // after them is the meter working toward the next. The label doubles as
-      // the chain cue -- CHAIN READY is up exactly while a press would extend
-      // the running burst instead of being refused, so the player can see the
-      // window rather than having to guess at it.
+      // One charge: the bar (and the button, which is its own gauge) shows
+      // the charge building, then full and ready, then the burst draining.
+      let nitroShown='';
       const paintNitro=(p)=>{
-        const stock=p.nitroStock,part=p.nitroCharge/100;
-        for(let i=0;i<nitroCells.length;i++){
-          const v=i<stock?1:(i===stock?part:0);
-          nitroCells[i].fill.style.transform=`scaleX(${v})`;
-          nitroCells[i].box.classList.toggle('full',i<stock);
+        const ready=p.nitroStock>0&&!p.boosting;
+        const v=p.boosting?Math.min(1,p.boostTimer/PHYSICS.boostDuration):(p.nitroStock>0?1:p.nitroCharge/100);
+        const w=(v*100).toFixed(1)+'%';
+        nitroFill.style.width=w;nitroBtnFill.style.width=w;
+        const state=p.boosting?'firing':(ready?'ready':'');
+        if(state!==nitroShown){
+          nitroShown=state;
+          nitroWrap.classList.toggle('firing',state==='firing');nitroWrap.classList.toggle('ready',state==='ready');
+          nitroBtn.classList.toggle('firing',state==='firing');nitroBtn.classList.toggle('ready',state==='ready');
+          nitroLabel.textContent=state==='firing'?'BOOST':(state==='ready'?'NITRO READY':'NITRO');
+          nitroTxt.textContent=state==='firing'?'BOOST':'NITRO';
         }
-        nitroWrap.classList.toggle('firing',p.boosting);
-        nitroBurstEl.style.transform=`scaleX(${p.boosting?Math.min(1,p.boostTimer/PHYSICS.boostDuration):0})`;
-        nitroCnt.textContent='×'+stock;
-        const canFire=stock>0&&(!p.boosting||p.boostTimer<=NITRO.chainWindow);
-        nitroBtn.classList.toggle('ready',canFire);
-        nitroLabel.textContent=p.boosting?(canFire?'NITRO · CHAIN READY':'NITRO · FIRING'):'NITRO';
       };
       const vsOverlay=el('vsOverlay'),vsStage=el('vsStage'),vsRival=el('vsRival'),signalOverlay=el('signalOverlay');
       const startLamps=[el('sig1'),el('sig2'),el('sig3'),el('sig4'),el('sig5')];
