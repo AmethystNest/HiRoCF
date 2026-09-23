@@ -433,7 +433,7 @@ export function buildAudio(ctx) {
    * with the car actually being driven.
    */
   /**
-   * The player's engine: a 5.0 V8 through an 8-speed box, built to match a
+   * The player's engine: a 5.0 V8 through a 6-speed box, built to match a
    * reference recording of one (a GT7 capture of an RC F pulling from 140
    * km/h) rather than tuned by ear. Nothing of the recording is shipped --
    * it was analysed, and these are the numbers that came out of it.
@@ -472,16 +472,17 @@ export function buildAudio(ctx) {
   const V8_IDLE_RPM = 850;
   const V8_REDLINE_RPM = 7000;
   /**
-   * Fraction of the car's top speed each of the 8 gears runs out at. These
-   * started as the real RC F ratio set (top in gear g = 8th's ratio over
-   * g's), but with the game's near-linear launch (13.5% of top speed per
-   * second at full throttle, measured) that put a shift every 0.75-0.9 s
-   * from 1.1 s onwards -- the first one heard as far too early. Laid out
-   * for the game instead: upshifts at about 1.6 / 2.7 / 3.8 / 4.9 / 6.2 s
-   * from standstill, with the steps closing from 1.61 to 1.09 up the box
-   * the way a real one's do, so each upshift lands 4,600-6,500 rpm.
+   * Fraction of the car's top speed each of the 6 gears runs out at.
+   *
+   * It was the RC F's own 8-speed, laid out for the game's launch, and
+   * asked down to six: shifting seven times on the way to top speed read
+   * as a gearbox that never stops working, not as a car pulling. Measured
+   * on a full-throttle launch, the upshifts now come at 1.8 / 3.1 / 4.4 /
+   * 5.9 / 9.2 s (the 8-speed's were 1.6 / 2.7 / 3.8 / 4.9 / 6.1 / 9.3 s and
+   * one more beyond), about 1.3-1.5 s apart, and the steps close up the
+   * box (1.67, 1.40, 1.29, 1.21, 1.15) so each lands at 4,500-6,200 rpm.
    */
-  const V8_GEAR_TOP = [0.22, 0.355, 0.49, 0.62, 0.735, 0.835, 0.92, 1];
+  const V8_GEAR_TOP = [0.24, 0.40, 0.56, 0.72, 0.87, 1];
   /** Torque cut on an upshift: how long, and how far the note drops. */
   const V8_SHIFT_TIME = 0.11;
   const V8_SHIFT_DUCK = 0.42;
@@ -501,7 +502,7 @@ export function buildAudio(ctx) {
   const V8_BLIP_GAIN = 0.35;
 
   /**
-   * The 8-speed box and rpm model both V8 voices share: one step per call
+   * The 6-speed box and rpm model both V8 voices share: one step per call
    * (at 60 fps nothing can cross two gears in a frame), 0.93 hysteresis on
    * the way back down so it does not hunt on a shift point, a torque cut
    * of V8_SHIFT_TIME on every upshift and a throttle blip on every
