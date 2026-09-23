@@ -275,7 +275,7 @@ export class Game {
     this.world.label = 'world';
     app.stage.addChild(this.world);
 
-    this.input = { left: false, right: false, brake: false };
+    this.input = { left: false, right: false, brake: false, drift: false };
     // Three camera distances. Level 0 is the existing/original framing;
     // levels 1 and 2 progressively magnify it -- each is a multiplier on
     // `zoom`, which IS the world's on-screen scale (see world.scale.set

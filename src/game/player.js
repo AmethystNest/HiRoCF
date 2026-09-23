@@ -45,8 +45,7 @@ export class PlayerCar {
     // and would otherwise hide any slip: the car would visibly slide
     // sideways but never look tilted while doing it.
     this.driftVisualAngle = 0;
-    // Latched player drift state: BRAKE and steering held together for
-    // driftHoldTime starts a slide (shorter presses stay on grip). Once started,
+    // Latched player drift state: DRIFT with steering starts a slide. Once started,
     // releasing the brake does not cancel it; the slide stays active until
     // the slip angle has naturally returned close to straight.
     this.driftSlipAngle = 0;
@@ -96,8 +95,6 @@ export class PlayerCar {
     this.driftSlipAngle = 0;
     this.driftVisualAngle = 0;
     this.driftSign = 0;
-    // how long BRAKE and steering have been held together (drift trigger)
-    this._coHold = 0;
     this.boostMix = 0;
   }
 
@@ -198,7 +195,7 @@ export class PlayerCar {
     const targetMax = Math.min(P.maxSpeed, this.speedTarget);
 
     if (input.brake) {
-      this.speed -= P.brake * P.brakeMul * (this.drifting ? P.driftBrakeMul : 1) * dt;
+      this.speed -= P.brake * P.brakeMul * dt;
     } else {
       const gap = targetMax - this.speed;
       if (gap > 0) {
@@ -229,15 +226,13 @@ export class PlayerCar {
 
     const steer = (input.right ? 1 : 0) - (input.left ? 1 : 0);
 
-    // Drift or grip is decided by how LONG BRAKE and steering are held down
-    // together: past P.driftHoldTime the car breaks into a drift, and any
-    // shorter press only slows it on grip. (Two earlier rules: any moment
-    // with both held -- no grip braking at all; then the order of the two
-    // -- but they arrive together in nearly every corner of this game.)
-    // Only above P.driftDial on the dial.
-    this._coHold = input.brake && steer !== 0 ? (this._coHold ?? 0) + dt : 0;
+    // Drift has its own button. DRIFT with steering (above P.driftDial on
+    // the dial) throws the car into a slide at once; BRAKE only ever slows
+    // it, on grip. One button carrying both -- by press order, then by how
+    // long it was held -- could never tell a grip corner from a drift
+    // without either getting it wrong or making every drift wait.
     const fastEnough = this.displaySpeed > P.driftDial;
-    const driftTrigger = fastEnough && steer !== 0 && this._coHold >= P.driftHoldTime;
+    const driftTrigger = fastEnough && steer !== 0 && !!input.drift;
     if (!this.drifting && driftTrigger) {
       this.drifting = true;
       this.driftSign = steer > 0 ? 1 : -1;
@@ -253,11 +248,8 @@ export class PlayerCar {
     // How deep the slide is, as a share of the full slip angle at this
     // speed (the same fullSlip as below, last frame's angle): the turn rate
     // grows with it (see driftTurnMin/Max).
-    // Committing (BRAKE and steering down, not yet held long enough): the
-    // rear is already stepping out, see driftPreSlide.
-    const preSlide = !this.drifting && fastEnough && steer !== 0 && this._coHold > 0;
     this.driftDepth = 0;
-    if (this.drifting || preSlide) {
+    if (this.drifting) {
       const full = this.fullDriftAngle();
       this.driftDepth = full > 1e-4 ? Math.min(1, Math.abs(this.driftSlipAngle) / full) : 0;
       turnRate *= P.driftTurnMin + (P.driftTurnMax - P.driftTurnMin) * this.driftDepth;
@@ -281,12 +273,14 @@ export class PlayerCar {
     if (this.drifting) {
       const fullSlip = this.driftSign * this.fullDriftAngle();
 
-      // Keep the slide while steering into it. Releasing the wheel lets the
-      // rear progressively settle; counter-steering settles it more quickly.
-      if (steer === this.driftSign) slipTarget = fullSlip;
-      else slipTarget = 0;
+      // Keep the slide while DRIFT is held and the wheel is turned into it.
+      // Letting go of either lets the rear progressively settle;
+      // counter-steering settles it more quickly -- and with DRIFT still
+      // held, flicks straight into a slide the other way once it has.
+      const holding = steer === this.driftSign && !!input.drift;
+      slipTarget = holding ? fullSlip : 0;
 
-      const recovering = steer !== this.driftSign;
+      const recovering = !holding;
       const response = recovering ? (steer === 0 ? 5.2 : 7.4) : P.driftSlipResponse;
       this.driftSlipAngle += (slipTarget - this.driftSlipAngle) * (1 - Math.exp(-dt * response));
 
@@ -301,10 +295,6 @@ export class PlayerCar {
         this.driftSlipAngle = 0;
         this.driftSign = 0;
       }
-    } else if (preSlide) {
-      const target = (steer > 0 ? 1 : -1) * this.fullDriftAngle() * P.driftPreSlide;
-      this.driftSlipAngle += (target - this.driftSlipAngle) * (1 - Math.exp(-dt * P.driftSlipResponse));
-      moveAngle -= this.driftSlipAngle;
     } else {
       this.driftSlipAngle += (0 - this.driftSlipAngle) * (1 - Math.exp(-dt * 7));
     }
