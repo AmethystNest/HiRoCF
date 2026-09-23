@@ -273,11 +273,11 @@ export class PlayerCar {
     if (this.drifting) {
       const fullSlip = this.driftSign * this.fullDriftAngle();
 
-      // Keep the slide while DRIFT is held and the wheel is turned into it.
-      // Letting go of either lets the rear progressively settle;
-      // counter-steering settles it more quickly -- and with DRIFT still
-      // held, flicks straight into a slide the other way once it has.
-      const holding = steer === this.driftSign && !!input.drift;
+      // DRIFT only starts the slide; it is then held with the wheel alone,
+      // as the brake-started drift was. Letting the wheel go lets the rear
+      // progressively settle; counter-steering settles it more quickly --
+      // and with DRIFT down again, flicks into a slide the other way.
+      const holding = steer === this.driftSign;
       slipTarget = holding ? fullSlip : 0;
 
       const recovering = !holding;

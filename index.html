@@ -182,7 +182,8 @@
     box-shadow:0 0 0 5px rgba(255,255,255,.10),0 0 26px rgba(255,255,255,.26),
                inset 0 1px 0 rgba(255,255,255,.5)
   }
-  #left,#right{font-size:clamp(26px,6.4vw,34px)}
+  /* as tall as the right hand's two rows together */
+  #left,#right{font-size:clamp(26px,6.4vw,34px);height:calc(var(--ctrlH) + var(--rowH) + 9px)}
   #nitro,#brake,#drift{width:var(--actW);font-size:clamp(14px,3.6vw,18px);letter-spacing:.06em;font-weight:900;
     flex-direction:column;gap:5px}
   /* DRIFT: amber, between BRAKE's red and NITRO's blue */
