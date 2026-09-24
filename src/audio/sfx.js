@@ -744,8 +744,10 @@ export function buildAudio(ctx) {
   const SAMPLE_BOXY_HZ = 320;
   const SAMPLE_BOXY_DB = -2.5;
   const SAMPLE_FADE_HIGH = 3000;
-  /** Rpm (game scale) from which revPitch / presence start to come in. */
-  const REV_BRIGHT_FROM = 3800;
+  /** The recording's own rev range once moving (see makeSampledV8Engine's
+   *  `sweep`): where each gear starts, and the lowest it rolls off to. */
+  const SWEEP_FROM = 3700;
+  const SWEEP_FLOOR = 3100;
   /** How far ahead grains are queued, s: enough to ride out a frame that
    *  takes 100 ms (measured in-game at 15 fps under software rendering the
    *  grain stream stayed continuous), short enough that rpm still tracks
@@ -820,16 +822,11 @@ export function buildAudio(ctx) {
    *   and slower-revving, not like a slowed tape of this one).
    */
   /**
-   * @param opts.revPitch extra transposition at the limiter (0.1 = 10% up),
-   *   eased in from REV_BRIGHT_FROM rpm: the recording tops out at 5,777
-   *   and is mapped under the game's 7,000 limiter, so without it the
-   *   last third of every gear barely rises in pitch
-   * @param opts.presence { hz, db, fixed }: a presence lift, `db` at the
-   *   limiter (eased in with revPitch) or throughout if `fixed`
    * @param opts.muffleFloor lowest the `distant` muffle closes to, Hz
    */
   function makeSampledV8Engine(baseGain, {
-    pitch = 1, gearTop = V8_GEAR_TOP, distant = false, revPitch = 0, presence = null, muffleFloor = 600,
+    pitch = 1, gearTop = V8_GEAR_TOP, distant = false, muffleFloor = 600,
+    sweep = false, weightDb = SAMPLE_WEIGHT_DB, boxyDb = SAMPLE_BOXY_DB, run = SAMPLE_RUN, tol = SAMPLE_TOL,
   } = {}) {
     const grains = v8Grains();
     const srcMin = grains[0].rpm;
@@ -843,6 +840,25 @@ export function buildAudio(ctx) {
     // recording measure within 1-2 dB per band, so the difference was never
     // in the grains, it was in the pitch they were being asked for.
     const toSoundRpm = (rpm) => V8_IDLE_RPM + (rpm - V8_IDLE_RPM) * (srcMax - V8_IDLE_RPM) / (V8_REDLINE_RPM - V8_IDLE_RPM);
+    // `sweep` (the player): the rev pattern of the recording itself. It is
+    // of a car that, in every gear including the first, pulls from about
+    // 3,700 to 5,780 rpm and drops back by half again on each change (its
+    // own launch flares straight to 3,860 -- it never runs lower once
+    // moving). The game's close-ratio box, mapped by rpm, swept its top
+    // gears across 5,000-5,780 only: a note that barely moved, changing
+    // gear all the time. Mapped by how far through its gear the car is,
+    // every gear makes the recording's own sweep; the shift points are the
+    // game's. Rolling off in a gear lets it fall toward SWEEP_FLOOR before
+    // the downshift picks it up again.
+    const sweepRpm = (sf, gear, blip, boosting) => {
+      const lo = gear > 0 ? gearTop[gear - 1] : 0, hi = gearTop[gear];
+      const u = (sf - lo) / (hi - lo);
+      let r = SWEEP_FROM + (srcMax - SWEEP_FROM) * Math.min(1, u);
+      r = Math.max(SWEEP_FLOOR, r);
+      // pulling away: from idle to the flare over the first metres
+      if (gear === 0) r = V8_IDLE_RPM + (r - V8_IDLE_RPM) * Math.min(1, sf / 0.02);
+      return r * (1 + V8_BLIP_OVERSHOOT * blip) * (boosting ? 1.03 : 1);
+    };
     const bus = ctx.createGain();
     bus.gain.value = 0;
     const synthOut = ctx.createGain();
@@ -855,21 +871,14 @@ export function buildAudio(ctx) {
     // 5.3 dB and 100-200 Hz 2.2 dB under it, everything above 200 Hz 2-3 dB
     // over. SAMPLE_LOW_SHELF_* are fitted to close that.
     const weight = ctx.createBiquadFilter();
-    weight.type = 'peaking'; weight.frequency.value = SAMPLE_WEIGHT_HZ; weight.Q.value = SAMPLE_WEIGHT_Q; weight.gain.value = SAMPLE_WEIGHT_DB;
+    weight.type = 'peaking'; weight.frequency.value = SAMPLE_WEIGHT_HZ; weight.Q.value = SAMPLE_WEIGHT_Q; weight.gain.value = weightDb;
     const boxy = ctx.createBiquadFilter();
-    boxy.type = 'peaking'; boxy.frequency.value = SAMPLE_BOXY_HZ; boxy.Q.value = 1.0; boxy.gain.value = SAMPLE_BOXY_DB;
+    boxy.type = 'peaking'; boxy.frequency.value = SAMPLE_BOXY_HZ; boxy.Q.value = 1.0; boxy.gain.value = boxyDb;
     const overrun = ctx.createBiquadFilter();
     overrun.type = 'lowpass'; overrun.frequency.value = 11000; overrun.Q.value = 0.5;
     bus.connect(weight);
     weight.connect(boxy);
-    let tail = boxy;
-    const lift = presence ? ctx.createBiquadFilter() : null;
-    if (lift) {
-      lift.type = 'peaking'; lift.frequency.value = presence.hz; lift.Q.value = presence.q ?? 0.8;
-      lift.gain.value = presence.fixed ? presence.db : 0;
-      tail.connect(lift); tail = lift;
-    }
-    tail.connect(overrun);
+    boxy.connect(overrun);
     const preLevel = overrun;
     // Both the recording and its synthesised low end leave through `level`
     // (distance, for the rival) and, on a `distant` voice, `muffle` too: a
@@ -891,7 +900,7 @@ export function buildAudio(ctx) {
     let stopped = false;
     let nextAt = 0;         // ctx time the next grain starts
     let cursor = 0;         // grain index the walk is on
-    let run = 0;            // consecutive cycles played since the last jump
+    let runLen = 0;           // consecutive cycles played since the last jump
     let rpmNow = V8_IDLE_RPM;
     let lastT = 0;
     let onThrottle = 1;
@@ -911,19 +920,16 @@ export function buildAudio(ctx) {
         const t = ctx.currentTime;
         const dt = lastT ? Math.min(0.1, Math.max(0, t - lastT)) : 0;
         lastT = t;
-        const { sf, rpm, shifting, blip, up } = box.step(speed, maxSpeed, boosting, t);
+        const { sf, rpm, shifting, blip, up, gear } = box.step(speed, maxSpeed, boosting, t);
         box.up = up;
         // The same glide the synthesised voice gives its pitch: quick through
         // a shift, so the drop reads as a clutch opening, not a bog.
         const tau = shifting || blip > 0 ? 0.025 : 0.05;
-        rpmNow += (toSoundRpm(rpm) - rpmNow) * (dt > 0 ? 1 - Math.exp(-dt / tau) : 1);
+        const soundRpm = sweep ? sweepRpm(sf, gear, blip, boosting) : toSoundRpm(rpm);
+        rpmNow += (soundRpm - rpmNow) * (dt > 0 ? 1 - Math.exp(-dt / tau) : 1);
 
         level.gain.setTargetAtTime(distance, t, 0.08);
         if (muffle) muffle.frequency.setTargetAtTime(muffleFloor + (3800 - muffleFloor) * distance * distance, t, 0.1);
-        // how far into the top of the rev range: drives revPitch and presence
-        const top = Math.max(0, Math.min(1, (rpm - REV_BRIGHT_FROM) / (V8_REDLINE_RPM - REV_BRIGHT_FROM))) ** 1.3;
-        if (lift && !presence.fixed) lift.gain.setTargetAtTime(presence.db * top, t, 0.05);
-        const revUp = 1 + revPitch * top;
         const mix = Math.max(0, Math.min(1, (rpmNow - SAMPLE_FADE_LOW) / (SAMPLE_FADE_HIGH - SAMPLE_FADE_LOW)));
         synth.update(speed, boosting, maxSpeed, throttle, Math.sqrt(1 - mix));
 
@@ -946,21 +952,21 @@ export function buildAudio(ctx) {
         // than firing a burst of late grains at once.
         if (nextAt < t) nextAt = t + 0.005;
         const target = Math.max(srcMin, Math.min(srcMax, rpmNow));
-        let lo = grainFor(target * (1 - SAMPLE_TOL));
-        let hi = Math.min(grains.length - 1, grainFor(target * (1 + SAMPLE_TOL)));
+        let lo = grainFor(target * (1 - tol));
+        let hi = Math.min(grains.length - 1, grainFor(target * (1 + tol)));
         if (hi - lo < SAMPLE_MIN_SPAN) {
           const mid = (lo + hi) >> 1;
           lo = Math.max(0, Math.min(grains.length - 1 - SAMPLE_MIN_SPAN, mid - (SAMPLE_MIN_SPAN >> 1)));
           hi = lo + SAMPLE_MIN_SPAN;
         }
         while (nextAt < t + SAMPLE_LOOKAHEAD) {
-          if (cursor < lo || cursor > hi || run >= SAMPLE_RUN) {
+          if (cursor < lo || cursor > hi || runLen >= run) {
             cursor = lo + Math.floor(Math.random() * (hi - lo + 1));
-            run = 0;
+            runLen = 0;
           }
-          run++;
+          runLen++;
           const g = grains[cursor];
-          const rate = (rpmNow / g.rpm) * pitch * revUp;
+          const rate = (rpmNow / g.rpm) * pitch;
           const src = ctx.createBufferSource();
           src.buffer = g.buf;
           src.playbackRate.value = rate;
@@ -1567,7 +1573,7 @@ export function buildAudio(ctx) {
       crackle = makeCrackle(v.bus, { onPower: 5, burn: 0.025 });
       popGain = 0.62;
     } else {
-      v = makeSampledV8Engine(0.42, { pitch: RIVAL_PITCH, gearTop: RIVAL_GEAR_TOP, distant: true, muffleFloor: 1300, revPitch: 0.06 });
+      v = makeSampledV8Engine(0.42, { pitch: RIVAL_PITCH, gearTop: RIVAL_GEAR_TOP, distant: true, muffleFloor: 1300 });
     }
     let lastSpeed = 0, thr = 1, lastT = 0;
     return {

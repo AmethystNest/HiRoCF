@@ -276,11 +276,15 @@ export class Game {
     // covers idle and launch inside it). The rival keeps the plain voice:
     // it is a different car on every stage -- a saloon, a truck -- and
     // none of them is a V8 like this.
-    // Rising in pitch and brightening toward the limiter (revPitch,
-    // presence): the recording tops out well under the game's 7,000.
-    // 0.26 (was 0.34): a little under the rival's voices, so they carry.
-    this.playerEngine = this.audio?.makeSampledV8Engine(0.26, {
-      revPitch: 0.1, presence: { hz: 2400, db: 6 },
+    // Played as the recording itself goes (sfx.js makeSampledV8Engine):
+    // each gear sweeps its rev range, no EQ on top, longer unbroken runs of
+    // it. Measured over a full-throttle run against the reference, 63 Hz-5
+    // kHz within 1.6 dB (160 Hz-3.15 kHz within 0.7), where the voice it
+    // replaces was 3-6 dB short under 100 Hz and 4-6 dB over at 1.6-3.2 kHz.
+    // 0.32: the same loudness above 200 Hz as before, give or take 1 dB,
+    // still a little under the rivals' voices so they carry.
+    this.playerEngine = this.audio?.makeSampledV8Engine(0.32, {
+      sweep: true, weightDb: 0, boxyDb: 0, run: 24, tol: 0.015,
     }) ?? null;
     // The rival's engine is its car's own (STAGES[n].rival.engine, see
     // sfx.js makeRivalEngine), so it is built per stage in loadStage.
