@@ -23,10 +23,21 @@
 import { Container, Graphics, Sprite } from '../pixi.js';
 import { CAR_SIZE } from '../config.js';
 
-/** Decorative parked vehicles should read as the same size as the actual cars. */
-const VEHICLE_PROPS = new Set([
-  'ambulance', 'tow_vehicle',
-  'car_civilian_white', 'car_civilian_silver', 'car_civilian_navy', 'car_civilian_maroon',
+/**
+ * Decorative parked vehicles, sized against the player's car: drawn width
+ * as a multiple of the player's sprite box (CAR_SIZE.player.w).
+ *
+ * The multiple is per vehicle because the art is not framed alike. The
+ * player's photo is only 56% car across its width (the rest is margin);
+ * the ambulance fills 75% of its frame and the tow truck 57%. A flat 1.2
+ * for all of them drew the ambulance's body 1.6 times the car's width
+ * (asked: "too big"). These put each body at 1.05-1.25 times the car's
+ * width and 0.93-0.98 of its length, as a van and a tow truck parked
+ * beside it are.
+ */
+const VEHICLE_PROPS = new Map([
+  ['ambulance', 0.95], ['tow_vehicle', 1.05],
+  ['car_civilian_white', 1.2], ['car_civilian_silver', 1.2], ['car_civilian_navy', 1.2], ['car_civilian_maroon', 1.2],
 ]);
 
 /** Deterministic RNG so a stage looks identical every load. */
@@ -423,7 +434,7 @@ export function buildProps(path, sheet, shadowTex, {
     // These vehicles are drawn taller/narrower than the player car's own
     // sprite, so matching width 1:1 still read as smaller; the multiplier
     // brings their overall footprint up to match instead of just one edge.
-    const baseW = VEHICLE_PROPS.has(name) ? CAR_SIZE.player.w * worldScale * 1.2 : info.w;
+    const baseW = VEHICLE_PROPS.has(name) ? CAR_SIZE.player.w * worldScale * VEHICLE_PROPS.get(name) : info.w;
     const w = baseW * scale;
     const h = w * (tx.height / tx.width);
     // Collision-avoidance radius is derived from the prop's ACTUAL rendered

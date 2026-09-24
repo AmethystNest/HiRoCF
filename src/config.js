@@ -333,9 +333,6 @@ export const STAGES = {
     courseDesc: 'ヘアピン8箇所 / つづら折りの登坂 / 渓谷ストレート',
     rivalName: 'ガムテープデスマッチ',
     roadHalf: 190, wallHalf: 260,
-    // The hairpins' inside rail is squeezed in toward the road instead of
-    // folding into a spike (see main.js `fold`), and the wall with it.
-    foldInside: true,
     playerPhysics: {
       // moveScale is deliberately NOT overridden here any more -- pace is
       // one value for every stage (see PHYSICS.moveScale). What stays below
@@ -402,6 +399,9 @@ export const STAGES = {
     courseDesc: '長い直線 / 高速コーナー / 最高速勝負',
     rivalName: '最大の敵は己',
     roadHalf: 360, wallHalf: 420,
+    // Other cars on the expressway (game/traffic.js), ~100 km/h in random
+    // lanes: in the player's way, and scattered by the truck.
+    traffic: { count: 5 },
     playerPhysics: { wallInset: 3, wallSpeedMul: 0.82 },
     wallTriggerExtra: 6,
     rival: {

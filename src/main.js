@@ -15,6 +15,7 @@ import { LAYOUTS } from './track/layouts.js';
 import { PlayerCar } from './game/player.js';
 import { RivalCar } from './game/rival.js';
 import { Race, resolveContacts, autoDrivePostRace } from './game/race.js';
+import { Traffic } from './game/traffic.js';
 import { clearContact } from './game/contact.js';
 import { buildAudio } from './audio/sfx.js';
 import { makeBgm } from './audio/bgm.js';
@@ -636,11 +637,11 @@ export class Game {
     const widen = (k) => halfW[k] - cfg.roadHalf;
     // Inside-of-bend caps (see foldLimits) -- only where a stage's own
     // strips are wide enough against its corners to need them.
-    // Stages 1 and 3 opt in too (cfg.foldInside): stage 3's hairpins are
-    // far tighter than its rail sits from the road, and stage 1's 520
-    // corners tighter than its gravel trap, so the inside of each drew as a
-    // spike folded back through itself.
-    const fold = mixed || cfg.foldInside ? foldLimits(path) : null;
+    // Opt-in only (cfg.foldInside), and no stage takes it now: the rounded,
+    // squeezed inside was tried on stages 1, 3 and 5 and read as less
+    // natural than the full-width roadside meeting at the apex, on all
+    // three (asked back each time).
+    const fold = cfg.foldInside ? foldLimits(path) : null;
 
     // The physics barrier, per route point: where each stretch of road
     // SHOWS something to hit (see visibleBarrierHalf). cfg.wallHalf is left
@@ -1033,6 +1034,32 @@ export class Game {
     this.rivalBoostFlame = buildBoostFlame();
     this.actors.addChild(this.rivalBoostFlame.view);
 
+    // --- traffic (cfg.traffic: stage 4's expressway only) ---
+    // Drawn under both racing cars. Ordinary Priuses, at the size the
+    // stage 2 Prius draws at, with a hull fitted the same way the rival's is.
+    this.traffic = null;
+    this.trafficViews = [];
+    if (cfg.traffic) {
+      const ts = CAR_SIZE.prius, tv = CAR_VISUAL_SCALE.prius ?? { w: 1, h: 1 };
+      const draw = { w: ts.w * s * tv.w, h: ts.h * s * tv.h };
+      const hs = CAR_HULL_SCALE.prius ?? {};
+      this.trafficHull = { w: draw.w * (hs.w ?? 1), h: draw.h * (hs.h ?? 1) };
+      this.traffic = new Traffic(path, {
+        count: cfg.traffic.count, roadHalf: cfg.roadHalf, size: this.trafficHull, barrier: this.barrier,
+      });
+      for (let i = 0; i < cfg.traffic.count; i++) {
+        const view = new Container();
+        const sh = new Sprite(this.tex.shadow_blob);
+        sh.anchor.set(0.5); sh.width = draw.w * 1.8; sh.height = draw.h * 1.4; sh.alpha = 0.5;
+        const sp = new Sprite(this.cars.prius);
+        sp.anchor.set(0.5); sp.width = draw.w; sp.height = draw.h;
+        view.addChild(sh, sp);
+        view.shadow = sh; view.body = sp; view.baseW = draw.w; view.baseH = draw.h;
+        this.actors.addChildAt(view, this.actors.getChildIndex(this.playerShadow));
+        this.trafficViews.push(view);
+      }
+    }
+
     this.rivalSprite = new Sprite(this.cars[cfg.rival.sprite] || this.cars.devilz);
     this.rivalSprite.anchor.set(0.5);
     this.rivalSprite.width = rivalDrawSize.w;
@@ -1062,6 +1089,10 @@ export class Game {
     this.race = new Race(path, { startBack });
     this.playerEntry = this.race.addCar(this.player, { isPlayer: true, name: 'YOU' });
     this.rivalEntry = this.race.addCar(this.rival, { isPlayer: false, name: cfg.rivalName });
+    if (this.traffic) {
+      this.traffic.reset(0);
+      for (const c of this.traffic.cars) this.syncDeck(c);
+    }
 
     this.miniMap = buildMiniMap(path, cfg);
     this.app.stage.addChild(this.miniMap.view);
@@ -1100,6 +1131,35 @@ export class Game {
     const speedShare = car.speed / (car.maxSpeed ?? PHYSICS.maxSpeed);
     const moving = clamp01((speedShare - SQUEAL_SPEED_FROM) / 0.15);
     return Math.max(cornering, slide) * moving;
+  }
+
+  /**
+   * Stage 4's traffic (game/traffic.js): moved, collided with both racing
+   * cars on the same deck, and heard. `collide` is off after the finish,
+   * where the cars are on autopilot.
+   */
+  updateTraffic(dt, collide) {
+    const t = this.traffic;
+    if (!t) return;
+    const p = this.player, L = this.path.length;
+    p.progressDistance = ((this.playerEntry.progress.total % L) + L) % L;
+    for (const c of t.cars) clearContact(c.contact);
+    t.tick(dt);
+    const { width: W, height: H } = this.app.screen;
+    const view = Math.hypot(W / 2, H * 0.62) / (this.zoom * this.camZoom) + 300;
+    const events = t.update(dt, {
+      player: p, rival: this.rival, view, collide,
+      hulls: { player: { w: CAR_SIZE.player.w * this.worldScale, h: CAR_SIZE.player.h * this.worldScale }, rival: this.rivalHullSize },
+      sameDeck: (a, b) => (a.deckId ?? 0) === (b.deckId ?? 0),
+    });
+    for (const c of t.cars) this.syncDeck(c);
+    if (!this.audio) return;
+    for (const e of events) {
+      const d = Math.hypot(e.car.x - p.x, e.car.y - p.y);
+      const near = Math.max(0, 1 - d / 5000);
+      if (e.type === 'player') this.audio.crash(0.35 + 0.65 * e.force);
+      else if (near > 0) this.audio.crash((0.5 + 0.5 * e.force) * near);
+    }
   }
 
   syncDeck(car) {
@@ -1161,7 +1221,9 @@ export class Game {
           dt,
         );
       }
+      this.updateTraffic(dt, true);
     } else if (state === 'finished') {
+      this.updateTraffic(dt, false);
       // Race is over: clear any remaining drift state/visual yaw for BOTH cars,
       // then keep them circulating under AI control. This prevents a car from
       // staying visually sideways forever if it crosses the line mid-drift.
@@ -1386,6 +1448,29 @@ export class Game {
     this.rivalSprite.alpha = this._rivalGhost;
     this.rivalShadow.alpha = 0.5 * this._rivalGhost;
 
+    if (this.traffic) {
+      const reach = Math.hypot(this.app.screen.width / 2, this.app.screen.height * 0.62) / (this.zoom * this.camZoom) + 300;
+      const playerUnder = this._deckGrid && (p.zLevel ?? 0) < 2 && this.underDeck(p.x, p.y, p._routeHint ?? 0);
+      this.traffic.cars.forEach((c, i) => {
+        const v = this.trafficViews[i];
+        const vis = Math.hypot(c.x - p.x, c.y - p.y) < reach;
+        if (v.visible !== vis) v.visible = vis;
+        if (!vis) return;
+        v.position.set(c.x, c.y);
+        v.body.rotation = c.angle + Math.PI / 2;
+        v.shadow.rotation = v.body.rotation;
+        // airborne after the truck: drawn bigger (nearer the camera) with
+        // its shadow left further behind on the road
+        const up = 1 + c.lift / 900;
+        v.body.width = v.baseW * up; v.body.height = v.baseH * up;
+        v.shadow.position.set(6 + c.lift * 0.25, 8 + c.lift * 0.35);
+        v.shadow.alpha = 0.5 / (1 + c.lift / 300);
+        // ghosted under a deck the player is not also under, like the rival
+        const ghost = this._deckGrid && !playerUnder && (c.zLevel ?? 0) < 2 && this.underDeck(c.x, c.y, c._routeHint ?? 0);
+        v.alpha = ghost ? RIVAL_UNDER_ALPHA : 1;
+      });
+    }
+
     // camera: player pinned to a fixed screen anchor, world rotated so the
     // car always points up the screen
     const shakeX = p.shake ? (Math.random() - 0.5) * p.shake : 0;
@@ -1426,7 +1511,7 @@ export class Game {
     // the wider undrawn box sat it noticeably outside stage 2/5's rivals,
     // which draw at 0.55-0.57x their box.
     this.rivalBoostFlame.update(this.rival, dt, this.worldScale, this.rivalDrawSizePx);
-    this.contactFX.update([p, this.rival], dt, this.worldScale);
+    this.contactFX.update(this.traffic ? [p, this.rival, ...this.traffic.cars] : [p, this.rival], dt, this.worldScale);
     this.finishFX.update(dt, W, H);
     this.sideBolts.update(dt, W, H);
   }
