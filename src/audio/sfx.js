@@ -834,6 +834,7 @@ export function buildAudio(ctx) {
    */
   function makeSampledV8Engine(baseGain, {
     pitch = 1, gearTop = V8_GEAR_TOP, distant = false, revPitch = 0, presence = null, drive = 0, muffleFloor = 600,
+    dirt = 0, driveOut = DRIVE_OUT, peaks = [],
   } = {}) {
     const grains = v8Grains();
     const srcMin = grains[0].rpm;
@@ -873,6 +874,11 @@ export function buildAudio(ctx) {
       lift.gain.value = presence.fixed ? presence.db : 0;
       tail.connect(lift); tail = lift;
     }
+    for (const pk of peaks) {
+      const f = ctx.createBiquadFilter();
+      f.type = 'peaking'; f.frequency.value = pk.hz; f.Q.value = pk.q; f.gain.value = pk.db;
+      tail.connect(f); tail = f;
+    }
     tail.connect(overrun);
     // An open pipe: the whole voice soft-clipped, which is what turns a
     // note into a rasp -- every firing pulse flattened into a burst of
@@ -886,11 +892,28 @@ export function buildAudio(ctx) {
     if (drive > 0) {
       const into = ctx.createGain(); into.gain.value = drive;
       const shaper = ctx.createWaveShaper();
-      const n = 2048, curve = new Float32Array(n);
-      for (let i = 0; i < n; i++) { const x = (i / (n - 1)) * 2 - 1; curve[i] = Math.tanh(x * 2.2) / Math.tanh(2.2); }
+      // `dirt` skews the curve: one half of the wave clips before the
+      // other, which adds the even harmonics a clean clipper does not --
+      // the difference between a loud exhaust and a torn one
+      const n = 2048, curve = new Float32Array(n), off = dirt * 0.35;
+      const norm = Math.max(Math.abs(Math.tanh(2.2 * (1 + off)) - Math.tanh(2.2 * off)), Math.abs(Math.tanh(2.2 * (-1 + off)) - Math.tanh(2.2 * off)));
+      for (let i = 0; i < n; i++) { const x = (i / (n - 1)) * 2 - 1; curve[i] = (Math.tanh(2.2 * (x + off)) - Math.tanh(2.2 * off)) / norm; }
       shaper.curve = curve; shaper.oversample = '4x';
-      back = ctx.createGain(); back.gain.value = DRIVE_OUT / Math.sqrt(drive);
-      overrun.connect(into); into.connect(shaper); shaper.connect(back);
+      back = ctx.createGain(); back.gain.value = driveOut / Math.sqrt(drive);
+      overrun.connect(into); into.connect(shaper);
+      // the uneven, burbling note of an engine breathing through nothing:
+      // its level shaken by slow noise, so no two firings are alike
+      if (dirt > 0) {
+        const hpf = ctx.createBiquadFilter();
+        hpf.type = 'highpass'; hpf.frequency.value = 30;   // the clipper's DC
+        const shake = ctx.createGain(); shake.gain.value = 1;
+        const wob = ctx.createBufferSource(); wob.buffer = noiseBuffer; wob.loop = true;
+        const wobLp = ctx.createBiquadFilter(); wobLp.type = 'lowpass'; wobLp.frequency.value = 70;
+        const wobDepth = ctx.createGain(); wobDepth.gain.value = 0.55 * dirt;
+        wob.connect(wobLp); wobLp.connect(wobDepth); wobDepth.connect(shake.gain);
+        wob.start();
+        shaper.connect(hpf); hpf.connect(shake); shake.connect(back);
+      } else shaper.connect(back);
       preLevel = back;
     }
     // Both the recording and its synthesised low end leave through `level`
@@ -960,7 +983,7 @@ export function buildAudio(ctx) {
           baseGain * SAMPLE_LEVEL * load * duck * (boosting ? 1.15 : 1) * Math.sqrt(mix), t, shifting || blip > 0 ? 0.025 : 0.05,
         );
         overrun.frequency.setTargetAtTime(1300 + 9700 * thr ** 2, t, blip > 0 ? 0.02 : 0.08);
-        if (back) back.gain.setTargetAtTime((DRIVE_OUT / Math.sqrt(drive)) * (0.3 + 0.7 * thr) * duck, t, 0.05);
+        if (back) back.gain.setTargetAtTime((driveOut / Math.sqrt(drive)) * (0.3 + 0.7 * thr) * duck, t, 0.05);
 
         const state = { rpm, sf, shifting, up: box.up, blip, overrun: 1 - thr };
         if (mix <= 0) { nextAt = 0; return state; }
@@ -1132,8 +1155,15 @@ export function buildAudio(ctx) {
    * milliseconds of band-passed noise with a snap of attack and a short
    * ring, over a low thump. They come in irregular runs, never on a beat.
    */
-  function makeCrackle(out) {
+  /**
+   * @param opts.onPower pops per second at full revs ON the throttle too
+   *   (a misfiring open pipe; 0 = only off it)
+   * @param opts.burn how much of the built-up heat each pop uses: lower
+   *   is longer runs
+   */
+  function makeCrackle(out, { onPower = 0, burn = 0.05 } = {}) {
     let nextAt = 0;
+    let powerAt = 0;
     let heat = 0;           // how much there is left to burn: builds on power
     let count = 0;
     function pop(at, strength) {
@@ -1168,16 +1198,26 @@ export function buildAudio(ctx) {
        * @param up an upshift this frame
        * @param gain loudness of a full pop
        */
-      update(dt, { overrun, rev, up, gain }) {
+      update(dt, { overrun, rev, up, gain, blip = 0 }) {
         const t = ctx.currentTime;
         heat = Math.min(1, heat + dt * (1 - overrun) * rev * 0.8);
-        if (up && rev > 0.3) pop(t + 0.01, gain * (0.7 + Math.random() * 0.3));
+        if (up && rev > 0.3) {
+          pop(t + 0.01, gain * (0.7 + Math.random() * 0.3));
+          if (onPower) pop(t + 0.04 + Math.random() * 0.03, gain * 0.6);
+        }
+        if (onPower && overrun < 0.5 && rev > 0.55) {
+          // misfires under power: sparse, irregular, quieter than the overrun
+          if (powerAt < t) powerAt = t + Math.random() / (onPower * rev);
+          if (powerAt < t + 0.1) { pop(powerAt, gain * (0.25 + 0.3 * Math.random())); powerAt += Math.random() * 2 / (onPower * rev); }
+        }
+        // a downshift blip lights off a couple
+        if (onPower && blip > 0.6 && Math.random() < 0.5) pop(t + Math.random() * 0.03, gain * 0.7);
         if (overrun < 0.5 || heat <= 0.02) { nextAt = 0; return; }
         if (nextAt < t) nextAt = t + Math.random() * 0.05;
         while (nextAt < t + 0.1) {
           // runs of quick pops with gaps between; loudest just after the lift
           pop(nextAt, gain * (0.35 + 0.65 * Math.random()) * Math.sqrt(heat));
-          heat = Math.max(0, heat - 0.05);
+          heat = Math.max(0, heat - burn);
           nextAt += Math.random() < 0.3 ? 0.08 + Math.random() * 0.2 : 0.015 + Math.random() * 0.05;
         }
       },
@@ -1413,14 +1453,17 @@ export function buildAudio(ctx) {
     else if (kind === 'v10') v = makeV10Engine(0.3);
     else if (kind === 'straightpipe') {
       v = makeSampledV8Engine(0.2, {
-        pitch: 0.9, gearTop: RIVAL_GEAR_TOP, distant: true, muffleFloor: 1300,
-        drive: 3.2, presence: { hz: 1500, db: 5, q: 0.7, fixed: true },
+        pitch: 0.9, gearTop: RIVAL_GEAR_TOP, distant: true, muffleFloor: 1500,
+        drive: 6, dirt: 1, driveOut: 1.45,
+        presence: { hz: 1500, db: 5, q: 0.7, fixed: true },
+        // the honk of a short, open pipe, and its fizz
+        peaks: [{ hz: 380, q: 1.2, db: 4 }, { hz: 3200, q: 1.0, db: 3 }],
       });
       const out = ctx.createGain();
       out.connect(master);
-      crackle = makeCrackle(out);
+      crackle = makeCrackle(out, { onPower: 5, burn: 0.025 });
       crackle.out = out;
-      popGain = 0.42;
+      popGain = 0.62;
     } else {
       v = makeSampledV8Engine(0.42, { pitch: RIVAL_PITCH, gearTop: RIVAL_GEAR_TOP, distant: true, muffleFloor: 1300, revPitch: 0.06 });
     }
@@ -1437,7 +1480,7 @@ export function buildAudio(ctx) {
         if (crackle && st) {
           const t = ctx.currentTime; const dt = lastT ? Math.min(0.1, t - lastT) : 0; lastT = t;
           crackle.out.gain.setTargetAtTime(level, t, 0.08);
-          crackle.update(dt, { overrun: 1 - thr, rev: Math.min(1, st.sf * 1.4), up: st.up, gain: popGain });
+          crackle.update(dt, { overrun: 1 - thr, rev: Math.min(1, st.sf * 1.4), up: st.up, gain: popGain, blip: st.blip });
         }
       },
       silence() { v.silence(); if (crackle) crackle.out.gain.setTargetAtTime(0, ctx.currentTime, 0.05); },

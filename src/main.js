@@ -164,6 +164,20 @@ function distanceLevel(d) {
 }
 
 /**
+ * The rival's ENGINE against distance: full within ENGINE_REF_DIST, then
+ * falling as d^-0.6 rather than d^-1. The inverse law is right for a point
+ * source, but a racing rival spends most of a race a screen or more away
+ * (median 1,500 units on stage 1, 2,800 on stage 3, 5,400 on stage 5 in a
+ * measured run), where it put the engine 13-24 dB down and muffled -- in
+ * the game, simply gone. This keeps it placed (quieter and duller the
+ * further off) but in the mix: -6 dB at 1,500, -12 at 5,400.
+ */
+const ENGINE_REF_DIST = 500;
+function engineLevel(d) {
+  return d <= ENGINE_REF_DIST ? 1 : Math.pow(ENGINE_REF_DIST / d, 0.6);
+}
+
+/**
  * Tyre squeal thresholds (see Game.tyreSlip), as a fraction of the fastest
  * the car can yaw at its current speed. Not in g: this game's cornering is
  * arcade -- a highway sweeper at full speed is ~10 g by the car's own
@@ -264,7 +278,8 @@ export class Game {
     // none of them is a V8 like this.
     // Rising in pitch and brightening toward the limiter (revPitch,
     // presence): the recording tops out well under the game's 7,000.
-    this.playerEngine = this.audio?.makeSampledV8Engine(0.34, {
+    // 0.26 (was 0.34): a little under the rival's voices, so they carry.
+    this.playerEngine = this.audio?.makeSampledV8Engine(0.26, {
       revPitch: 0.1, presence: { hz: 2400, db: 6 },
     }) ?? null;
     // The rival's engine is its car's own (STAGES[n].rival.engine, see
@@ -1480,7 +1495,8 @@ export class Game {
       // Everything the rival makes is heard from where the player is (see
       // distanceLevel), not at one fixed level wherever it is on the course.
       const rivalLevel = distanceLevel(Math.hypot(this.rival.x - p.x, this.rival.y - p.y));
-      this.rivalEngine?.update(this.rival.speed, this.rival.boosting, this.rival.maxSpeed, rivalLevel);
+      this.rivalEngine?.update(this.rival.speed, this.rival.boosting, this.rival.maxSpeed,
+        engineLevel(Math.hypot(this.rival.x - p.x, this.rival.y - p.y)));
       this.playerSqueal.update(this.tyreSlip(p, 'player', dt));
       this.rivalSqueal.update(this.tyreSlip(this.rival, 'rival', dt), rivalLevel);
 
