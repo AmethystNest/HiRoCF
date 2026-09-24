@@ -20,6 +20,8 @@
   html,body{margin:0;height:100%;overflow:hidden;background:#161a1e;
     font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
     touch-action:none;-webkit-user-select:none;user-select:none;
+    /* no iOS long-press callout / magnifier on a held pad */
+    -webkit-touch-callout:none;-webkit-text-size-adjust:100%;
     -webkit-tap-highlight-color:transparent;overscroll-behavior:none}
   #app{position:fixed;inset:0}
   #app canvas{display:block;width:100%;height:100%}
@@ -1410,10 +1412,24 @@
       // not an <audio> element: the music would play on over the home
       // screen. Stop it with the page, and pick it back up on return
       // unless the pause card is what is waiting there.
+      //
+      // On a phone, leaving mid-race is usually not a choice (a call, the
+      // lock button, a notification pulled down), so the race is paused
+      // too and comes back on the pause card rather than already running.
+      // iOS also suspends -- or "interrupts" -- the AudioContext on the way
+      // out and does not always hand it back, so it is resumed on return
+      // and, failing that, on the next touch.
+      const wakeAudio=()=>{const c=game.audio?.ctx??audioCtx;if(c&&c.state!=='running'){try{c.resume();}catch{/* next touch */}}};
       document.addEventListener('visibilitychange',()=>{
-        if(document.hidden)game.bgm?.pause();
-        else if(pauseOverlay.hidden)game.bgm?.resume();
+        if(document.hidden){
+          if(game.race?.state==='racing'||game.race?.state==='countdown')openPause();
+          game.bgm?.pause();
+        } else {
+          wakeAudio();
+          if(pauseOverlay.hidden)game.bgm?.resume();
+        }
       });
+      addEventListener('pointerdown',wakeAudio,{capture:true,passive:true});
       pauseBtn.addEventListener('pointerdown',e=>{e.preventDefault();game.audio?.click();openPause()});
       el('pauseResume').addEventListener('pointerdown',e=>{e.preventDefault();game.audio?.click();closePause()});
       el('pauseRestart').addEventListener('pointerdown',e=>{

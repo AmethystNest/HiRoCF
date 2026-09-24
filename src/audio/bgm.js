@@ -55,13 +55,23 @@ export function makeBgm(ctx, bus, el) {
   let active = false;   // started for this race and not yet finished
   let stopTimer = 0;
 
+  // Embedded tracks decoded so far, by stage. Each is decoded once: the
+  // blob URL is kept for the next visit to that stage and the base64 text
+  // is dropped from the page -- ~4.5 MB of string per track that a phone
+  // would otherwise hold for the whole session, and a 3.5 MB decode (a
+  // visible hitch on a phone) repeated on every stage load.
+  const embedded = new Map();
   function sourceFor(stageId) {
+    if (embedded.has(stageId)) return { url: embedded.get(stageId), owned: false };
     const tag = typeof document !== 'undefined' ? document.getElementById(`bgm-${stageId}`) : null;
     if (tag) {
       const bin = atob(tag.textContent.trim());
       const bytes = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      return { url: URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' })), owned: true };
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }));
+      embedded.set(stageId, url);
+      tag.textContent = '';
+      return { url, owned: false };
     }
     // A page built without music says so (build/pwa.mjs without
     // --with-bgm), rather than have every stage ask the server for a track

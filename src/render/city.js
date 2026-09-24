@@ -74,18 +74,38 @@ function inStreet(s, x, y, half) {
   return Math.abs(d) <= half && a >= s.a0 - half && a <= s.a1 + half;
 }
 
-/** Exact distance to the course's centreline. TrackPath.nearest only looks
- *  one 400-unit cell around the point, which is not enough out here. */
+/**
+ * Distance to the course's centreline, exact up to LIMIT and Infinity
+ * beyond it -- every caller only asks "is this nearer than some pavement
+ * width" (all under 800). TrackPath.nearest only looks one cell around the
+ * point; the scan of every point this replaces cost a second of stage 2's
+ * load on a throttled CPU, since building the town asks it tens of
+ * thousands of times.
+ */
 function routeDistance(path) {
-  const pts = path.points;
+  const C = 400, LIMIT = 1200, R = Math.ceil(LIMIT / C);
+  const grid = new Map();
+  const key = (i, j) => (i + 50000) * 100000 + (j + 50000);
+  for (const p of path.points) {
+    const k = key(Math.floor(p[0] / C), Math.floor(p[1] / C));
+    let b = grid.get(k);
+    if (!b) grid.set(k, (b = []));
+    b.push(p);
+  }
   return (x, y) => {
-    let best = Infinity;
-    for (let i = 0; i < pts.length; i++) {
-      const dx = pts[i][0] - x, dy = pts[i][1] - y;
-      const d = dx * dx + dy * dy;
-      if (d < best) best = d;
+    const ci = Math.floor(x / C), cj = Math.floor(y / C);
+    let best = LIMIT * LIMIT;
+    for (let i = ci - R; i <= ci + R; i++) {
+      for (let j = cj - R; j <= cj + R; j++) {
+        const b = grid.get(key(i, j));
+        if (!b) continue;
+        for (const p of b) {
+          const dx = p[0] - x, dy = p[1] - y, d = dx * dx + dy * dy;
+          if (d < best) best = d;
+        }
+      }
     }
-    return Math.sqrt(best);
+    return best >= LIMIT * LIMIT ? Infinity : Math.sqrt(best);
   };
 }
 
