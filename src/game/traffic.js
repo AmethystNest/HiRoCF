@@ -1,6 +1,6 @@
 /**
  * Background traffic on stage 4's expressway: ordinary cars cruising at
- * about 100 km/h on the dial, one to a lane in any of the three lanes.
+ * about 100 km/h on the dial, spread over the three lanes.
  *
  * They are there to be in the player's way. The rival -- a loaded box
  * truck -- does not go round them: it runs straight through and sends
@@ -8,23 +8,33 @@
  * costs most of the closing speed, and the car it hit is shoved on ahead
  * of it, spinning.
  *
- * A car has two states. On the road it runs on rails, a distance along the
- * course and a lane, at its own cruising speed, holding back behind a
- * slower car in its lane. Once hit it is loose: a body with its own
- * velocity and spin that slides to a stop wherever it ends up, still in
- * the way. A car well behind the player, or loose and stopped out of
- * sight, is taken away and put back into the traffic somewhere ahead,
- * beyond the edge of the screen, so the density round the player holds.
+ * A car is in one of three modes.
+ *  - 'road': on rails, a distance along the course and a lateral offset,
+ *    at its own cruising speed. It holds back behind anything slower in
+ *    front of it in its lane -- another car, a wreck, either racer -- and
+ *    every so often moves over a lane (at once, if it is stuck behind
+ *    something), when the lane it wants is clear round it. The lateral
+ *    offset is eased across, and the car is turned into the move, so a
+ *    lane change reads as one.
+ *  - 'loose': just hit. A body with its own velocity and spin, sliding and
+ *    bouncing off the walls, until it has stopped spinning and come down.
+ *  - 'recover': the driver takes it back. Turned toward a point in the
+ *    nearest lane a way up the road, it pulls away and merges back in, and
+ *    once it is straight and in its lane it is put back on the rails.
+ * A car well behind the player, or stuck out of sight, is taken away and
+ * put back into the traffic somewhere ahead, beyond the edge of the
+ * screen, as a new car (model and colour drawn again), so the density
+ * round the player holds.
  *
- * Pure logic: main.js draws them (see Game#buildTraffic) and hands this
- * the player, the rival and their hull sizes each frame.
+ * Pure logic: main.js draws them (see Game#loadStage) and hands this the
+ * player, the rival and their hull sizes each frame.
  */
 import { PHYSICS as P } from '../config.js';
 import { hullCircles } from './race.js';
 import { makeContact, setContact } from './contact.js';
 
 /** Cruising speed band, in the dial's km/h. */
-const KMH_MIN = 90, KMH_MAX = 110;
+const KMH_MIN = 95, KMH_MAX = 105;
 /** Lane centres as a share of the road half-width (three lanes: the
  *  separators are painted at +/-1/3, see surfaces.js highwayLanes). */
 const LANES = [-2 / 3, 0, 2 / 3];
@@ -36,30 +46,50 @@ const DESPAWN_BEHIND = 2600;
 const SPAWN_GAP = 900;
 /** Following distance: inside this a car matches the one ahead. */
 const FOLLOW_GAP = 520;
+/** Seconds between a car's lane changes, and how long one takes. */
+const CHANGE_EVERY = [6, 14];
+const CHANGE_TIME = [2.0, 2.8];
+/** Road clear of anything in the lane moved into: this far ahead, and
+ *  this far behind plus a second of whatever is coming up on it faster. */
+const CLEAR_AHEAD = 700, CLEAR_BEHIND = 450;
+/** Recovering: how hard the driver steers (rad/s at speed) and
+ *  accelerates / brakes (dial units per second). */
+const RECOVER_TURN = 2.4;
+const RECOVER_ACCEL = 150, RECOVER_BRAKE = 400;
 
 const toSpeed = (kmh) => kmh / P.hudSpeedFactor;
+const smooth = (t) => t * t * (3 - 2 * t);
+const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
 export class Traffic {
   /**
    * @param path      TrackPath
    * @param opts.count cars
    * @param opts.roadHalf the road's half-width (lane positions)
-   * @param opts.size  { w, h } hull of one car, world units
+   * @param opts.kinds { name: { hull: {w, h}, halfW, weight } }: the car
+   *        models, each with its collision hull, its drawn half-width (for
+   *        the walls) and how common it is
+   * @param opts.paints colours, one drawn at random per car (only handed
+   *        back to the renderer)
    * @param opts.barrier per-index wall half-width (main.js), which a car
    *        knocked loose bounces off instead of flying through
    * @param opts.rng   () => [0, 1), for repeatable tests
    */
-  constructor(path, { count = 5, roadHalf, size, barrier = null, rng = Math.random }) {
+  constructor(path, { count = 5, roadHalf, kinds, paints = [0xffffff], barrier = null, rng = Math.random }) {
     this.path = path;
     this.barrier = barrier;
     this.roadHalf = roadHalf;
-    this.size = size;
+    this.kinds = kinds;
+    this.kindNames = Object.keys(kinds);
+    this.paints = paints;
     this.rng = rng;
     this.cars = [];
     for (let i = 0; i < count; i++) {
       this.cars.push({
-        id: i, loose: false, d: 0, lane: 0, lat: 0, cruise: 0, speed: 0,
-        x: 0, y: 0, angle: 0, vx: 0, vy: 0, spin: 0, lift: 0, liftV: 0, still: 0,
+        id: i, mode: 'road', loose: false, d: 0, lane: 0, lat: 0, cruise: 0, speed: 0,
+        latFrom: 0, latTo: 0, latT: 1, latDur: 1, nextChange: 0,
+        kind: this.kindNames[0], paint: paints[0], hull: null, halfW: 0,
+        x: 0, y: 0, angle: 0, vx: 0, vy: 0, spin: 0, lift: 0, liftV: 0, still: 0, modeT: 0,
         contact: makeContact(), _routeHint: 0, deckId: 0, zLevel: 0,
       });
     }
@@ -72,7 +102,31 @@ export class Traffic {
 
   laneOffset(lane) { return LANES[lane] * this.roadHalf; }
 
-  /** Put `c` back on the road somewhere ahead of distance `from`. */
+  /** Lane width in world units. */
+  get laneWidth() { return this.roadHalf * (2 / 3); }
+
+  /** The lane whose centre is nearest a lateral offset. */
+  laneAt(lat) {
+    let best = 0;
+    for (let i = 1; i < LANES.length; i++) {
+      if (Math.abs(this.laneOffset(i) - lat) < Math.abs(this.laneOffset(best) - lat)) best = i;
+    }
+    return best;
+  }
+
+  pickKind() {
+    let total = 0;
+    for (const k of this.kindNames) total += this.kinds[k].weight ?? 1;
+    let r = this.rng() * total;
+    for (const k of this.kindNames) {
+      r -= this.kinds[k].weight ?? 1;
+      if (r < 0) return k;
+    }
+    return this.kindNames[0];
+  }
+
+  /** Put `c` back on the road somewhere ahead of distance `from`, as a
+   *  new car. */
   respawn(c, from, initial = false) {
     const L = this.path.length;
     for (let tries = 0; tries < 20; tries++) {
@@ -81,16 +135,21 @@ export class Traffic {
         : SPAWN_AHEAD[0] + this.rng() * (SPAWN_AHEAD[1] - SPAWN_AHEAD[0]);
       const d = (((from + ahead) % L) + L) % L;
       const lane = Math.floor(this.rng() * LANES.length);
-      const clear = this.cars.every((o) => o === c || o.loose || o.lane !== lane
+      const lat = this.laneOffset(lane);
+      const clear = this.cars.every((o) => o === c || Math.abs(o.lat - lat) > this.laneWidth * 0.75
         || Math.abs(this.gap(d, o.d)) > SPAWN_GAP);
       if (!clear && tries < 19) continue;
+      const kind = this.pickKind();
       Object.assign(c, {
-        loose: false, d, lane, lat: this.laneOffset(lane),
+        mode: 'road', loose: false, d, lane, lat, latFrom: lat, latTo: lat, latT: 1, latDur: 1,
+        nextChange: 3 + this.rng() * 10,
         cruise: toSpeed(KMH_MIN + this.rng() * (KMH_MAX - KMH_MIN)),
-        vx: 0, vy: 0, spin: 0, lift: 0, liftV: 0, still: 0,
+        kind, hull: this.kinds[kind].hull, halfW: this.kinds[kind].halfW,
+        paint: this.paints[Math.floor(this.rng() * this.paints.length)],
+        vx: 0, vy: 0, spin: 0, lift: 0, liftV: 0, still: 0, modeT: 0,
       });
       c.speed = c.cruise;
-      this.place(c);
+      this.place(c, 0);
       return;
     }
   }
@@ -104,21 +163,79 @@ export class Traffic {
     return g;
   }
 
-  place(c) {
+  /** Position a car on the rails. `latV` (world units/s) is how fast it is
+   *  moving across: the car is drawn turned into the move. */
+  place(c, latV) {
     const s = this.path.sample(c.d);
     const k = s.index;
-    c.x = s.x + this.path.normals[k * 2] * c.lat;
-    c.y = s.y + this.path.normals[k * 2 + 1] * c.lat;
-    c.angle = s.angle;
+    const nx = this.path.normals[k * 2], ny = this.path.normals[k * 2 + 1];
+    c.x = s.x + nx * c.lat;
+    c.y = s.y + ny * c.lat;
+    const v = c.speed * P.moveScale;
+    c.angle = latV ? Math.atan2(Math.sin(s.angle) * v + ny * latV, Math.cos(s.angle) * v + nx * latV) : s.angle;
     c._routeHint = k;
   }
 
   /** Knock `c` loose with a velocity (world units/s) and spin (rad/s). */
   launch(c, vx, vy, spin, lift = 0) {
+    c.mode = 'loose';
     c.loose = true;
+    c.modeT = 0;
     c.vx = vx; c.vy = vy; c.spin = spin;
     c.liftV = Math.max(c.liftV, lift);
     c.still = 0;
+  }
+
+  /** Start easing `c` over to lateral offset `to`. */
+  steerTo(c, to, dur) {
+    c.latFrom = c.lat; c.latTo = to; c.latT = 0; c.latDur = dur;
+    c.lane = this.laneAt(to);
+  }
+
+  /**
+   * Everything that can be in a car's way, as { ref, d, lat, v }: its
+   * distance and lateral offset on the course and its forward speed (dial
+   * units). The racers are located on the course once per frame.
+   */
+  obstacles(racers) {
+    const out = [];
+    for (const c of this.cars) {
+      const v = c.mode === 'road' ? c.speed
+        : Math.max(0, (c.vx * Math.cos(this.path.tangents[c._routeHint]) + c.vy * Math.sin(this.path.tangents[c._routeHint])) / P.moveScale);
+      out.push({ ref: c, d: c.d, lat: c.lat, v });
+    }
+    for (const r of racers) {
+      if (!r) continue;
+      const near = this.path.nearestLocal(r.x, r.y, r._routeHint, 60);
+      const k = near.index;
+      const lat = (r.x - near.x) * this.path.normals[k * 2] + (r.y - near.y) * this.path.normals[k * 2 + 1];
+      out.push({ ref: r, d: near.distance, lat, v: Math.max(0, (r.speed ?? 0) * Math.cos((r.angle ?? 0) - this.path.tangents[k])) });
+    }
+    return out;
+  }
+
+  /** Slowest speed `c` may hold at (d, lat) without running into whatever
+   *  is ahead of it there. */
+  limit(c, d, lat, obs, target) {
+    const w = this.laneWidth * 0.75;
+    for (const o of obs) {
+      if (o.ref === c || Math.abs(o.lat - lat) > w) continue;
+      const g = this.gap(d, o.d);
+      if (g > 0 && g < FOLLOW_GAP) target = Math.min(target, o.v * (g / FOLLOW_GAP));
+    }
+    return target;
+  }
+
+  /** Is the lane at `lat` clear round distance `d` for `c` to move into? */
+  clearFor(c, d, lat, obs) {
+    const w = this.laneWidth * 0.75;
+    for (const o of obs) {
+      if (o.ref === c || Math.abs(o.lat - lat) > w) continue;
+      const g = this.gap(d, o.d);
+      const behind = CLEAR_BEHIND + Math.max(0, o.v - c.speed) * P.moveScale;
+      if (g < CLEAR_AHEAD && g > -behind) return false;
+    }
+    return true;
   }
 
   /**
@@ -135,38 +252,72 @@ export class Traffic {
     const events = [];
     const ms = P.moveScale;
     const pd = player.progressDistance ?? 0;
+    const obs = this.obstacles([player, rival]);
 
-    // --- on the road: cruise, keep station behind a slower car in lane
-    const onRoad = this.cars.filter((c) => !c.loose);
-    for (const c of onRoad) {
-      let target = c.cruise;
-      for (const o of onRoad) {
-        if (o === c || o.lane !== c.lane) continue;
-        const g = this.gap(c.d, o.d);
-        if (g > 0 && g < FOLLOW_GAP) target = Math.min(target, o.speed * (g / FOLLOW_GAP));
+    // --- on the road: cruise, keep station, now and then change lanes
+    for (const c of this.cars) {
+      if (c.mode !== 'road') continue;
+      const target = this.limit(c, c.d, c.lat, obs, c.cruise);
+      const blocked = target < c.cruise * 0.8;
+      c.nextChange -= dt * (blocked ? 5 : 1);
+      if (c.nextChange <= 0 && c.latT >= 1) {
+        c.nextChange = CHANGE_EVERY[0] + this.rng() * (CHANGE_EVERY[1] - CHANGE_EVERY[0]);
+        const lane = this.laneAt(c.lat);
+        const options = [lane - 1, lane + 1].filter((l) => l >= 0 && l < LANES.length
+          && this.clearFor(c, c.d, this.laneOffset(l), obs));
+        if (options.length) {
+          const to = options[Math.floor(this.rng() * options.length)];
+          this.steerTo(c, this.laneOffset(to), CHANGE_TIME[0] + this.rng() * (CHANGE_TIME[1] - CHANGE_TIME[0]));
+        }
       }
       c.speed += (target - c.speed) * Math.min(1, dt * 2.5);
       c.d = (c.d + c.speed * ms * dt) % this.path.length;
-      this.place(c);
+      let latV = 0;
+      if (c.latT < 1) {
+        const before = c.lat;
+        // slower across when slower along: a car crawling behind a hold-up
+        // eases over rather than turning sideways
+        c.latT = Math.min(1, c.latT + (dt / c.latDur) * Math.min(1, Math.max(0.3, c.speed / c.cruise)));
+        c.lat = c.latFrom + (c.latTo - c.latFrom) * smooth(c.latT);
+        latV = (c.lat - before) / dt;
+      }
+      this.place(c, latV);
     }
 
-    // --- loose: slide, spin, settle
+    // --- loose (slide, spin, settle) and recovering (drive back in)
     for (const c of this.cars) {
-      if (!c.loose) continue;
-      c.x += c.vx * dt; c.y += c.vy * dt;
-      c.angle += c.spin * dt;
-      const f = Math.exp(-dt * 1.6);
-      c.vx *= f; c.vy *= f; c.spin *= Math.exp(-dt * 1.9);
-      c.liftV -= 900 * dt; c.lift = Math.max(0, c.lift + c.liftV * dt);
-      if (c.lift === 0) c.liftV = Math.max(0, c.liftV);
+      if (c.mode === 'road') continue;
+      c.modeT += dt;
       const near = this.path.nearestLocal(c.x, c.y, c._routeHint, 60);
       c._routeHint = near.index;
+      const k = near.index, nx = this.path.normals[k * 2], ny = this.path.normals[k * 2 + 1];
+      c.d = near.distance;
+      c.lat = (c.x - near.x) * nx + (c.y - near.y) * ny;
+
+      if (c.mode === 'loose') {
+        c.angle += c.spin * dt;
+        const f = Math.exp(-dt * 1.6);
+        c.vx *= f; c.vy *= f; c.spin *= Math.exp(-dt * 1.9);
+        c.liftV -= 900 * dt; c.lift = Math.max(0, c.lift + c.liftV * dt);
+        if (c.lift === 0) c.liftV = Math.max(0, c.liftV);
+        // down and no longer spinning: the driver has it again
+        if (c.lift === 0 && Math.abs(c.spin) < 1.6 && c.modeT > 0.6) {
+          c.mode = 'recover';
+          c.modeT = 0;
+          c.spin = 0;
+          c.lane = this.laneAt(c.lat);
+          c.speed = Math.max(0, (c.vx * Math.cos(c.angle) + c.vy * Math.sin(c.angle)) / ms);
+        }
+      } else {
+        this.recover(c, dt, near, obs);
+        if (c.mode === 'road') continue;
+      }
+      c.x += c.vx * dt; c.y += c.vy * dt;
       // the concrete wall: pushed back inside it, and the part of its
       // velocity that was going into the wall mostly lost
       if (this.barrier) {
-        const k = near.index, nx = this.path.normals[k * 2], ny = this.path.normals[k * 2 + 1];
         const lat = (c.x - near.x) * nx + (c.y - near.y) * ny;
-        const lim = this.barrier[k] - this.size.w * 0.5;
+        const lim = this.barrier[k] - c.halfW;
         if (Math.abs(lat) > lim) {
           const sgn = Math.sign(lat), back = Math.abs(lat) - lim;
           c.x -= nx * sgn * back; c.y -= ny * sgn * back;
@@ -174,8 +325,9 @@ export class Traffic {
           if (vn > 0) { c.vx -= nx * sgn * vn * 1.35; c.vy -= ny * sgn * vn * 1.35; c.spin *= 0.7; }
         }
       }
-      c.speed = Math.hypot(c.vx, c.vy) / ms;
-      c.still = c.speed < 20 ? c.still + dt : 0;
+      const moving = Math.hypot(c.vx, c.vy) / ms;
+      if (c.mode === 'loose') c.speed = moving;
+      c.still = moving < 20 ? c.still + dt : 0;
     }
 
     // --- contacts
@@ -186,15 +338,63 @@ export class Traffic {
       }
     }
 
-    // --- recycle: fallen behind, or loose and parked out of sight
+    // --- recycle: fallen behind, or stuck out of sight
     for (const c of this.cars) {
-      const g = this.gap(pd, c.loose ? c._routeHint * this.path.spacing : c.d);
+      const g = this.gap(pd, c.d);
       const seen = Math.hypot(c.x - player.x, c.y - player.y) < view;
-      if ((g < -DESPAWN_BEHIND && !seen) || (c.loose && c.still > 1.2 && !seen) || (c.loose && g < -DESPAWN_BEHIND * 2)) {
+      const stuck = (c.mode === 'loose' && c.still > 1.2) || (c.mode === 'recover' && c.modeT > 12);
+      if ((g < -DESPAWN_BEHIND && !seen) || (stuck && !seen) || (c.mode !== 'road' && g < -DESPAWN_BEHIND * 2)) {
         this.respawn(c, pd);
       }
     }
     return events;
+  }
+
+  /**
+   * One step of a recovering car: steered at a point in its lane up the
+   * road, speed brought up to its cruise (held down while it is still
+   * pointing the wrong way, and behind anything in front of it), its
+   * velocity pulled round onto its heading by the tyres. Straight and in
+   * its lane, it goes back on the rails.
+   */
+  recover(c, dt, near, obs) {
+    const ms = P.moveScale;
+    const laneLat = this.laneOffset(c.lane);
+    const fw = c.speed * ms;
+    const aim = this.path.sample(near.distance + 220 + fw * 0.3);
+    const ak = aim.index;
+    const tx = aim.x + this.path.normals[ak * 2] * laneLat;
+    const ty = aim.y + this.path.normals[ak * 2 + 1] * laneLat;
+    // aimed from where it is about to be: the tyres bring its velocity
+    // round onto its heading with a lag, and steering from where it is now
+    // swings it past the lane
+    const err = wrapAngle(Math.atan2(ty - (c.y + c.vy * 0.3), tx - (c.x + c.vx * 0.3)) - c.angle);
+    // a car can only turn as fast as it is rolling; at a crawl it still
+    // gets round, just slowly
+    const rate = RECOVER_TURN * Math.min(1, 0.3 + fw / 400);
+    c.angle += Math.max(-rate * dt, Math.min(rate * dt, err));
+    let target = Math.abs(err) > 1 ? c.cruise * 0.25 : c.cruise * (1 - 0.5 * Math.abs(err));
+    target = this.limit(c, c.d, c.lat, obs, target);
+    c.speed += Math.max(-RECOVER_BRAKE * dt, Math.min(RECOVER_ACCEL * dt, target - c.speed));
+    c.speed = Math.max(0, c.speed);
+    const grip = 1 - Math.exp(-dt * 4);
+    c.vx += (Math.cos(c.angle) * c.speed * ms - c.vx) * grip;
+    c.vy += (Math.sin(c.angle) * c.speed * ms - c.vy) * grip;
+    // near its lane and pointing down it: on the rails again, easing out
+    // whatever is left of the lateral error (steering at a point ahead
+    // cuts a bend's inside, so on a curve it settles a little off-centre
+    // rather than on it)
+    const along = wrapAngle(c.angle - this.path.tangents[near.index]);
+    const slip = Math.hypot(c.vx, c.vy) - c.speed * ms;
+    if (Math.abs(c.lat - laneLat) < this.laneWidth * 0.3 && Math.abs(along) < 0.15 && Math.abs(slip) < 60 && c.speed > c.cruise * 0.5) {
+      c.mode = 'road';
+      c.loose = false;
+      c.modeT = 0;
+      c.vx = 0; c.vy = 0;
+      c.nextChange = Math.max(c.nextChange, 4);
+      this.steerTo(c, laneLat, 1 + Math.abs(c.lat - laneLat) / 40);
+      this.place(c, 0);
+    }
   }
 
   /** Deepest overlap between two hulls, or null. */
@@ -218,14 +418,14 @@ export class Traffic {
    * speed on a rear-end, a smaller scrub on a glancing one.
    */
   hitPlayer(c, p, pSize, events) {
-    const hit = Traffic.overlap(p, pSize, c, this.size);
+    const hit = Traffic.overlap(p, pSize, c, c.hull);
     if (!hit) return;
     const ms = P.moveScale;
     const sep = hit.o * 1.04;
     p.x -= hit.nx * sep * 0.4; p.y -= hit.ny * sep * 0.4;
     c.x += hit.nx * sep * 0.6; c.y += hit.ny * sep * 0.6;
     const hx = Math.cos(p.angle), hy = Math.sin(p.angle);
-    const cv = c.loose ? { x: c.vx, y: c.vy } : { x: Math.cos(c.angle) * c.speed * ms, y: Math.sin(c.angle) * c.speed * ms };
+    const cv = c.mode !== 'road' ? { x: c.vx, y: c.vy } : { x: Math.cos(c.angle) * c.speed * ms, y: Math.sin(c.angle) * c.speed * ms };
     const pv = p.speed * ms;
     // closing speed along the contact normal, world units/s
     const closing = (hx * pv - cv.x) * hit.nx + (hy * pv - cv.y) * hit.ny;
@@ -248,7 +448,7 @@ export class Traffic {
 
   /** The rival plows through: the car goes flying, the rival barely notices. */
   hitRival(c, r, rSize, events) {
-    const hit = Traffic.overlap(r, rSize, c, this.size);
+    const hit = Traffic.overlap(r, rSize, c, c.hull);
     if (!hit) return;
     const ms = P.moveScale;
     c.x += hit.nx * hit.o * 1.04; c.y += hit.ny * hit.o * 1.04;

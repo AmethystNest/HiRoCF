@@ -399,8 +399,9 @@ export const STAGES = {
     courseDesc: '長い直線 / 高速コーナー / 最高速勝負',
     rivalName: '最大の敵は己',
     roadHalf: 360, wallHalf: 420,
-    // Other cars on the expressway (game/traffic.js), ~100 km/h in random
-    // lanes: in the player's way, and scattered by the truck.
+    // Other cars on the expressway (game/traffic.js): ~100 km/h, changing
+    // lanes now and then, in the player's way; scattered by the truck, and
+    // driven back into their lane after.
     traffic: { count: 5 },
     playerPhysics: { wallInset: 3, wallSpeedMul: 0.82 },
     wallTriggerExtra: 6,

@@ -16,6 +16,7 @@ import { PlayerCar } from './game/player.js';
 import { RivalCar } from './game/rival.js';
 import { Race, resolveContacts, autoDrivePostRace } from './game/race.js';
 import { Traffic } from './game/traffic.js';
+import { MOB_CARS, MOB_PAINTS } from './render/mobcars.js';
 import { buildViewMask } from './render/viewmask.js';
 import { clearContact } from './game/contact.js';
 import { buildAudio } from './audio/sfx.js';
@@ -1052,26 +1053,42 @@ export class Game {
     this.actors.addChild(this.rivalBoostFlame.view);
 
     // --- traffic (cfg.traffic: stage 4's expressway only) ---
-    // Drawn under both racing cars. Ordinary Priuses, at the size the
-    // stage 2 Prius draws at, with a hull fitted the same way the rival's is.
+    // Drawn under both racing cars. Two models (render/mobcars.js), each
+    // drawn at its real length against the player's car and in a colour
+    // drawn at random, as a photo with its tinted bodywork laid over it.
     this.traffic = null;
     this.trafficViews = [];
     if (cfg.traffic) {
-      const ts = CAR_SIZE.prius, tv = CAR_VISUAL_SCALE.prius ?? { w: 1, h: 1 };
-      const draw = { w: ts.w * s * tv.w, h: ts.h * s * tv.h };
-      const hs = CAR_HULL_SCALE.prius ?? {};
-      this.trafficHull = { w: draw.w * (hs.w ?? 1), h: draw.h * (hs.h ?? 1) };
+      // the player's drawn body (its art fills 91% of its box's height),
+      // taken as a 4.7 m car
+      const perMetre = (CAR_SIZE.player.h * 0.91 * s) / 4.7;
+      const kinds = {};
+      this.trafficKinds = {};
+      for (const [name, m] of Object.entries(MOB_CARS)) {
+        const h = m.length * perMetre;
+        const w = h * (m.px.w / m.px.h);
+        const body = h * (m.bodyPx / m.px.h);
+        // hullCircles' middle circle is 0.355 of the width it is given and
+        // its end circles reach 0.27 h + 0.285 w: sized so the sides meet
+        // the body and the ends its bumpers, kept inside the three-circle
+        // form (h < 2 w)
+        const hw = body / 0.71;
+        const hh = Math.min(hw * 1.99, (h / 2 - 0.285 * hw) / 0.27);
+        kinds[name] = { hull: { w: hw, h: hh }, halfW: body / 2, weight: name === 'van' ? 0.4 : 0.6 };
+        this.trafficKinds[name] = { w, h, tex: this.tex.mob[name] };
+      }
       this.traffic = new Traffic(path, {
-        count: cfg.traffic.count, roadHalf: cfg.roadHalf, size: this.trafficHull, barrier: this.barrier,
+        count: cfg.traffic.count, roadHalf: cfg.roadHalf, kinds, paints: MOB_PAINTS, barrier: this.barrier,
       });
       for (let i = 0; i < cfg.traffic.count; i++) {
         const view = new Container();
         const sh = new Sprite(this.tex.shadow_blob);
-        sh.anchor.set(0.5); sh.width = draw.w * 1.8; sh.height = draw.h * 1.4; sh.alpha = 0.5;
-        const sp = new Sprite(this.cars.prius);
-        sp.anchor.set(0.5); sp.width = draw.w; sp.height = draw.h;
-        view.addChild(sh, sp);
-        view.shadow = sh; view.body = sp; view.baseW = draw.w; view.baseH = draw.h;
+        sh.anchor.set(0.5); sh.alpha = 0.5;
+        const detail = new Sprite(Texture.EMPTY);
+        const paint = new Sprite(Texture.EMPTY);
+        detail.anchor.set(0.5); paint.anchor.set(0.5);
+        view.addChild(sh, detail, paint);
+        Object.assign(view, { shadow: sh, detail, paint, kind: null, tint: null, baseW: 0, baseH: 0 });
         this.actors.addChildAt(view, this.actors.getChildIndex(this.playerShadow));
         this.trafficViews.push(view);
       }
@@ -1474,12 +1491,22 @@ export class Game {
         if (v.visible !== vis) v.visible = vis;
         if (!vis) return;
         v.position.set(c.x, c.y);
-        v.body.rotation = c.angle + Math.PI / 2;
-        v.shadow.rotation = v.body.rotation;
+        // a car put back into the traffic comes back as a new one
+        if (v.kind !== c.kind) {
+          const k = this.trafficKinds[c.kind];
+          v.kind = c.kind;
+          v.detail.texture = k.tex.detail; v.paint.texture = k.tex.paint;
+          v.baseW = k.w; v.baseH = k.h;
+          v.shadow.width = k.w * 1.5; v.shadow.height = k.h * 1.25;
+        }
+        if (v.tint !== c.paint) { v.tint = c.paint; v.paint.tint = c.paint; }
+        const rot = c.angle + Math.PI / 2;
+        v.detail.rotation = rot; v.paint.rotation = rot; v.shadow.rotation = rot;
         // airborne after the truck: drawn bigger (nearer the camera) with
         // its shadow left further behind on the road
         const up = 1 + c.lift / 900;
-        v.body.width = v.baseW * up; v.body.height = v.baseH * up;
+        v.detail.width = v.baseW * up; v.detail.height = v.baseH * up;
+        v.paint.width = v.detail.width; v.paint.height = v.detail.height;
         v.shadow.position.set(6 + c.lift * 0.25, 8 + c.lift * 0.35);
         v.shadow.alpha = 0.5 / (1 + c.lift / 300);
         // ghosted under a deck the player is not also under, like the rival
@@ -1855,6 +1882,10 @@ export async function boot({ stageId = 1, difficulty = 'normal', onReady, audioC
 
   const urls = [...Object.values(TEXTURES), ...Object.values(CARS), PROP_ATLAS];
   const loaded = await Assets.load(urls);
+  // stage 4's traffic: every model's photo and its paint layer, mipmapped
+  // like the car art below (they are drawn as small as the cars)
+  const mobUrls = Object.values(MOB_CARS).flatMap((m) => [m.detail, m.paint]);
+  const mobLoaded = await Assets.load(mobUrls);
 
   const tex = {};
   for (const [k, url] of Object.entries(TEXTURES)) tex[k] = loaded[url];
@@ -1885,6 +1916,15 @@ export async function boot({ stageId = 1, difficulty = 'normal', onReady, audioC
   const propSheet = { textures: propTextures };
 
   for (const k of WRAPPED) tex[k].source.addressMode = 'repeat';
+  tex.mob = {};
+  for (const [k, m] of Object.entries(MOB_CARS)) {
+    tex.mob[k] = { detail: mobLoaded[m.detail], paint: mobLoaded[m.paint] };
+    for (const t of Object.values(tex.mob[k])) {
+      t.source.mipmap = 'on';
+      t.source.autoGenerateMipmaps = true;
+      t.source.update();
+    }
+  }
 
   // Car art is drawn from large source photos (the rival roster is well
   // over 700px on a side) down to a car's actual ~50-90px on-screen size --

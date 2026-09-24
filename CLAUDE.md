@@ -9,7 +9,7 @@
   - `main.js`, `config.js`, `pixi.js`(バンドル済み PixiJS)
   - `game/` — プレイヤー物理、ライバル AI、レース進行、記録（`records.js`: ベストタイム・★・ステージ解放・難易度を localStorage に保存。使えない環境でも落ちずにその回だけ保持）
   - `track/` — コース中心線、ステージレイアウト
-  - `render/` — 路面・リボン・ミニマップ・プロップ・エフェクト
+  - `render/` — 路面・リボン・ミニマップ・プロップ・エフェクト、STAGE4 のモブ車画像(`mobcars.js`: 写真+塗装レイヤーを tint でランダム色に)
 - `build/standalone.mjs` — esbuild で `src/` を単一 HTML(`build/index.standalone.html`)にまとめる。配布物はこれ。
 - `build/artifact.mjs` — Claude Artifact ホスト用の別ビルド(head 構成が異なるだけ)。
 - `build/pwa.mjs` — PWA ビルド。`dist/`(git 管理外)に静的サイトとして出力する。画像は bundle から抜き出して WebP 化(地面タイルは可逆、車・プロップは near-lossless)、manifest・アイコン(`build/pwa/icons/`)・Service Worker(`build/pwa/sw.js`: 起動に要る全ファイルをビルド単位でキャッシュ、BGM は初回再生時にキャッシュして Range 要求に 206 で応答)を付ける。**https で配信しないと SW が動かない**(localhost は可)。`npm run build:pwa` は BGM なし(公開配信してよい)、`npm run build:pwa:bgm` は BGM 入り(**非公開の配信先専用**)。画像変換に `sharp` を使う。
