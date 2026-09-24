@@ -1660,7 +1660,10 @@ export class Game {
 
     for (let i = 1; i < trail.length; i++) {
       const a = trail[i - 1], b = trail[i];
-      const alpha = Math.max(0, Math.min(1, b.life / DRIFT_MARK_LIFE)) * 0.42;
+      // `gap`: b starts a new run of marks -- nothing joins it to the last
+      if (b.gap) continue;
+      // `a`: a grip mark is fainter than a slide's (game/tyremarks.js)
+      const alpha = Math.max(0, Math.min(1, b.life / DRIFT_MARK_LIFE)) * 0.42 * (b.a ?? 1);
       if (alpha <= 0) continue;
 
       const dx = b.x - a.x, dy = b.y - a.y;

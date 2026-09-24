@@ -328,7 +328,17 @@ export const STAGES = {
     // the player's (27.1 -> 29.2s against 26.8 -> 28.6s), because a course
     // this tight leaves it accelerating out of corners as much as the
     // player does, so the taper reached it on its own.
-    rival: { maxSpeed: 650, accel: 120, turn: 3.05, sprite: 'prius' },
+    // Weaves wherever it is: behind the player as it used to only in
+    // front, and wider in front (weaveAhead, share of roadHalf; 0.55 is
+    // the default). Weaving flat out, the steering overshot every swerve
+    // and ran the car over the kerb for up to 18% of a lap, so it aims
+    // further up the road while weaving (weaveLook x the usual point),
+    // which also smooths its corners. maxSpeed 650 -> 660 on top of that:
+    // two laps come out 1.5-4.6% quicker than before on either difficulty,
+    // leading or chasing, with the body over the kerb no more than it
+    // was (<= 3.3% of a lap). accel -- the getaway -- is left alone: 4s
+    // off the line it is doing 469 against 466.
+    rival: { maxSpeed: 660, accel: 120, turn: 3.05, sprite: 'prius', weaveBehind: true, weaveAhead: 0.75, weaveLook: 1.3 },
     bestKey: 'topdownRacer_stage2_best_ms',
   },
   3: {
@@ -432,7 +442,11 @@ export const STAGES = {
       // cornerSlow is deliberately NOT re-derived this time: at 0.205 the
       // corner target falls with the top speed, 648 -> 628, which is the
       // same 3% and keeps the one knob doing the one job.
-      cornerSlow: 0.205, cornerLookAhead: 24, launchAccel: 51, block: false, weave: false,
+      // cornerSlow: was 0.205, which at this course's widest bends (curvature
+      // 0.2 ahead) took 4% off; 1.0 takes 20% there -- 519 through the
+      // tightest bends on NORMAL against 599 on the straights, where the
+      // player's car holds ~608 on grip alone.
+      cornerSlow: 1.0, cornerLookAhead: 24, launchAccel: 51, block: false, weave: false,
       // Shuts the door on a car coming alongside, and only then -- `block`
       // stays off, because that one weaves about for as long as the rival
       // leads, which on a truck would read as a driver who cannot hold a
@@ -442,10 +456,15 @@ export const STAGES = {
       sideBlock: 0.26, sideBlockRate: 1.3,
       // A loaded box truck does not get shoved aside by a car. `mass` is
       // how much of a contact the OTHER vehicle absorbs (see
-      // resolveContacts): at 9 against the player's 1 the truck takes about
-      // 6% of the separation and keeps essentially all of its speed, while
-      // the player is the one that bounces and scrubs off pace.
-      mass: 9,
+      // resolveContacts). Was 9, which read as hitting a wall; at 4 the
+      // player takes 77% of the separation (88% before) and the truck a
+      // quarter of what a car would (a ninth before) -- still clearly the
+      // heavier of the two, just no longer immovable.
+      mass: 4,
+      // Traffic it runs into (game/traffic.js hitRival): cars thrown less
+      // hard than at 1 and the truck losing more of its own speed per hit,
+      // still harder than the player's car knocks them.
+      trafficHit: { forward: 1.0, out: [0.4, 0.7], spin: [4, 8], lift: [180, 0.09], keep: 0.93 },
     },
     bestKey: 'topdownRacer_stage4_best_ms',
   },

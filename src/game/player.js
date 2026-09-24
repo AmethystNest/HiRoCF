@@ -5,9 +5,10 @@
  * a verbatim carry-over of the Canvas build's tuning — the car must feel
  * identical.
  */
-import { PHYSICS as P, NITRO, DRIFT_MARK_LIFE } from '../config.js';
+import { PHYSICS as P, NITRO } from '../config.js';
 import { bodyPastBarrier } from './race.js';
 import { makeContact, setContact } from './contact.js';
+import { layTyreMarks } from './tyremarks.js';
 
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
@@ -220,6 +221,7 @@ export class PlayerCar {
     this.speed = Math.max(0, Math.min(P.maxSpeed, this.speed));
 
     // --- steering ---
+    const angleBefore = this.angle;
     const ratio = Math.min(1, this.speed / P.maxSpeed);
     let turnRate = P.turnLow + (P.turnHigh - P.turnLow) * Math.pow(ratio, P.turnCurveExp);
     turnRate *= 1.10;
@@ -285,8 +287,6 @@ export class PlayerCar {
       this.driftSlipAngle += (slipTarget - this.driftSlipAngle) * (1 - Math.exp(-dt * response));
 
       moveAngle -= this.driftSlipAngle;
-      this.driftTrail.push({ x: this.x, y: this.y, life: DRIFT_MARK_LIFE });
-      if (this.driftTrail.length > 160) this.driftTrail.shift();
 
       // Do not terminate just because BRAKE was released. Only end once the
       // car has genuinely straightened, or speed has fallen very low.
@@ -305,6 +305,9 @@ export class PlayerCar {
 
     this.x += Math.cos(moveAngle) * moveSpeed * dt;
     this.y += Math.sin(moveAngle) * moveSpeed * dt;
+    // tyre marks: a slide always, a hard corner on grip too (tyremarks.js)
+    const turned = this.angle - angleBefore;
+    layTyreMarks(this, dt, Math.atan2(Math.sin(turned), Math.cos(turned)) / dt, P.maxSpeed, this.drifting);
 
     for (const p of this.driftTrail) p.life -= dt;
     if (this.driftTrail.length && this.driftTrail[0].life <= 0) {

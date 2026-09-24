@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { STAGES, CAR_SIZE, PHYSICS } from '../config.js';
+import { STAGES, CAR_SIZE, PHYSICS, rivalTuning } from '../config.js';
 import { STAGE_PATHS } from '../track/stages.js';
 import { RivalCar } from './rival.js';
 
@@ -85,15 +85,19 @@ describe('rival side block', () => {
   });
 });
 
-describe('rival pace spec: stage 4 alone is slow away and fast flat out', () => {
+describe('rival pace spec: stage 4 alone is slow away and near the player flat out', () => {
   const playerLaunchRate = (id) => {
     const over = STAGES[id].playerPhysics || {};
     const accel = over.accel ?? PHYSICS.accel;
     return accel * (over.launchBoostMul ?? PHYSICS.launchBoostMul);
   };
 
-  it('stage 4: the truck out-runs the player flat out', () => {
-    expect(STAGES[4].rival.maxSpeed).toBeGreaterThan(PHYSICS.maxSpeed);
+  it('stage 4: the truck tops out just under the player, on either difficulty', () => {
+    for (const d of ['normal', 'hard']) {
+      const top = rivalTuning(STAGES[4].rival, d).maxSpeed;
+      expect(top).toBeLessThanOrEqual(PHYSICS.maxSpeed * 0.97 + 1e-9);
+      expect(top).toBeGreaterThan(PHYSICS.maxSpeed * 0.9);
+    }
   });
 
   it('stage 4: the truck loses the drag off the line', () => {
@@ -124,8 +128,11 @@ describe('rival pace spec: stage 4 alone is slow away and fast flat out', () => 
     // the ramp has to finish below the speed this stage takes its tightest
     // corner at, or it would be quietly detuning corner exits too
     const c = STAGES[4];
-    const r = new RivalCar(STAGE_PATHS[4](), c, c.rival);
-    expect(r.launchAccelUntil).toBeLessThan(c.rival.maxSpeed * (1 - c.rival.cornerSlow));
+    const path = STAGE_PATHS[4]();
+    const r = new RivalCar(path, c, c.rival);
+    const tightest = Math.max(...path.curvature);
+    const top = rivalTuning(c.rival, 'normal').maxSpeed;
+    expect(r.launchAccelUntil).toBeLessThan(top * (1 - c.rival.cornerSlow * tightest));
   });
 
   for (const id of [1, 2, 3, 5]) {

@@ -6,7 +6,8 @@
  * the last lap. Tuning numbers (maxSpeed / accel / turn) come from the stage
  * config and are carried over from the Canvas build.
  */
-import { PHYSICS as P, DRIFT_MARK_LIFE } from '../config.js';
+import { PHYSICS as P } from '../config.js';
+import { layTyreMarks } from './tyremarks.js';
 import { makeContact, setContact } from './contact.js';
 import { bodyPastBarrier } from './race.js';
 
@@ -348,8 +349,10 @@ export class RivalCar {
     // stage 3's AE86 wants to carry speed through instead, so this is
     // per-stage tunable rather than a fixed constant.
     // How much of a body contact the OTHER vehicle absorbs (see
-    // resolveContacts in race.js). 1 is a car; stage 4's box truck is 9.
+    // resolveContacts in race.js). 1 is a car; stage 4's box truck is 4.
     this.contactMass = tuning.mass ?? 1;
+    // stage 4: how hard it throws the traffic it runs into (traffic.js)
+    this.trafficHit = tuning.trafficHit ?? null;
     this.cornerSlow = tuning.cornerSlow ?? 0.45;
     // How far ahead (in route points) the corner-braking scan reaches. The
     // default 22 is ~570 world units, which at cruising speed is about half
@@ -465,6 +468,12 @@ export class RivalCar {
     this.blockGapMax = 620;   // only blocks when the player is within this close behind
     this.weaveSpeed = 2.6;    // rad/s -- one full swerve cycle roughly every 2.4s
     this.weaveAmplitude = 0.55; // fraction of roadHalf added on top of the player's own line
+    // stage 2: weave behind the player too, and wider in front (see update)
+    this.weaveBehind = tuning.weaveBehind ?? false;
+    this.weaveAhead = tuning.weaveAhead ?? null;
+    this.weaveLook = tuning.weaveLook ?? 1;
+    this._weaving = false;
+    this._weaveAmp = null;
 
     // --- rubber-band: easing off while actually in the lead keeps the race
     // close instead of letting one early gap snowball into an unreachable
@@ -564,9 +573,11 @@ export class RivalCar {
     this.finished = false;
     this.contactRecoveryTimer = 0;
     this.driftTrail.length = 0;
+    this._weaveAmp = null;
   }
 
   update(dt, race) {
+    const angleBefore = this.angle;
     this.contactRecoveryTimer = Math.max(0, this.contactRecoveryTimer - dt);
 
     // Stage 1 opening: keep the launch lane and heading through the entire
@@ -689,11 +700,28 @@ export class RivalCar {
     // used before there was anything on the grid wider than a car.
     const lineLimit = this.roadHalf - (this.bodyHalf ?? 45) - 2;
 
+    // `weaveBehind` (stage 2): it weaves behind the player as well, as
+    // wide as it used to only in front, and wider again in front
+    // (`weaveAhead`). The amplitude is eased between the two so the
+    // swerve does not jump as the lead changes hands. Still held inside
+    // `lineLimit`: a limit off the car's drawn width (40 units wider on
+    // stage 2) let the swerve's overshoot carry the car over the kerb for
+    // up to 29% of a lap, so a wider weave shows as the car swinging out
+    // to the limit sooner and holding it longer instead.
     let steerLine = this._raceLine;
-    if (this.blockEnabled && race?.player && race.gap != null && race.gap > 0) {
+    const ahead = race?.gap != null && race.gap > 0;
+    this._weaving = false;
+    if (this.blockEnabled && race?.player && race.gap != null && (ahead || this.weaveBehind)) {
+      this._weaving = true;
       this.weavePhase += dt * this.weaveSpeed;
-      const weave = Math.sin(this.weavePhase) * this.roadHalf * this.weaveAmplitude;
-      const center = race.gap < this.blockGapMax
+      const ampTarget = ahead ? (this.weaveAhead ?? this.weaveAmplitude) : this.weaveAmplitude;
+      this._weaveAmp = this._weaveAmp == null ? ampTarget : this._weaveAmp + (ampTarget - this._weaveAmp) * (1 - Math.exp(-dt * 1.5));
+      // eased out through a corner when it weaves at full racing speed
+      // (behind, or wherever weaveBehind is set): swerving on top of the
+      // corner's own line there ran it over the kerb
+      const cornerFade = this.weaveBehind ? 1 - Math.min(1, bigCurve * 1.5) : 1;
+      const weave = Math.sin(this.weavePhase) * this.roadHalf * this._weaveAmp * cornerFade;
+      const center = ahead && race.gap < this.blockGapMax
         ? path.lateralOf(race.player.x, race.player.y, near)
         : this._raceLine;
       steerLine = Math.max(-lineLimit, Math.min(lineLimit, center + weave));
@@ -787,7 +815,10 @@ export class RivalCar {
     // through every apex, and giving away 35 units of road it had been
     // told to use. Nothing else reads the line this way because nothing
     // else knows it in advance.
-    let aimAt = lookAhead;
+    // Weaving, it aims further up the road: from the usual point the
+    // steering overshot every swerve at racing speed and carried the car
+    // over the kerb; a longer look damps that.
+    let aimAt = this._weaving ? Math.round(lookAhead * this.weaveLook) : lookAhead;
     if (this._perfectLine && !warmingUp && this.contactRecoveryTimer <= 0) {
       aimAt = this._lineAim ?? lookAhead;
       const ahead = this._perfectLine[path.wrap(here + aimAt)] * this._lineScale;
@@ -968,10 +999,8 @@ export class RivalCar {
       this.y += ny * dLat;
     }
 
-    if (this.drifting) {
-      this.driftTrail.push({ x: this.x, y: this.y, life: DRIFT_MARK_LIFE });
-      if (this.driftTrail.length > 160) this.driftTrail.shift();
-    }
+    // tyre marks: a slide always, a hard corner on grip too (tyremarks.js)
+    layTyreMarks(this, dt, wrapAngle(this.angle - angleBefore) / dt, this.maxSpeed, this.drifting);
     for (const pt of this.driftTrail) pt.life -= dt;
     if (this.driftTrail.length && this.driftTrail[0].life <= 0) {
       this.driftTrail = this.driftTrail.filter((pt) => pt.life > 0);

@@ -57,6 +57,12 @@ const CLEAR_AHEAD = 700, CLEAR_BEHIND = 450;
 const RECOVER_TURN = 2.4;
 const RECOVER_ACCEL = 150, RECOVER_BRAKE = 400;
 
+/** A rival running into a car, unless its tuning says otherwise
+ *  (`trafficHit`): the car's velocity forward with the rival and out to the
+ *  side (shares of the rival's), spin (rad/s), lift (base + share of the
+ *  rival's speed), and the share of its speed the rival keeps. */
+const RIVAL_HIT = { forward: 1.15, out: [0.55, 0.9], spin: [5, 10], lift: [260, 0.12], keep: 0.97 };
+
 const toSpeed = (kmh) => kmh / P.hudSpeedFactor;
 const smooth = (t) => t * t * (3 - 2 * t);
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -514,13 +520,15 @@ export class Traffic {
     if (!fresh) return;
     const hx = Math.cos(r.angle), hy = Math.sin(r.angle);
     const rv = r.speed * ms;
-    // thrown forward with the truck and out to the side it was struck on
-    const out = 0.55 + this.rng() * 0.35;
-    const vx = hx * rv * 1.15 + hit.nx * rv * out;
-    const vy = hy * rv * 1.15 + hit.ny * rv * out;
-    const spin = (this.rng() < 0.5 ? -1 : 1) * (5 + this.rng() * 5);
-    this.launch(c, vx, vy, spin, 260 + rv * 0.12);
-    r.speed *= 0.97;
+    // thrown forward with the truck and out to the side it was struck on;
+    // how hard, and what it costs the truck, is the stage's (RIVAL_HIT)
+    const k = { ...RIVAL_HIT, ...(r.trafficHit ?? {}) };
+    const out = k.out[0] + this.rng() * (k.out[1] - k.out[0]);
+    const vx = hx * rv * k.forward + hit.nx * rv * out;
+    const vy = hy * rv * k.forward + hit.ny * rv * out;
+    const spin = (this.rng() < 0.5 ? -1 : 1) * (k.spin[0] + this.rng() * (k.spin[1] - k.spin[0]));
+    this.launch(c, vx, vy, spin, k.lift[0] + rv * k.lift[1]);
+    r.speed *= k.keep;
     const force = Math.min(1, rv / (P.maxSpeed * ms));
     setContact(c.contact, { impact: true, x: hit.x, y: hit.y, nx: -hit.nx, ny: -hit.ny, force });
     events.push({ type: 'rival', car: c, force });
