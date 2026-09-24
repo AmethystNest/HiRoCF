@@ -50,7 +50,12 @@ export async function bundleBoot(boot) {
   writeFileSync(entryPath, `${imports.join('\n')}\n${script}`);
   try {
     const result = await esbuild.build({
-      entryPoints: [entryPath], bundle: true, format: 'iife', minify: true, write: false,
+      // keepNames: the game tells the player's car from a rival's by class
+      // name (race.js resolveContacts, boostfx.js), which plain minifying
+      // renamed to two letters -- every player/rival rule in a contact was
+      // silently off in the built game, while the source and the tests
+      // had them.
+      entryPoints: [entryPath], bundle: true, format: 'iife', minify: true, keepNames: true, write: false,
     });
     return result.outputFiles[0].text;
   } finally {

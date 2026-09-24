@@ -1284,6 +1284,11 @@ export class Game {
     // permanently on any frame nothing touches the car to clear it.
     clearContact(p.contact);
     clearContact(this.rival.contact);
+    // carImpact: a fresh car-to-car hit this frame (set in resolveContacts);
+    // it was never set anywhere, so the two racing cars colliding made no
+    // crash sound at all
+    p.carImpact = false;
+    this.rival.carImpact = false;
 
     if (state === 'racing') {
       p.update(dt, this.input);

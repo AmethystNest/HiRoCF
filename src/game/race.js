@@ -311,6 +311,9 @@ export function autoDrivePostRace(car, path, dt, targetSpeed, laneOffset = 0) {
   }
 }
 
+/** Share of the way to a shared speed a rear-end takes both cars. */
+const SHUNT_SHARE = 0.4;
+
 /** Push overlapping cars apart; side rubbing is cheap, head-on costs speed. */
 export function resolveContacts(cars, sizes, dt = 1 / 60, passes = 4) {
   // Per-car "was this one touched during this call" flag, for the impact
@@ -323,6 +326,7 @@ export function resolveContacts(cars, sizes, dt = 1 / 60, passes = 4) {
   const touched = new Array(cars.length).fill(false);
   const contactAt = new Array(cars.length).fill(null);
 
+  const shunted = new Set();
   for (let pass = 0; pass < passes; pass++) {
     for (let i = 0; i < cars.length; i++) {
       for (let j = i + 1; j < cars.length; j++) {
@@ -407,28 +411,39 @@ export function resolveContacts(cars, sizes, dt = 1 / 60, passes = 4) {
         // that goes to 350. 1.18 is the same over-speed ceiling the
         // rivals' own boost uses, so a hit is still clearly felt.
         const overSpeedCap = (car) => (car.maxSpeed ?? P.maxSpeed) * 1.18;
+        // ...and never past the car doing the pushing: a shove can bring a
+        // car up to the speed of what hit it, not beyond. Stage 4's truck,
+        // rear-ending the player at 700, sent it off at 770-900 -- faster
+        // than the truck and past its own top speed -- because the shove
+        // scales with the truck's mass and repeats every frame they touch.
+        const pushedCap = (car, by) => Math.max(car.speed, by.speed);
         if (headingDot > 0.55) {
           const aTowardB = ahx * best.nx + ahy * best.ny;
           const bTowardA = -(bhx * best.nx + bhy * best.ny);
 
-          if (aTowardB > 0.45 && a.speed > b.speed + 12) {
-            const closing = Math.min(180, a.speed - b.speed);
-            // the shove a rear-ending car delivers is shared out by mass:
-            // running into a truck pushes the truck barely at all and
-            // costs the car most of the closing speed
-            const shove = closing * 0.22 * (aPower / 0.55) * bHit;
-            b.speed = Math.min(b.speed + shove, overSpeedCap(b));
-            b.x += ahx * closing * 0.010 * bHit;
-            b.y += ahy * closing * 0.010 * bHit;
-            a.speed -= closing * 0.035 * aHit;
-          } else if (bTowardA > 0.45 && b.speed > a.speed + 12) {
-            const closing = Math.min(180, b.speed - a.speed);
-            const shove = closing * 0.22 * (bPower / 0.55) * aHit;
-            a.speed = Math.min(a.speed + shove, overSpeedCap(a));
-            a.x += bhx * closing * 0.010 * aHit;
-            a.y += bhy * closing * 0.010 * aHit;
-            b.speed -= closing * 0.035 * bHit;
-          }
+          // A rear-end is a momentum exchange, once per contact however many
+          // separation passes or frames it lasts: both cars go SHUNT_SHARE of
+          // the way to the speed they would share if they stuck together,
+          // weighted by mass (the rest is what the crumpling absorbs). Was a
+          // shove scaled by the pusher's mass and re-applied on every pass
+          // and every frame of contact, which let stage 4's truck drag the
+          // player up to its own speed and past it in a fraction of a second.
+          const shunt = (pusher, pushed, pm, qm, hx, hy, hitOnPushed) => {
+            const key = i * 64 + j;
+            if (shunted.has(key)) return;
+            shunted.add(key);
+            // the first frame of a contact only: held together, the pair are
+            // one pushing on the other, which separation already deals with
+            if ((pusher._carContactCooldown ?? 0) > 0 || (pushed._carContactCooldown ?? 0) > 0) return;
+            const closing = Math.min(180, pusher.speed - pushed.speed);
+            const vc = (pm * pusher.speed + qm * pushed.speed) / (pm + qm);
+            pushed.speed = Math.min(pushed.speed + (vc - pushed.speed) * SHUNT_SHARE, pushedCap(pushed, pusher), overSpeedCap(pushed));
+            pusher.speed += (vc - pusher.speed) * SHUNT_SHARE;
+            pushed.x += hx * closing * 0.010 * hitOnPushed;
+            pushed.y += hy * closing * 0.010 * hitOnPushed;
+          };
+          if (aTowardB > 0.45 && a.speed > b.speed + 12) shunt(a, b, am, bm, ahx, ahy, bHit);
+          else if (bTowardA > 0.45 && b.speed > a.speed + 12) shunt(b, a, bm, am, bhx, bhy, aHit);
         }
 
         // Only a genuinely nose-on / crossing hit should scrub notable
@@ -455,6 +470,7 @@ export function resolveContacts(cars, sizes, dt = 1 / 60, passes = 4) {
     if (!touched[i]) continue;
     const impact = car._carContactCooldown <= 0;
     car._carContactCooldown = P.wallGraceWindow;
+    if (impact) car.carImpact = true;
     const hit = contactAt[i];
     // `best.nx/ny` runs from the pair's lower index to its higher one, so
     // it already points from this car into what it hit for the first of

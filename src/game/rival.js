@@ -12,6 +12,8 @@ import { makeContact, setContact } from './contact.js';
 import { bodyPastBarrier } from './race.js';
 
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+/** How hard a rival brakes to back off after running into the player. */
+const BACK_OFF_BRAKE = 1600;
 
 /**
  * Per-point "how committed to the big-corner line should the car be here"
@@ -942,6 +944,14 @@ export class RivalCar {
         this.speed += this.launchAccelAt(this.speed) * taper * dt;
       } else if (!fullBigCurveAttack) this.speed -= 430 * speedFactor * dt;
       this.speed = Math.max(0, Math.min(this.maxSpeed, this.speed));
+    }
+    // Just run into the back of the player: back off to under its pace for
+    // the moment the contact lasts, as a driver would, rather than keep
+    // shoving -- held flat out, a heavy rival pushed the player along at
+    // its own speed for as long as it stayed behind.
+    if (this.contactRecoveryTimer > 0 && race?.player && race.gap != null && race.gap < 0 && this.boostTimer <= 0) {
+      const under = race.player.speed * 0.85;
+      if (this.speed > under) this.speed = Math.max(under, this.speed - BACK_OFF_BRAKE * dt);
     }
 
     // --- drift spec: the car's actual travel direction lags behind where

@@ -263,24 +263,6 @@ export function buildAudio(ctx) {
 
   /** Metal: a handful of inharmonic partials struck together and ringing
    *  down fast -- a panel taking a hit rather than a drum. */
-  function clank({ base = 480, gain = 0.12, dur = 0.28, delay = 0, send = 0.15 }) {
-    const ratios = [1, 2.31, 3.87, 5.43, 7.19];
-    ratios.forEach((r, i) => {
-      const t0 = ctx.currentTime + delay;
-      const o = ctx.createOscillator();
-      o.type = 'sine';
-      o.frequency.value = base * r * (0.97 + Math.random() * 0.06);
-      const g = ctx.createGain();
-      const d = dur / (1 + i * 0.35);
-      g.gain.setValueAtTime(gain / (1 + i * 0.5), t0);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + d);
-      o.connect(g);
-      g.connect(outlet({ send, pan: (i % 2 ? 0.3 : -0.3) }));
-      o.start(t0);
-      o.stop(t0 + d + 0.05);
-    });
-  }
-
   const hz = (midi) => 440 * Math.pow(2, (midi - 69) / 12);
 
   // --- one-shots, in roughly the order they occur in a race ------------
@@ -344,12 +326,62 @@ export function buildAudio(ctx) {
    *  contact.js -- scaled down again for the rival's own hits. A sub
    *  thump for the mass, a low-passed crunch for the body, a ring of
    *  bent metal and a spray of high debris on top. */
+  /**
+   * A noise burst through a band: the building block of everything that
+   * breaks. `q` high makes it ring (metal), low makes it a crunch or hiss.
+   */
+  function burst({ at, hz, q = 1, type = 'bandpass', gain, decay, len = decay * 5, send = 0.12, pan = 0 }) {
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuffer;
+    const f = ctx.createBiquadFilter();
+    f.type = type; f.frequency.value = hz; f.Q.value = q;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, at);
+    g.gain.linearRampToValueAtTime(gain, at + 0.0015);
+    g.gain.setTargetAtTime(0, at + 0.0015, decay);
+    src.connect(f); f.connect(g); g.connect(outlet({ send, pan }));
+    src.start(at, Math.random() * 1.5, len + 0.01);
+  }
+
+  /**
+   * A crash: "gasha-n". Built in layers, each louder and longer the harder
+   * the hit (and the glass only on a real one):
+   * - the thud of the bodies meeting;
+   * - the crunch: a spray of short noise hits over 0.2 s, each in its own
+   *   band, which is what crumpling sheet metal is -- many small impacts,
+   *   not one;
+   * - a short metallic ring from the panels, noise-excited resonances
+   *   rather than sine partials (those were what made the old one a
+   *   "clank" from a toy);
+   * - the shatter: a falling hiss and scattered high glints, the glass and
+   *   the bits coming off, running on after the rest has stopped.
+   */
   function crash(strength = 1) {
-    const s = Math.max(0.05, strength);
-    boom({ from: 95, to: 32, dur: 0.3, gain: 0.42 * s });
-    sweep({ f0: 2600, f1: 350, type: 'lowpass', q: 0.6, dur: 0.28, gain: 0.42 * s, attack: 0.002, send: 0.15 });
-    clank({ base: 380 + Math.random() * 180, gain: 0.07 * s, dur: 0.32, send: 0.18 });
-    sweep({ f0: 6500, f1: 3500, type: 'highpass', q: 0.8, dur: 0.16, gain: 0.10 * s, attack: 0.001, delay: 0.012, send: 0.1 });
+    const s = Math.max(0.05, Math.min(1, strength));
+    const t0 = ctx.currentTime + 0.005;
+    const L = 1.4 * s;                          // level: every layer scales with the hit
+    boom({ from: 110, to: 34, dur: 0.32, gain: 0.4 * s });
+    burst({ at: t0, hz: 260, type: 'lowpass', q: 0.7, gain: 0.34 * L, decay: 0.05 });
+    const hits = 5 + Math.round(9 * s);
+    for (let i = 0; i < hits; i++) {
+      const at = t0 + Math.pow(Math.random(), 1.6) * (0.08 + 0.16 * s);
+      burst({
+        at, hz: 450 + Math.random() * 2600, q: 1.2 + Math.random() * 2, gain: (0.10 + 0.14 * Math.random()) * L * (1 - (at - t0) * 2.5),
+        decay: 0.008 + Math.random() * 0.02, pan: (Math.random() - 0.5) * 0.6,
+      });
+    }
+    [520, 870, 1430].forEach((hz, i) => burst({
+      at: t0 + 0.004, hz: hz * (0.9 + Math.random() * 0.2), q: 11, gain: (0.09 - i * 0.02) * L, decay: 0.07 + 0.06 * s, send: 0.2,
+    }));
+    if (s > 0.35) {
+      const g = (s - 0.35) / 0.65;
+      burst({ at: t0 + 0.02, hz: 3800, type: 'highpass', q: 0.6, gain: 0.13 * 1.4 * g, decay: 0.12 + 0.12 * g, send: 0.25 });
+      const glints = 6 + Math.round(12 * g);
+      for (let i = 0; i < glints; i++) {
+        const at = t0 + 0.03 + Math.pow(Math.random(), 1.4) * (0.25 + 0.35 * g);
+        burst({ at, hz: 3000 + Math.random() * 5000, q: 14 + Math.random() * 10, gain: (0.05 + 0.07 * Math.random()) * 1.4 * g, decay: 0.01 + Math.random() * 0.025, send: 0.3, pan: (Math.random() - 0.5) * 0.9 });
+      }
+    }
   }
 
   /** A quieter, coarser variant for the ongoing scrape rather than the
@@ -1328,37 +1360,37 @@ export function buildAudio(ctx) {
     knockSrc.start(); pulse.start(); turbo.start(); rush.start();
     let spool = 0, lastT = 0;
     /**
-     * The gear going in: "ga-chan". Two hits of steel on steel 60 ms
-     * apart -- the dog teeth meeting, then the collar seating -- each a
-     * thud from the driveline under a short ring of inharmonic partials,
-     * the second the heavier. Played just after the air hiss, as the box
-     * actuates.
+     * The gear going in: "gasha-gon". The box is a heavy thing: a rattle
+     * of the selector and the dog teeth skating as they line up, then the
+     * collar slamming home with a thud that goes down through the
+     * driveline, and the casing ringing low and dull for an instant after.
+     * Noise through bands and low resonances, not sine partials -- those
+     * rang like a bell, which was the "karan" of a toy button.
      */
     function gearClunk(at) {
-      const hit = (t0, weight) => {
-        const th = ctx.createOscillator(); th.type = 'sine';
-        th.frequency.setValueAtTime(95, t0); th.frequency.exponentialRampToValueAtTime(52, t0 + 0.07);
-        const tg = ctx.createGain();
-        tg.gain.setValueAtTime(0, t0); tg.gain.linearRampToValueAtTime(baseGain * 0.55 * weight, t0 + 0.003);
-        tg.gain.setTargetAtTime(0, t0 + 0.003, 0.035 * weight);
-        th.connect(tg); tg.connect(e.bus); th.start(t0); th.stop(t0 + 0.3);
-        const base = 560 + Math.random() * 90;
-        [1, 1.62, 2.31, 3.43].forEach((r, i) => {
-          const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = base * r;
-          const g = ctx.createGain();
-          g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(baseGain * 0.13 * weight / (1 + i * 0.6), t0 + 0.002);
-          g.gain.setTargetAtTime(0, t0 + 0.002, (0.05 * weight) / (1 + i * 0.4));
-          o.connect(g); g.connect(e.bus); o.start(t0); o.stop(t0 + 0.4);
-        });
-        const n = ctx.createBufferSource(); n.buffer = noiseBuffer;
-        const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1900; bp.Q.value = 1.4;
-        const ng = ctx.createGain();
-        ng.gain.setValueAtTime(0, t0); ng.gain.linearRampToValueAtTime(baseGain * 0.3 * weight, t0 + 0.001);
-        ng.gain.setTargetAtTime(0, t0 + 0.001, 0.012);
-        n.connect(bp); bp.connect(ng); ng.connect(e.bus); n.start(t0, Math.random(), 0.1);
+      const out = (node) => node.connect(e.bus);
+      const hit = (t0, hz, q, gain, decay, type = 'bandpass') => {
+        const src = ctx.createBufferSource(); src.buffer = noiseBuffer;
+        const f = ctx.createBiquadFilter(); f.type = type; f.frequency.value = hz; f.Q.value = q;
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(gain, t0 + 0.0015);
+        g.gain.setTargetAtTime(0, t0 + 0.0015, decay);
+        src.connect(f); f.connect(g); out(g);
+        src.start(t0, Math.random() * 1.5, decay * 6 + 0.02);
       };
-      hit(at, 0.7);
-      hit(at + 0.06, 1);
+      // "gasha": the selector and teeth, a short rattle
+      for (let i = 0; i < 4; i++) hit(at + i * (0.012 + Math.random() * 0.01), 1400 + Math.random() * 1400, 2.5, baseGain * (0.16 + 0.1 * Math.random()), 0.006);
+      hit(at, 900, 1.5, baseGain * 0.22, 0.02);
+      // "gon": the collar home -- thud, driveline, low dull ring
+      const t1 = at + 0.075;
+      hit(t1, 200, 0.8, baseGain * 0.9, 0.06, 'lowpass');
+      const th = ctx.createOscillator(); th.type = 'sine';
+      th.frequency.setValueAtTime(70, t1); th.frequency.exponentialRampToValueAtTime(42, t1 + 0.12);
+      const tg = ctx.createGain();
+      tg.gain.setValueAtTime(0, t1); tg.gain.linearRampToValueAtTime(baseGain * 0.7, t1 + 0.004);
+      tg.gain.setTargetAtTime(0, t1 + 0.004, 0.07);
+      th.connect(tg); out(tg); th.start(t1); th.stop(t1 + 0.5);
+      [310, 560, 980].forEach((hz, i) => hit(t1 + 0.002, hz * (0.93 + Math.random() * 0.14), 7, baseGain * (0.3 - i * 0.07), 0.05 - i * 0.01));
     }
     function airHiss(at) {
       const src = ctx.createBufferSource(); src.buffer = noiseBuffer;
