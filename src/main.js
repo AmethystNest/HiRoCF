@@ -262,10 +262,14 @@ export class Game {
     // covers idle and launch inside it). The rival keeps the plain voice:
     // it is a different car on every stage -- a saloon, a truck -- and
     // none of them is a V8 like this.
-    this.playerEngine = this.audio?.makeSampledV8Engine(0.34) ?? null;
-    // the recorded engine, lower and further off (see sfx.js makeRivalEngine);
-    // 0.26 measures level with the synthesised voice it replaced at 0.11
-    this.rivalEngine = this.audio?.makeRivalEngine(0.26) ?? null;
+    // Rising in pitch and brightening toward the limiter (revPitch,
+    // presence): the recording tops out well under the game's 7,000.
+    this.playerEngine = this.audio?.makeSampledV8Engine(0.34, {
+      revPitch: 0.1, presence: { hz: 2400, db: 6 },
+    }) ?? null;
+    // The rival's engine is its car's own (STAGES[n].rival.engine, see
+    // sfx.js makeRivalEngine), so it is built per stage in loadStage.
+    this.rivalEngine = null;
     // Tyre squeal, one voice per car (see makeSqueal and tyreSlip). The
     // rival's ceiling is lower for the same reason its engine's is: the car
     // being driven is the foreground, the other one is the scene.
@@ -1015,6 +1019,13 @@ export class Game {
 
     // --- rival ---
     this.rival = new RivalCar(path, cfg, rivalTuning(cfg.rival, this.difficulty));
+    // this car's own engine note; kept across a restart of the same stage
+    const engineKind = cfg.rival.engine ?? 'sport';
+    if (this.audio && this.rivalEngine?.kind !== engineKind) {
+      this.rivalEngine?.silence();
+      this.rivalEngine?.stop();
+      this.rivalEngine = this.audio.makeRivalEngine(engineKind);
+    }
     // The AI clamps its own racing line so the car stays on the road; that
     // clamp needs the body's real half-width, which only exists once the
     // world scale does. Stage 4's box truck is wide enough that the old
@@ -1469,7 +1480,7 @@ export class Game {
       // Everything the rival makes is heard from where the player is (see
       // distanceLevel), not at one fixed level wherever it is on the course.
       const rivalLevel = distanceLevel(Math.hypot(this.rival.x - p.x, this.rival.y - p.y));
-      this.rivalEngine.update(this.rival.speed, this.rival.boosting, this.rival.maxSpeed, rivalLevel);
+      this.rivalEngine?.update(this.rival.speed, this.rival.boosting, this.rival.maxSpeed, rivalLevel);
       this.playerSqueal.update(this.tyreSlip(p, 'player', dt));
       this.rivalSqueal.update(this.tyreSlip(this.rival, 'rival', dt), rivalLevel);
 

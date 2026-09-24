@@ -313,7 +313,7 @@ export const STAGES = {
     // big 180-degree curve added): on the line-follow bot the rival's lap
     // went from 0.929 of the player's to 0.900, the new corners suiting it
     // better; 665 measures 0.926, back where the stage was.
-    rival: { maxSpeed: 665, accel: 107, turn: 2.25, sprite: 'devilz', block: false, weave: false, raceLine: true, cornerSlow: 0.22, holdOpeningStraight: true, finalLapBoostOnly: true },
+    rival: { engine: 'sport', maxSpeed: 665, accel: 107, turn: 2.25, sprite: 'devilz', block: false, weave: false, raceLine: true, cornerSlow: 0.22, holdOpeningStraight: true, finalLapBoostOnly: true },
     bestKey: 'topdownRacer_stage1_best_ms',
   },
   2: {
@@ -338,7 +338,7 @@ export const STAGES = {
     // leading or chasing, with the body over the kerb no more than it
     // was (<= 3.3% of a lap). accel -- the getaway -- is left alone: 4s
     // off the line it is doing 469 against 466.
-    rival: { maxSpeed: 660, accel: 120, turn: 3.05, sprite: 'prius', weaveBehind: true, weaveAhead: 0.75, weaveLook: 1.3 },
+    rival: { engine: 'straightpipe', maxSpeed: 660, accel: 120, turn: 3.05, sprite: 'prius', weaveBehind: true, weaveAhead: 0.75, weaveLook: 1.3 },
     bestKey: 'topdownRacer_stage2_best_ms',
   },
   3: {
@@ -387,7 +387,7 @@ export const STAGES = {
       // where two different test bots agreed about it (the gap reopened to
       // -8.0 and -7.8s against a -4.7s target, while on the other stages
       // the two bots disagreed by up to 2s and were left alone).
-      maxSpeed: 593, accel: 90, turn: 3.35, sprite: 'ae86',
+      engine: 'sport', maxSpeed: 593, accel: 90, turn: 3.35, sprite: 'ae86',
       drift: 0.62, driftVisualBoost: 0.5,
       // Takes its hairpin apexes out to the guardrail rather than the
       // pavement edge -- there is no off-road penalty left to pay for it,
@@ -420,6 +420,7 @@ export const STAGES = {
     playerPhysics: { wallInset: 3, wallSpeedMul: 0.82 },
     wallTriggerExtra: 6,
     rival: {
+      engine: 'diesel',
       maxSpeed: 790, accel: 111, turn: 1.95, sprite: 'truck0164',
       // ...but never faster than the player at the top end: held to 97% of
       // the player's top speed (760 -> 737 on HARD; NORMAL's 0.9 already
@@ -503,7 +504,7 @@ export const STAGES = {
     // tint/recolour step is needed (an earlier flat sprite.tint on a white
     // photo dragged that red toward whatever the tint colour was).
     rival: {
-      maxSpeed: PHYSICS.maxSpeed, accel: PHYSICS.accel, turn: 2.85, sprite: 'r8',
+      engine: 'v10', maxSpeed: PHYSICS.maxSpeed, accel: PHYSICS.accel, turn: 2.85, sprite: 'r8',
       // 0.30 -> 0.34 -> 0.44. The first step was about holding the line,
       // not pace: measured over two laps when the line still stopped at
       // the pavement, at 0.30 the body overran the commanded line on 39
