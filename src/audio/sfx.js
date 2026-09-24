@@ -744,8 +744,6 @@ export function buildAudio(ctx) {
   const SAMPLE_BOXY_HZ = 320;
   const SAMPLE_BOXY_DB = -2.5;
   const SAMPLE_FADE_HIGH = 3000;
-  /** Level out of the open-pipe clipper (see makeSampledV8Engine's drive). */
-  const DRIVE_OUT = 0.75;
   /** Rpm (game scale) from which revPitch / presence start to come in. */
   const REV_BRIGHT_FROM = 3800;
   /** How far ahead grains are queued, s: enough to ride out a frame that
@@ -828,13 +826,10 @@ export function buildAudio(ctx) {
    *   last third of every gear barely rises in pitch
    * @param opts.presence { hz, db, fixed }: a presence lift, `db` at the
    *   limiter (eased in with revPitch) or throughout if `fixed`
-   * @param opts.drive  soft clipping on the whole voice, 0 = none: the
-   *   rasp of an open exhaust (stage 2)
    * @param opts.muffleFloor lowest the `distant` muffle closes to, Hz
    */
   function makeSampledV8Engine(baseGain, {
-    pitch = 1, gearTop = V8_GEAR_TOP, distant = false, revPitch = 0, presence = null, drive = 0, muffleFloor = 600,
-    dirt = 0, driveOut = DRIVE_OUT, peaks = [],
+    pitch = 1, gearTop = V8_GEAR_TOP, distant = false, revPitch = 0, presence = null, muffleFloor = 600,
   } = {}) {
     const grains = v8Grains();
     const srcMin = grains[0].rpm;
@@ -874,48 +869,8 @@ export function buildAudio(ctx) {
       lift.gain.value = presence.fixed ? presence.db : 0;
       tail.connect(lift); tail = lift;
     }
-    for (const pk of peaks) {
-      const f = ctx.createBiquadFilter();
-      f.type = 'peaking'; f.frequency.value = pk.hz; f.Q.value = pk.q; f.gain.value = pk.db;
-      tail.connect(f); tail = f;
-    }
     tail.connect(overrun);
-    // An open pipe: the whole voice soft-clipped, which is what turns a
-    // note into a rasp -- every firing pulse flattened into a burst of
-    // harmonics. Driven hard enough to clip, so what comes out is set by
-    // the clipper, not what goes in: the level, and the drop off the
-    // throttle (squashed flat by the clipping otherwise, which left the
-    // crackle buried under a pipe as loud on the overrun as on power), are
-    // both applied after it, in `back`.
-    let preLevel = overrun;
-    let back = null;
-    if (drive > 0) {
-      const into = ctx.createGain(); into.gain.value = drive;
-      const shaper = ctx.createWaveShaper();
-      // `dirt` skews the curve: one half of the wave clips before the
-      // other, which adds the even harmonics a clean clipper does not --
-      // the difference between a loud exhaust and a torn one
-      const n = 2048, curve = new Float32Array(n), off = dirt * 0.35;
-      const norm = Math.max(Math.abs(Math.tanh(2.2 * (1 + off)) - Math.tanh(2.2 * off)), Math.abs(Math.tanh(2.2 * (-1 + off)) - Math.tanh(2.2 * off)));
-      for (let i = 0; i < n; i++) { const x = (i / (n - 1)) * 2 - 1; curve[i] = (Math.tanh(2.2 * (x + off)) - Math.tanh(2.2 * off)) / norm; }
-      shaper.curve = curve; shaper.oversample = '4x';
-      back = ctx.createGain(); back.gain.value = driveOut / Math.sqrt(drive);
-      overrun.connect(into); into.connect(shaper);
-      // the uneven, burbling note of an engine breathing through nothing:
-      // its level shaken by slow noise, so no two firings are alike
-      if (dirt > 0) {
-        const hpf = ctx.createBiquadFilter();
-        hpf.type = 'highpass'; hpf.frequency.value = 30;   // the clipper's DC
-        const shake = ctx.createGain(); shake.gain.value = 1;
-        const wob = ctx.createBufferSource(); wob.buffer = noiseBuffer; wob.loop = true;
-        const wobLp = ctx.createBiquadFilter(); wobLp.type = 'lowpass'; wobLp.frequency.value = 70;
-        const wobDepth = ctx.createGain(); wobDepth.gain.value = 0.55 * dirt;
-        wob.connect(wobLp); wobLp.connect(wobDepth); wobDepth.connect(shake.gain);
-        wob.start();
-        shaper.connect(hpf); hpf.connect(shake); shake.connect(back);
-      } else shaper.connect(back);
-      preLevel = back;
-    }
+    const preLevel = overrun;
     // Both the recording and its synthesised low end leave through `level`
     // (distance, for the rival) and, on a `distant` voice, `muffle` too: a
     // car further off loses its top end before its body. The player's own
@@ -983,7 +938,6 @@ export function buildAudio(ctx) {
           baseGain * SAMPLE_LEVEL * load * duck * (boosting ? 1.15 : 1) * Math.sqrt(mix), t, shifting || blip > 0 ? 0.025 : 0.05,
         );
         overrun.frequency.setTargetAtTime(1300 + 9700 * thr ** 2, t, blip > 0 ? 0.02 : 0.08);
-        if (back) back.gain.setTargetAtTime((driveOut / Math.sqrt(drive)) * (0.3 + 0.7 * thr) * duck, t, 0.05);
 
         const state = { rpm, sf, shifting, up: box.up, blip, overrun: 1 - thr };
         if (mix <= 0) { nextAt = 0; return state; }
@@ -1367,6 +1321,39 @@ export function buildAudio(ctx) {
     rush.connect(rushBand); rushBand.connect(rushGain); rushGain.connect(e.bus);
     knockSrc.start(); pulse.start(); turbo.start(); rush.start();
     let spool = 0, lastT = 0;
+    /**
+     * The gear going in: "ga-chan". Two hits of steel on steel 60 ms
+     * apart -- the dog teeth meeting, then the collar seating -- each a
+     * thud from the driveline under a short ring of inharmonic partials,
+     * the second the heavier. Played just after the air hiss, as the box
+     * actuates.
+     */
+    function gearClunk(at) {
+      const hit = (t0, weight) => {
+        const th = ctx.createOscillator(); th.type = 'sine';
+        th.frequency.setValueAtTime(95, t0); th.frequency.exponentialRampToValueAtTime(52, t0 + 0.07);
+        const tg = ctx.createGain();
+        tg.gain.setValueAtTime(0, t0); tg.gain.linearRampToValueAtTime(baseGain * 0.55 * weight, t0 + 0.003);
+        tg.gain.setTargetAtTime(0, t0 + 0.003, 0.035 * weight);
+        th.connect(tg); tg.connect(e.bus); th.start(t0); th.stop(t0 + 0.3);
+        const base = 560 + Math.random() * 90;
+        [1, 1.62, 2.31, 3.43].forEach((r, i) => {
+          const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = base * r;
+          const g = ctx.createGain();
+          g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(baseGain * 0.13 * weight / (1 + i * 0.6), t0 + 0.002);
+          g.gain.setTargetAtTime(0, t0 + 0.002, (0.05 * weight) / (1 + i * 0.4));
+          o.connect(g); g.connect(e.bus); o.start(t0); o.stop(t0 + 0.4);
+        });
+        const n = ctx.createBufferSource(); n.buffer = noiseBuffer;
+        const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1900; bp.Q.value = 1.4;
+        const ng = ctx.createGain();
+        ng.gain.setValueAtTime(0, t0); ng.gain.linearRampToValueAtTime(baseGain * 0.3 * weight, t0 + 0.001);
+        ng.gain.setTargetAtTime(0, t0 + 0.001, 0.012);
+        n.connect(bp); bp.connect(ng); ng.connect(e.bus); n.start(t0, Math.random(), 0.1);
+      };
+      hit(at, 0.7);
+      hit(at + 0.06, 1);
+    }
     function airHiss(at) {
       const src = ctx.createBufferSource(); src.buffer = noiseBuffer;
       const hpf = ctx.createBiquadFilter(); hpf.type = 'highpass'; hpf.frequency.value = 2800;
@@ -1392,7 +1379,8 @@ export function buildAudio(ctx) {
         turboGain.gain.setTargetAtTime(baseGain * 0.03 * spool, t, 0.1);
         rushBand.frequency.setTargetAtTime(1800 + 2500 * spool, t, 0.1);
         rushGain.gain.setTargetAtTime(baseGain * 0.1 * spool, t, 0.1);
-        if (st.up) airHiss(t + 0.05);
+        // "pshh -- ga-chan": the air, then the gear
+        if (st.up) { airHiss(t + 0.03); gearClunk(t + 0.2); }
       },
       silence() { e.silence(); },
       stop() { e.stop(); try { knockSrc.stop(); pulse.stop(); turbo.stop(); rush.stop(); } catch { /* already stopped */ } },
@@ -1433,15 +1421,137 @@ export function buildAudio(ctx) {
   }
 
   /**
+   * Stage 2's car: a four-cylinder breathing through a straight pipe, built
+   * from its exhaust pulses rather than from a recording. What makes an
+   * open pipe sound the way it does is that each firing reaches the ear as
+   * its own pressure pulse -- nothing smooths them into a note -- and no
+   * two are alike: the "bari-bari" is that rattle of separate, uneven
+   * blasts. So each pulse here is a sharp crack over the ring of the pipe
+   * (damped sines at 180 / 540 / 1,500 Hz), with a fixed imbalance
+   * between the four cylinders (the lumpy four-beat of a tired engine), a
+   * random spread on top, the odd weak one and the odd hard crack, and the
+   * whole lot clipped. Pulse trains are built at six speeds across the rev
+   * range and the two nearest are played, re-pitched the rest of the way
+   * and crossfaded, so the pipe's ring stays where it is while the pulses
+   * speed up.
+   */
+  const PIPE_RPMS = [1200, 2200, 3400, 4800, 6400, 8000];
+  let pipeTrains = null;
+  function pipeBuffers() {
+    if (pipeTrains) return pipeTrains;
+    const sr = ctx.sampleRate;
+    const shape = Math.round(0.03 * sr);
+    const cylBias = [1, 0.8, 1.15, 0.9];
+    const rng = (() => { let x = 12345; return () => ((x = (x * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff); })();
+    // eight pulse shapes (each its own pipe ring) and eight cracks,
+    // rendered once; every pulse is one of them, scaled
+    const shapes = Array.from({ length: 16 }, (_, j) => {
+      const crack = j >= 8;
+      const f1 = 170 + rng() * 25, f2 = 520 + rng() * 60, f3 = 1400 + rng() * 300;
+      const out = new Float32Array(shape);
+      for (let k = 0; k < shape; k++) {
+        const tt = k / sr;
+        let v = 1.1 * Math.exp(-tt / 0.011) * Math.sin(2 * Math.PI * f1 * tt)
+          + 0.55 * Math.exp(-tt / 0.005) * Math.sin(2 * Math.PI * f2 * tt)
+          + 0.22 * Math.exp(-tt / 0.0025) * Math.sin(2 * Math.PI * f3 * tt);
+        if (k < 0.002 * sr) v += (rng() * 2 - 1) * (crack ? 1.0 : 0.4) * (1 - k / (0.002 * sr));
+        out[k] = v;
+      }
+      return out;
+    });
+    pipeTrains = PIPE_RPMS.map((rpm) => {
+      const T = 30 / rpm;                            // two firings a turn
+      const n = Math.max(8, Math.round(0.8 / T / 4) * 4);
+      const len = Math.round(n * T * sr);
+      const buf = ctx.createBuffer(1, len, sr);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < n; i++) {
+        const at = Math.round((i + (rng() - 0.5) * 0.08) * T * sr);
+        let a = cylBias[i % 4] * (0.7 + 0.6 * rng());
+        const r = rng();
+        const crack = r < 0.04;
+        if (r > 0.96) a *= 0.25;                     // a weak one
+        if (crack) a *= 1.7;                          // a hard crack
+        const sh = shapes[(crack ? 8 : 0) + Math.floor(rng() * 8)];
+        for (let k = 0; k < shape; k++) d[(at + k + len) % len] += a * sh[k];   // wraps: seamless loop
+      }
+      let rms = 0;
+      for (let i = 0; i < len; i++) { d[i] = Math.tanh(d[i] * 1.6); rms += d[i] * d[i]; }
+      rms = Math.sqrt(rms / len) || 1;
+      for (let i = 0; i < len; i++) d[i] *= 0.25 / rms;
+      return buf;
+    });
+    return pipeTrains;
+  }
+
+  function makePipeEngine(baseGain) {
+    const trains = pipeBuffers();
+    const mix = ctx.createGain();
+    const voices = trains.map((buf) => {
+      const src = ctx.createBufferSource();
+      src.buffer = buf; src.loop = true;
+      const g = ctx.createGain(); g.gain.value = 0;
+      src.connect(g); g.connect(mix);
+      src.start(0, Math.random() * buf.duration);
+      return { src, g };
+    });
+    const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 55;
+    const low = ctx.createBiquadFilter(); low.type = 'lowshelf'; low.frequency.value = 160; low.gain.value = -2;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 0.6;
+    const tone = ctx.createGain(); tone.gain.value = 0;
+    mix.connect(hp); hp.connect(low); low.connect(lp); lp.connect(tone);
+    const bus = ctx.createGain();
+    const muffle = ctx.createBiquadFilter(); muffle.type = 'lowpass'; muffle.Q.value = 0.5;
+    const level = ctx.createGain(); level.gain.value = 0;
+    tone.connect(bus); bus.connect(muffle); muffle.connect(level); level.connect(master);
+    const box = makeGearbox(RIVAL_GEAR_TOP, { idle: 900, redline: 7800, shiftTime: 0.14, overshoot: 0.2 });
+    let onThrottle = 1, stopped = false;
+    return {
+      bus,
+      update(speed, boosting, maxSpeed, throttle = 1, distance = 1) {
+        if (stopped) return null;
+        const t = ctx.currentTime;
+        const st = box.step(speed, maxSpeed, boosting, t);
+        const glide = st.shifting || st.blip > 0 ? 0.025 : 0.05;
+        // the two trains either side of this rpm, crossfaded in log rpm
+        const lr = Math.log(st.rpm);
+        let k = 0;
+        while (k < PIPE_RPMS.length - 2 && st.rpm > PIPE_RPMS[k + 1]) k++;
+        const w = Math.max(0, Math.min(1, (lr - Math.log(PIPE_RPMS[k])) / (Math.log(PIPE_RPMS[k + 1]) - Math.log(PIPE_RPMS[k]))));
+        voices.forEach((v, i) => {
+          v.src.playbackRate.setTargetAtTime(st.rpm / PIPE_RPMS[i], t, glide);
+          const gain = i === k ? Math.cos(w * Math.PI / 2) : i === k + 1 ? Math.sin(w * Math.PI / 2) : 0;
+          v.g.gain.setTargetAtTime(gain, t, 0.04);
+        });
+        onThrottle += (throttle - onThrottle) * 0.2;
+        const thr = Math.max(onThrottle, st.blip);
+        const rev = (st.rpm - 900) / (7800 - 900);
+        const load = (0.5 + 0.5 * rev) * (0.3 + 0.7 * thr) * (1 + 0.4 * st.blip);
+        const duck = st.shifting ? 0.35 : 1;
+        lp.frequency.setTargetAtTime((1300 + st.rpm * 0.45) * (0.45 + 0.55 * thr), t, 0.05);
+        tone.gain.setTargetAtTime(baseGain * load * duck * (boosting ? 1.15 : 1), t, glide);
+        level.gain.setTargetAtTime(distance, t, 0.08);
+        muffle.frequency.setTargetAtTime(1500 + 7500 * distance * distance, t, 0.1);
+        return { ...st, rev, thr, overrun: 1 - thr };
+      },
+      silence() { level.gain.setTargetAtTime(0, ctx.currentTime, 0.08); },
+      stop() {
+        stopped = true;
+        for (const v of voices) { try { v.src.stop(); } catch { /* already stopped */ } }
+      },
+    };
+  }
+
+  /**
    * The rivals' engines, one per car (STAGES[n].rival.engine):
    * - 'sport' (stages 1 and 3): the recorded V8, as the rival always had,
    *   but at 0.95 of the player's pitch rather than 0.78, louder, and muffled
    *   less with distance. At 0.78 its note sat around 100-150 Hz through
    *   most of each gear, which a phone speaker barely plays: on a phone it
    *   was all but gone.
-   * - 'straightpipe' (stage 2): the same recording through an open pipe --
-   *   soft-clipped into a rasp, the upper mids lifted, louder again -- and
-   *   crackling on every lift and upshift.
+   * - 'straightpipe' (stage 2): a four-cylinder built from its own exhaust
+   *   pulses (makePipeEngine), the loudest of them, crackling on every
+   *   lift, blip and upshift and now and then on power.
    * - 'diesel' (stage 4), 'v10' (stage 5): synthesised, see above.
    * All take the rival's update(speed, boosting, maxSpeed, level); lifting
    * (its speed falling) counts as off the throttle.
@@ -1452,17 +1562,9 @@ export function buildAudio(ctx) {
     if (kind === 'diesel') v = makeDieselEngine(0.38);
     else if (kind === 'v10') v = makeV10Engine(0.3);
     else if (kind === 'straightpipe') {
-      v = makeSampledV8Engine(0.2, {
-        pitch: 0.9, gearTop: RIVAL_GEAR_TOP, distant: true, muffleFloor: 1500,
-        drive: 6, dirt: 1, driveOut: 1.45,
-        presence: { hz: 1500, db: 5, q: 0.7, fixed: true },
-        // the honk of a short, open pipe, and its fizz
-        peaks: [{ hz: 380, q: 1.2, db: 4 }, { hz: 3200, q: 1.0, db: 3 }],
-      });
-      const out = ctx.createGain();
-      out.connect(master);
-      crackle = makeCrackle(out, { onPower: 5, burn: 0.025 });
-      crackle.out = out;
+      v = makePipeEngine(1.0);
+      // pops go through the pipe's own bus, so distance takes them too
+      crackle = makeCrackle(v.bus, { onPower: 5, burn: 0.025 });
       popGain = 0.62;
     } else {
       v = makeSampledV8Engine(0.42, { pitch: RIVAL_PITCH, gearTop: RIVAL_GEAR_TOP, distant: true, muffleFloor: 1300, revPitch: 0.06 });
@@ -1479,11 +1581,10 @@ export function buildAudio(ctx) {
         const st = v.update(speed, boosting, maxSpeed, thr, level);
         if (crackle && st) {
           const t = ctx.currentTime; const dt = lastT ? Math.min(0.1, t - lastT) : 0; lastT = t;
-          crackle.out.gain.setTargetAtTime(level, t, 0.08);
           crackle.update(dt, { overrun: 1 - thr, rev: Math.min(1, st.sf * 1.4), up: st.up, gain: popGain, blip: st.blip });
         }
       },
-      silence() { v.silence(); if (crackle) crackle.out.gain.setTargetAtTime(0, ctx.currentTime, 0.05); },
+      silence() { v.silence(); },
       stop() { v.stop(); },
     };
   }

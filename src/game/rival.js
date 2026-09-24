@@ -466,12 +466,14 @@ export class RivalCar {
     this.drawHalf = null;
     this.weavePhase = 0;
     this.blockGapMax = 620;   // only blocks when the player is within this close behind
-    this.weaveSpeed = 2.6;    // rad/s -- one full swerve cycle roughly every 2.4s
-    this.weaveAmplitude = 0.55; // fraction of roadHalf added on top of the player's own line
+    this.weaveSpeed = tuning.weaveSpeed ?? 2.6;    // rad/s -- one full swerve cycle roughly every 2.4s
+    this.weaveAmplitude = tuning.weaveAmp ?? 0.55; // fraction of roadHalf added on top of the player's own line
     // stage 2: weave behind the player too, and wider in front (see update)
     this.weaveBehind = tuning.weaveBehind ?? false;
     this.weaveAhead = tuning.weaveAhead ?? null;
     this.weaveLook = tuning.weaveLook ?? 1;
+    // stage 2: the weave may run off the tarmac, out to the wall
+    this.weaveOffRoad = tuning.weaveOffRoad ?? false;
     this._weaving = false;
     this._weaveAmp = null;
 
@@ -724,7 +726,10 @@ export class RivalCar {
       const center = ahead && race.gap < this.blockGapMax
         ? path.lateralOf(race.player.x, race.player.y, near)
         : this._raceLine;
-      steerLine = Math.max(-lineLimit, Math.min(lineLimit, center + weave));
+      // off-road allowed: out to the barrier the course shows, less the
+      // car's own drawn half-width and a margin, instead of the kerb
+      const weaveLimit = this.weaveOffRoad ? this.lineBarrier(here) - (this.drawHalf ?? 45) - 14 : lineLimit;
+      steerLine = Math.max(-weaveLimit, Math.min(weaveLimit, center + weave));
     } else {
       this.weavePhase = 0;
     }
@@ -793,7 +798,8 @@ export class RivalCar {
     // held sideways at 28 degrees through a hairpin then tracked 14 units
     // shy of the line it had been given, leaving the apex it was built for
     // a car's width off the rail. The bias exists to be spent here.
-    const aimCap = this.wallLine ? this.lineBarrier(here) - WALL_LINE_GAP : this.roadHalf - 20;
+    const aimCap = this.wallLine ? this.lineBarrier(here) - WALL_LINE_GAP
+      : this._weaving && this.weaveOffRoad ? this.lineBarrier(here) - 10 : this.roadHalf - 20;
     let aimLine = Math.max(-aimCap, Math.min(aimCap, steerLine + Math.sign(steerLine) * driftAimBias));
 
     // After body contact, don't immediately yank back to the programmed

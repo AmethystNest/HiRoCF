@@ -338,7 +338,7 @@ export const STAGES = {
     // leading or chasing, with the body over the kerb no more than it
     // was (<= 3.3% of a lap). accel -- the getaway -- is left alone: 4s
     // off the line it is doing 469 against 466.
-    rival: { engine: 'straightpipe', maxSpeed: 660, accel: 120, turn: 3.05, sprite: 'prius', weaveBehind: true, weaveAhead: 0.75, weaveLook: 1.3 },
+    rival: { engine: 'straightpipe', maxSpeed: 670, accel: 120, turn: 3.05, sprite: 'prius', weaveBehind: true, weaveAmp: 0.85, weaveAhead: 1.1, weaveOffRoad: true, weaveLook: 1.3 },
     bestKey: 'topdownRacer_stage2_best_ms',
   },
   3: {
