@@ -397,6 +397,63 @@ export class Traffic {
     }
   }
 
+  /**
+   * A way through the traffic for a car the game drives itself (the
+   * player, after the finish): which lateral offset to make for, and how
+   * fast it may go. `want` is kept while the road ahead of it is clear;
+   * otherwise the nearest lane that is clear ahead -- and clear alongside
+   * in every lane crossed to reach it -- is taken; boxed in, it stays and
+   * is slowed to whatever is in front of it.
+   *
+   * @param car   { x, y, speed, _routeHint }
+   * @param want  lateral offset it is holding now
+   * @param halfW its half-width, world units
+   * @param others more things to keep clear of (the rival), each
+   *        { x, y, speed, angle, _routeHint, halfW }
+   * @returns { lat, speed }: speed in dial units, Infinity if unlimited
+   */
+  planPass(car, want, halfW, others = []) {
+    const ms = P.moveScale;
+    const near = this.path.nearestLocal(car.x, car.y, car._routeHint, 60);
+    const k = near.index;
+    const d = near.distance;
+    const lat = (car.x - near.x) * this.path.normals[k * 2] + (car.y - near.y) * this.path.normals[k * 2 + 1];
+    const obs = this.obstacles(others);
+    // nearest thing in the way at offset L, from just behind to `ahead`
+    const block = (L, ahead) => {
+      let g = Infinity, v = 0;
+      for (const o of obs) {
+        if (Math.abs(o.lat - L) > (o.ref.halfW ?? 60) + halfW + 30) continue;
+        const og = this.gap(d, o.d);
+        if (og > -200 && og < ahead && og < g) { g = og; v = o.v; }
+      }
+      return { g, v };
+    };
+    // slowed to follow whatever is in front of it, `g` ahead going `v`:
+    // closing on it from well back, matching it at 220, and stopped short
+    // of it inside 150 (about the two bodies' half-lengths and a gap)
+    const follow = ({ g, v }) => {
+      if (g === Infinity) return Infinity;
+      if (g > 220) return v + (g - 220) / (ms * 1.2);
+      return v * Math.max(0, (g - 150) / 70);
+    };
+    const reach = 250 + car.speed * ms * 1.8;
+    // Whatever is ahead where the car IS, not only where it is going: part
+    // way across into another lane it can still run up the back of a car
+    // in the lane it is leaving or crossing.
+    const now = follow(block(lat, reach));
+    const here = block(want, reach);
+    if (here.g === Infinity) return { lat: want, speed: now };
+    const lanes = LANES.map((_, i) => this.laneOffset(i));
+    const options = lanes.filter((L) => Math.abs(L - want) > 1).sort((a, b) => Math.abs(a - lat) - Math.abs(b - lat));
+    for (const L of options) {
+      if (block(L, reach).g !== Infinity) continue;
+      const crossed = lanes.filter((M) => (M - lat) * (M - L) < 0);
+      if (crossed.every((M) => block(M, 350).g === Infinity)) return { lat: L, speed: now };
+    }
+    return { lat: want, speed: Math.min(now, follow(here)) };
+  }
+
   /** Deepest overlap between two hulls, or null. */
   static overlap(a, sa, b, sb) {
     let best = null;

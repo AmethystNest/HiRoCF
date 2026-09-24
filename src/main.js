@@ -147,6 +147,8 @@ const FINISH_CAR_FILL = 0.72;
  * see where it is and which way it is pointing.
  */
 const RIVAL_UNDER_ALPHA = 0.3;
+/** Post-race autopilot's braking for traffic, dial units per second. */
+const POST_RACE_BRAKE = 700;
 
 /**
  * How loud a sound made `d` world units from the player is, 0..1. The
@@ -1176,7 +1178,13 @@ export class Game {
     const t = this.traffic;
     if (!t) return;
     const p = this.player, L = this.path.length;
-    p.progressDistance = ((this.playerEntry.progress.total % L) + L) % L;
+    // Race progress stops counting at the flag, so after it the player's
+    // place on the course is read off its route position instead -- held
+    // at the finish line, the traffic would be kept (and recycled) round
+    // the line while the player drove away from all of it.
+    p.progressDistance = this.race.state === 'finished'
+      ? this.path.nearestLocal(p.x, p.y, p._routeHint, 60).distance
+      : ((this.playerEntry.progress.total % L) + L) % L;
     for (const c of t.cars) clearContact(c.contact);
     t.tick(dt);
     const { width: W, height: H } = this.app.screen;
@@ -1196,6 +1204,36 @@ export class Game {
     }
   }
 
+  /**
+   * The player's autopilot after the finish: the side of the road it was
+   * given at the flag (_postRaceLane), unless traffic is in the way -- then
+   * another lane, eased across rather than jumped to, or, with nowhere to
+   * go, held back behind the car in front. Returns the lateral offset and
+   * the cruise speed (autoDrivePostRace's units) to drive at.
+   */
+  postRacePlayerLane(dt) {
+    const CRUISE = 410;
+    const base = this._postRaceLane.player;
+    if (!this.traffic) return { lat: base, speed: CRUISE };
+    const p = this.player;
+    if (!this._postPass) this._postPass = { want: base, lat: base };
+    const pass = this._postPass;
+    const rival = this.rival;
+    const plan = this.traffic.planPass(p, pass.want, this.playerSprite.width / 2, [{
+      x: rival.x, y: rival.y, speed: rival.speed, angle: rival.angle, _routeHint: rival._routeHint,
+      halfW: this.rivalDrawSize.w / 2,
+    }]);
+    pass.want = plan.lat;
+    const step = 260 * dt;
+    pass.lat += Math.max(-step, Math.min(step, pass.want - pass.lat));
+    const speed = Number.isFinite(plan.speed) ? Math.min(CRUISE, plan.speed * PHYSICS.paceScale) : CRUISE;
+    // braked, not eased: autoDrivePostRace only drifts its speed toward the
+    // cruise it is given, far too slowly for a car pulling out ahead
+    const cap = speed / PHYSICS.paceScale;
+    if (p.speed > cap) p.speed = Math.max(cap, p.speed - POST_RACE_BRAKE * dt);
+    return { lat: pass.lat, speed };
+  }
+
   syncDeck(car) {
     const idx = car._routeHint ?? this.path.nearest(car.x, car.y).index;
     const layer = this.path.layerAtIndex(idx);
@@ -1208,9 +1246,8 @@ export class Game {
     const p = this.player;
 
     // One place, before anything can write one: a contact record left over
-    // from last frame would otherwise be drawn again, and after the finish
-    // (where the cars are driven by autoDrivePostRace and resolveContacts
-    // never runs) it would stick permanently.
+    // from last frame would otherwise be drawn again, and it would stick
+    // permanently on any frame nothing touches the car to clear it.
     clearContact(p.contact);
     clearContact(this.rival.contact);
 
@@ -1257,7 +1294,17 @@ export class Game {
       }
       this.updateTraffic(dt, true);
     } else if (state === 'finished') {
-      this.updateTraffic(dt, false);
+      // Still solid after the flag: the two racers against each other and
+      // against the traffic, which the player's autopilot steers round
+      // (see postRacePlayerLane) and the truck does not.
+      if ((p.deckId ?? 0) === (this.rival.deckId ?? 0)) {
+        resolveContacts(
+          [p, this.rival],
+          [{ w: CAR_SIZE.player.w * this.worldScale, h: CAR_SIZE.player.h * this.worldScale }, this.rivalHullSize],
+          dt,
+        );
+      }
+      this.updateTraffic(dt, true);
       // Race is over: clear any remaining drift state/visual yaw for BOTH cars,
       // then keep them circulating under AI control. This prevents a car from
       // staying visually sideways forever if it crosses the line mid-drift.
@@ -1276,7 +1323,8 @@ export class Game {
       // After the finish, keep the two cars on separate sides of the road
       // so they don't converge onto the same centreline and overlap --
       // see _postRaceLane, set once above at the moment of crossing.
-      autoDrivePostRace(p, this.path, dt, 410, this._postRaceLane.player);
+      const pass = this.postRacePlayerLane(dt);
+      autoDrivePostRace(p, this.path, dt, pass.speed, pass.lat);
       autoDrivePostRace(this.rival, this.path, dt, 390, this._postRaceLane.rival);
     }
     this.race.update(dt);
@@ -1380,6 +1428,7 @@ export class Game {
       );
       const halfGap = Math.min(wantedGap, safeGap);
       this._postRaceLane = { player: sign * halfGap, rival: -sign * halfGap };
+      this._postPass = null;
 
       const place = this.race.positionOf(this.playerEntry);
       this.finishFX.trigger(place, this.app.screen.width, this.app.screen.height);
