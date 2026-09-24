@@ -251,10 +251,14 @@ export const DIFFICULTY = {
 /** The rival's tuning for a stage at a difficulty (HARD: as tuned). */
 export function rivalTuning(rival, difficulty = 'normal') {
   const d = DIFFICULTY[difficulty] || DIFFICULTY.normal;
-  if (d.speed === 1 && d.accel === 1) return rival;
+  // `topVsPlayer`: a top speed held to this share of the player's (PHYSICS
+  // as the stage has set it up), whatever the difficulty would give it
+  const cap = rival.topVsPlayer != null ? PHYSICS.maxSpeed * rival.topVsPlayer : Infinity;
+  const maxSpeed = Math.min(rival.maxSpeed * d.speed, cap);
+  if (d.speed === 1 && d.accel === 1 && maxSpeed === rival.maxSpeed) return rival;
   return {
     ...rival,
-    maxSpeed: rival.maxSpeed * d.speed,
+    maxSpeed,
     accel: rival.accel * d.accel,
     ...(rival.launchAccel != null ? { launchAccel: rival.launchAccel * d.accel } : {}),
   };
@@ -407,6 +411,13 @@ export const STAGES = {
     wallTriggerExtra: 6,
     rival: {
       maxSpeed: 790, accel: 111, turn: 1.95, sprite: 'truck0164',
+      // ...but never faster than the player at the top end: held to 97% of
+      // the player's top speed (760 -> 737 on HARD; NORMAL's 0.9 already
+      // puts it at 711, under that). Asked for once the truck read as
+      // simply faster than the player's car on the straights. Its boost
+      // (1.18x speed, 1.12x movement) then peaks at 974 against the
+      // player's nitro 1049.
+      topVsPlayer: 0.97,
       // The one rival specified as slow away and fast flat out: 790
       // against the player's 760 at the top end, and a launch rate of 120
       // against the player's 244 off the line (see rival.js launchAccel).
@@ -417,6 +428,7 @@ export const STAGES = {
       // (-3%), the least that both restores the 3.0s gap the stage was
       // tuned around (69.4 -> 69.6s here against the player's 72.4 ->
       // 75.0s) and leaves the truck the fastest thing on any straight.
+      // (Since superseded at the top end by topVsPlayer below.)
       // cornerSlow is deliberately NOT re-derived this time: at 0.205 the
       // corner target falls with the top speed, 648 -> 628, which is the
       // same 3% and keeps the one knob doing the one job.
