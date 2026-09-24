@@ -16,7 +16,7 @@ import { PlayerCar } from './game/player.js';
 import { RivalCar } from './game/rival.js';
 import { Race, resolveContacts, autoDrivePostRace } from './game/race.js';
 import { Traffic } from './game/traffic.js';
-import { MOB_CARS, MOB_PAINTS } from './render/mobcars.js';
+import { MOB_CARS, MOB_PAINTS, glossFor } from './render/mobcars.js';
 import { buildViewMask } from './render/viewmask.js';
 import { clearContact } from './game/contact.js';
 import { buildAudio } from './audio/sfx.js';
@@ -1057,7 +1057,8 @@ export class Game {
     // --- traffic (cfg.traffic: stage 4's expressway only) ---
     // Drawn under both racing cars. Two models (render/mobcars.js), each
     // drawn at its real length against the player's car and in a colour
-    // drawn at random, as a photo with its tinted bodywork laid over it.
+    // drawn at random, as a photo with its tinted bodywork laid over it
+    // (and, on a dark paint, the bodywork's highlights over that).
     this.traffic = null;
     this.trafficViews = [];
     if (cfg.traffic) {
@@ -1088,9 +1089,12 @@ export class Game {
         sh.anchor.set(0.5); sh.alpha = 0.5;
         const detail = new Sprite(Texture.EMPTY);
         const paint = new Sprite(Texture.EMPTY);
-        detail.anchor.set(0.5); paint.anchor.set(0.5);
-        view.addChild(sh, detail, paint);
-        Object.assign(view, { shadow: sh, detail, paint, kind: null, tint: null, baseW: 0, baseH: 0 });
+        const gloss = new Sprite(Texture.EMPTY);
+        detail.anchor.set(0.5); paint.anchor.set(0.5); gloss.anchor.set(0.5);
+        view.addChild(sh, detail, paint, gloss);
+        // (the colour is kept as `paintColor`: a Container's own `tint` would
+        // tint every layer of it -- glass, lamps and all -- and the paint twice)
+        Object.assign(view, { shadow: sh, detail, paint, gloss, kind: null, paintColor: null, baseW: 0, baseH: 0 });
         this.actors.addChildAt(view, this.actors.getChildIndex(this.playerShadow));
         this.trafficViews.push(view);
       }
@@ -1544,18 +1548,23 @@ export class Game {
         if (v.kind !== c.kind) {
           const k = this.trafficKinds[c.kind];
           v.kind = c.kind;
-          v.detail.texture = k.tex.detail; v.paint.texture = k.tex.paint;
+          v.detail.texture = k.tex.detail; v.paint.texture = k.tex.paint; v.gloss.texture = k.tex.gloss;
           v.baseW = k.w; v.baseH = k.h;
           v.shadow.width = k.w * 1.5; v.shadow.height = k.h * 1.25;
         }
-        if (v.tint !== c.paint) { v.tint = c.paint; v.paint.tint = c.paint; }
+        if (v.paintColor !== c.paint) {
+          v.paintColor = c.paint; v.paint.tint = c.paint;
+          v.gloss.alpha = glossFor(c.paint);
+          v.gloss.visible = v.gloss.alpha > 0;
+        }
         const rot = c.angle + Math.PI / 2;
-        v.detail.rotation = rot; v.paint.rotation = rot; v.shadow.rotation = rot;
+        v.detail.rotation = rot; v.paint.rotation = rot; v.gloss.rotation = rot; v.shadow.rotation = rot;
         // airborne after the truck: drawn bigger (nearer the camera) with
         // its shadow left further behind on the road
         const up = 1 + c.lift / 900;
         v.detail.width = v.baseW * up; v.detail.height = v.baseH * up;
         v.paint.width = v.detail.width; v.paint.height = v.detail.height;
+        v.gloss.width = v.detail.width; v.gloss.height = v.detail.height;
         v.shadow.position.set(6 + c.lift * 0.25, 8 + c.lift * 0.35);
         v.shadow.alpha = 0.5 / (1 + c.lift / 300);
         // ghosted under a deck the player is not also under, like the rival
@@ -1936,7 +1945,7 @@ export async function boot({ stageId = 1, difficulty = 'normal', onReady, audioC
   const loaded = await Assets.load(urls);
   // stage 4's traffic: every model's photo and its paint layer, mipmapped
   // like the car art below (they are drawn as small as the cars)
-  const mobUrls = Object.values(MOB_CARS).flatMap((m) => [m.detail, m.paint]);
+  const mobUrls = Object.values(MOB_CARS).flatMap((m) => [m.detail, m.paint, m.gloss]);
   const mobLoaded = await Assets.load(mobUrls);
 
   const tex = {};
@@ -1970,7 +1979,7 @@ export async function boot({ stageId = 1, difficulty = 'normal', onReady, audioC
   for (const k of WRAPPED) tex[k].source.addressMode = 'repeat';
   tex.mob = {};
   for (const [k, m] of Object.entries(MOB_CARS)) {
-    tex.mob[k] = { detail: mobLoaded[m.detail], paint: mobLoaded[m.paint] };
+    tex.mob[k] = { detail: mobLoaded[m.detail], paint: mobLoaded[m.paint], gloss: mobLoaded[m.gloss] };
     for (const t of Object.values(tex.mob[k])) {
       t.source.mipmap = 'on';
       t.source.autoGenerateMipmaps = true;
