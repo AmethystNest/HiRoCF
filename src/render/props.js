@@ -24,20 +24,23 @@ import { Container, Graphics, Sprite } from '../pixi.js';
 import { CAR_SIZE } from '../config.js';
 
 /**
- * Decorative parked vehicles, sized against the player's car: drawn width
- * as a multiple of the player's sprite box (CAR_SIZE.player.w).
+ * Decorative parked vehicles, sized against the player's car: `w` is the
+ * drawn width as a multiple of the player's sprite box (CAR_SIZE.player.w),
+ * `stretch` lengthens the art a little past its own aspect.
  *
- * The multiple is per vehicle because the art is not framed alike. The
- * player's photo is only 56% car across its width (the rest is margin);
- * the ambulance fills 75% of its frame and the tow truck 57%. A flat 1.2
- * for all of them drew the ambulance's body 1.6 times the car's width
- * (asked: "too big"). These put each body at 1.05-1.25 times the car's
- * width and 0.93-0.98 of its length, as a van and a tow truck parked
- * beside it are.
+ * Per vehicle, because the art is not framed alike: the player's photo is
+ * 56% car across its width (the rest is margin), the ambulance fills 75%
+ * of its frame, the tow truck 57%, the civilian cars 89% -- and the
+ * ambulance and civilian art are stubby, far wider for their length than a
+ * real vehicle. So width is matched to the car's body (1.05-1.1 times it)
+ * and the length made up with a modest stretch, rather than letting a
+ * width-for-length match draw them half again as wide as the car (asked
+ * twice: "the ambulance is too wide").
  */
 const VEHICLE_PROPS = new Map([
-  ['ambulance', 0.95], ['tow_vehicle', 1.05],
-  ['car_civilian_white', 1.2], ['car_civilian_silver', 1.2], ['car_civilian_navy', 1.2], ['car_civilian_maroon', 1.2],
+  ['ambulance', { w: 0.8, stretch: 1.12 }], ['tow_vehicle', { w: 1.0, stretch: 1 }],
+  ['car_civilian_white', { w: 0.7, stretch: 1.15 }], ['car_civilian_silver', { w: 0.7, stretch: 1.15 }],
+  ['car_civilian_navy', { w: 0.7, stretch: 1.15 }], ['car_civilian_maroon', { w: 0.7, stretch: 1.15 }],
 ]);
 
 /** Deterministic RNG so a stage looks identical every load. */
@@ -357,7 +360,7 @@ function pick(rng, entries) {
  */
 export function buildProps(path, sheet, shadowTex, {
   edge, preset = 'circuit', seed = 1, layout = null, worldScale = 1, wallHalf = null,
-  widen = null, lampGlow = true, lampLateral = null, blocked = null,
+  widen = null, lampGlow = true, lampLateral = null, blocked = null, seen = null,
 }) {
   const rng = mulberry32(seed * 7919 + 13);
   const layer = new Container();
@@ -434,9 +437,10 @@ export function buildProps(path, sheet, shadowTex, {
     // These vehicles are drawn taller/narrower than the player car's own
     // sprite, so matching width 1:1 still read as smaller; the multiplier
     // brings their overall footprint up to match instead of just one edge.
-    const baseW = VEHICLE_PROPS.has(name) ? CAR_SIZE.player.w * worldScale * VEHICLE_PROPS.get(name) : info.w;
+    const veh = VEHICLE_PROPS.get(name);
+    const baseW = veh ? CAR_SIZE.player.w * worldScale * veh.w : info.w;
     const w = baseW * scale;
-    const h = w * (tx.height / tx.width);
+    const h = w * (tx.height / tx.width) * (veh?.stretch ?? 1);
     // Collision-avoidance radius is derived from the prop's ACTUAL rendered
     // footprint, not the catalogue's static `pad` -- that value was
     // authored against the catalogue's own base width and silently went
@@ -449,6 +453,8 @@ export function buildProps(path, sheet, shadowTex, {
     // its own spacing, and fits() is a plain circular test that cannot
     // tell that two bands at different distances from the road never
     // actually overlap on screen.
+    // never on screen from anywhere the player can drive (render/viewmask.js)
+    if (seen && !seen(p.x, p.y, Math.max(w, h) * 0.6)) return false;
     if (!opts.force && !fits(p.x, p.y, pad)) return false;
     if (blocked && blocked(p.x, p.y)) return false;
     // Nothing waives this one. Guard against the prop landing inside a
@@ -773,7 +779,7 @@ export function buildProps(path, sheet, shadowTex, {
  * a scatter of large, irregular, semi-transparent patches is what gives the
  * ground large-scale variation.
  */
-export function buildGroundPatches(path, tex, { edge, seed = 1, count = 90, names, widen = null }) {
+export function buildGroundPatches(path, tex, { edge, seed = 1, count = 90, names, widen = null, seen = null }) {
   const rng = mulberry32(seed * 104729 + 7);
   const layer = new Container();
   layer.label = 'patches';
@@ -787,6 +793,7 @@ export function buildGroundPatches(path, tex, { edge, seed = 1, count = 90, name
     const sp = new Sprite(tex[name]);
     sp.anchor.set(0.5);
     const size = 320 + rng() * 760;
+    if (seen && !seen(p.x, p.y, size * 0.6)) continue;
     sp.width = size;
     sp.height = size * (0.62 + rng() * 0.5);
     sp.rotation = rng() * Math.PI * 2;

@@ -16,6 +16,7 @@ import { PlayerCar } from './game/player.js';
 import { RivalCar } from './game/rival.js';
 import { Race, resolveContacts, autoDrivePostRace } from './game/race.js';
 import { Traffic } from './game/traffic.js';
+import { buildViewMask } from './render/viewmask.js';
 import { clearContact } from './game/contact.js';
 import { buildAudio } from './audio/sfx.js';
 import { makeBgm } from './audio/bgm.js';
@@ -703,6 +704,22 @@ export class Game {
       this.barrierSide = { pos, neg };
     }
 
+    // Everything the camera can ever show on this stage, for this screen
+    // (and the same screen turned over). Scenery outside it is not built
+    // at all -- see render/viewmask.js.
+    {
+      const { width: W, height: H } = this.app.screen;
+      const z = this.baseZoom * this.zoomLevels[0];
+      // kept per stage and screen size: a retry reloads the same stage
+      const key = `${stageId}|${Math.round(W)}|${Math.round(H)}`;
+      this._viewMasks ??= new Map();
+      if (!this._viewMasks.has(key)) {
+        this._viewMasks.set(key, buildViewMask(path, this.barrier, [{ w: W / z, h: H / z }, { w: H / z, h: W / z }]));
+      }
+      this.viewMask = this._viewMasks.get(key);
+    }
+    const seen = (x, y, r) => this.viewMask.visible(x, y, r);
+
     // Stage 2's town (render/city.js): the street grid the course is part
     // of, built under the course's surface, with the course's pavement left
     // open wherever a street meets it.
@@ -713,7 +730,7 @@ export class Game {
       const pave = surfaceExtent(cfg.roadHalf, preset) - cfg.roadHalf;
       const dims = { roadHalf: cfg.roadHalf, pave, streetHalf: cityDef.streetHalf };
       const under = buildCityUnderlay(path, this.tex, this.propSheet, this.tex.shadow_blob, cityDef, {
-        ...dims, worldScale: 1 / this.baseZoom, carWidth: CAR_SIZE.player.w, seed: stageId,
+        ...dims, worldScale: 1 / this.baseZoom, carWidth: CAR_SIZE.player.w, seed: stageId, seen,
       });
       city = {
         streets, under,
@@ -734,7 +751,7 @@ export class Game {
         edge: mixed
           ? Math.max(...mixed.sectors.map((sec) => surfaceExtent(cfg.roadHalf, sec.preset)))
           : surfaceExtent(cfg.roadHalf, preset),
-        seed: stageId, widen,
+        seed: stageId, widen, seen,
         count: patchDef.count, names: patchDef.textures,
       });
     }
@@ -837,7 +854,7 @@ export class Game {
     this.worldScale = s;
 
     const props = buildProps(path, this.propSheet, this.tex.shadow_blob, {
-      edge, preset, seed: stageId, layout, worldScale: s, wallHalf: cfg.wallHalf, widen,
+      edge, preset, seed: stageId, layout, worldScale: s, wallHalf: cfg.wallHalf, widen, seen,
       // A lamp's glow is a pool of light on the ground at night; by day
       // (stages 1-3) it read as a pale stain on the pavement or gravel.
       lampGlow: stageId >= 4,

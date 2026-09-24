@@ -233,7 +233,7 @@ export function buildBarricades(path, streets, barrier, { pave }) {
  * stands on them. See the header.
  */
 export function buildCityUnderlay(path, tex, sheet, shadowTex, def, {
-  roadHalf, pave, worldScale = 1, carWidth = 176, seed = 2,
+  roadHalf, pave, worldScale = 1, carWidth = 176, seed = 2, seen = null,
 }) {
   const rng = mulberry32(seed * 3301 + 17);
   const streets = cityStreets(def);
@@ -474,7 +474,11 @@ export function buildCityUnderlay(path, tex, sheet, shadowTex, def, {
   const hasH = (y, xa, xb) => streets.some((s) => !s.v && s.c === y && s.a0 <= (xa + xb) / 2 && s.a1 >= (xa + xb) / 2);
   const builder = {
     rng, dist, clearOfRoute, lots, shadows, roofs, parks, sprites, sheet, shadowTex, tex, cull,
-    carW: carWidth * worldScale * 1.2,
+    // matched to the player's drawn body, as props.js VEHICLE_PROPS does
+    carW: carWidth * worldScale * 0.7,
+    // everything the camera can ever show (render/viewmask.js); nothing
+    // outside it is built
+    seen: seen ?? (() => true),
   };
   for (let i = 0; i < X.length - 1; i++) {
     for (let j = 0; j < Y.length - 1; j++) {
@@ -556,6 +560,7 @@ function fillBlock(B, cell) {
   const { rng } = B;
   const W = cell.x1 - cell.x0, Hh = cell.y1 - cell.y0;
   if (W <= 0 || Hh <= 0) return;
+  if (!B.seen((cell.x0 + cell.x1) / 2, (cell.y0 + cell.y1) / 2, Math.hypot(W, Hh) / 2)) return;
   // the yards and service ways between the buildings: concrete -- laid on
   // any sliver of a cell too, or the bare ground shows between two lines
   // that do not both run here (x = 4160 / 4760 on stage 2)
@@ -617,6 +622,7 @@ function building(B, x0, y0, x1, y1) {
   const { rng, shadows: S, roofs: G } = B;
   const w = x1 - x0, h = y1 - y0;
   if (w < 80 || h < 80) return;
+  if (!B.seen((x0 + x1) / 2, (y0 + y1) / 2, Math.hypot(w, h) / 2 + 150)) return;
   const height = 60 + rng() * 170 + Math.min(w, h) * 0.12;
   // sun from the north-west: the shadow falls south-east
   const dx = height * 0.42, dy = height * 0.6;
@@ -683,6 +689,7 @@ function building(B, x0, y0, x1, y1) {
 function park(B, x0, y0, x1, y1) {
   const { rng, lots } = B;
   const w = x1 - x0, h = y1 - y0;
+  if (!B.seen((x0 + x1) / 2, (y0 + y1) / 2, Math.hypot(w, h) / 2)) return;
   lots.rect(x0 - 6, y0 - 6, w + 12, h + 12).fill({ color: 0x9aa09a });   // kerbed edge
   const grass = new TilingSprite({ texture: B.tex.grass, width: w, height: h });
   grass.position.set(x0, y0);
@@ -711,6 +718,7 @@ function park(B, x0, y0, x1, y1) {
 function carPark(B, x0, y0, x1, y1) {
   const { rng, lots } = B;
   const w = x1 - x0, h = y1 - y0;
+  if (!B.seen((x0 + x1) / 2, (y0 + y1) / 2, Math.hypot(w, h) / 2)) return;
   lots.rect(x0, y0, w, h).fill({ color: 0x5d6268 });
   const bay = 130, len = 250;
   const horiz = w >= h;   // bays side by side along the long side
@@ -740,6 +748,7 @@ function addTree(B, x, y, scale, name) {
   const t = B.sheet?.textures?.[name];
   if (!t) return;
   const w = 400 * scale, h = w * (t.height / t.width);
+  if (!B.seen(x, y, Math.max(w, h) * 0.6)) return;
   const holder = new Container();
   holder.position.set(x, y);
   const sh = new Sprite(B.shadowTex);
@@ -759,7 +768,8 @@ function addTree(B, x, y, scale, name) {
 function addCar(B, x, y, heading, name, scale = 1) {
   const t = B.sheet?.textures?.[name];
   if (!t) return;
-  const w = B.carW * scale, h = w * (t.height / t.width);
+  const w = B.carW * scale, h = w * (t.height / t.width) * 1.15;
+  if (!B.seen(x, y, h)) return;
   const holder = new Container();
   holder.position.set(x, y);
   holder.rotation = heading + Math.PI / 2;
