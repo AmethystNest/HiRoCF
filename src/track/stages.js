@@ -1,0 +1,553 @@
+/**
+ * Stage centreline definitions.
+ *
+ * Layouts are carried over from the Canvas build (they played well and were
+ * collision-verified); what changes is that every path is now resampled to a
+ * uniform spacing, so downstream spacing is even by construction.
+ */
+import { PathBuilder } from './path.js';
+
+const SPACING = 26;
+
+/**
+ * Turtle-style course builder: carries exact position and heading, so a
+ * course closes on its start point by construction instead of by
+ * hand-solved trig. Stage 2's switchback grid was generated this way
+ * offline; stage 4's crossing layout needs it inline, because there the
+ * closure AND the crossing point both have to be exact -- a course that
+ * crosses over itself has no margin for a few units of drift at the join.
+ *
+ * Step counts are derived from real distance (matching the ~56-67 world
+ * units per authored point the hand-written stages use) rather than being
+ * passed in, so a corner never silently becomes a polygon after resampling.
+ *
+ * Headings are in degrees, screen-space: 0 = +x (east), +90 = +y (south),
+ * -90 = -y (north). `turn(r, deg)` with a negative angle turns left.
+ */
+class Turtle {
+  /**
+   * `dry` walks the same ops for their end position and heading alone,
+   * emitting no points. That is what lets a layout with unknown lengths in
+   * it be SOLVED for closure at build time (see buildStage3Path) instead of
+   * carrying hand-fitted constants that silently stop closing the moment a
+   * leg length is edited.
+   */
+  constructor(x, y, headingDeg, dry = false) {
+    this.b = dry ? null : new PathBuilder();
+    this.x = x;
+    this.y = y;
+    this.h = (headingDeg * Math.PI) / 180;
+  }
+
+  /** Straight run of `dist` world units along the current heading. */
+  fwd(dist) {
+    const nx = this.x + Math.cos(this.h) * dist;
+    const ny = this.y + Math.sin(this.h) * dist;
+    if (this.b) this.b.line(this.x, this.y, nx, ny, Math.max(4, Math.round(dist / 67)));
+    this.x = nx;
+    this.y = ny;
+    return this;
+  }
+
+  /**
+   * Straight run with a sine S-bend layered on. The bend fades to zero at
+   * both ends (PathBuilder.wave), so the turtle's end position and heading
+   * are exactly those of a plain fwd() -- an S-curve never affects closure.
+   */
+  waveFwd(dist, amplitude, waves = 1) {
+    const nx = this.x + Math.cos(this.h) * dist;
+    const ny = this.y + Math.sin(this.h) * dist;
+    if (this.b) this.b.wave(this.x, this.y, nx, ny, Math.max(20, Math.round(dist / 67)), amplitude, waves);
+    this.x = nx;
+    this.y = ny;
+    return this;
+  }
+
+  /** Circular turn of `deg` degrees at `radius`; negative turns left. */
+  turn(radius, deg) {
+    const rad = (deg * Math.PI) / 180;
+    const sgn = Math.sign(deg);
+    const centreAngle = this.h + (sgn * Math.PI) / 2;
+    const cx = this.x + Math.cos(centreAngle) * radius;
+    const cy = this.y + Math.sin(centreAngle) * radius;
+    const a0 = Math.atan2(this.y - cy, this.x - cx);
+    const a1 = a0 + rad;
+    const arcLen = Math.abs(rad) * radius;
+    if (this.b) this.b.arc(cx, cy, radius, a0, a1, Math.max(12, Math.round(arcLen / 56)));
+    this.x = cx + Math.cos(a1) * radius;
+    this.y = cy + Math.sin(a1) * radius;
+    this.h += rad;
+    return this;
+  }
+
+  build(spacing) {
+    return this.b.build(spacing);
+  }
+}
+
+// Stage 1 layout, as turtle ops. Exported (with its parameters) so the
+// shape can be tuned and measured without a build.
+export const S1 = {
+  corner: 520,       // the circuit's 90-degree corners, as before
+  kink: 650,         // the two right-handers into and out of the big curve
+  big: 1000,         // THE big curve: 180 degrees at this radius
+  straightOut: 6700, // start line to turn 1
+  straightIn: 2300,  // last corner to the start line
+  eastSide: 4400,    // turn 1 to turn 2, a right-hand S
+  topEast: 3200,     // turn 2 to the first kink
+  bigLegs: 2400,     // kink to the big curve, and back out to the other
+};
+
+function stage1Layout(A, B, dry) {
+  const c = S1;
+  const t = new Turtle(0, 0, 0, dry);
+  t.fwd(c.straightOut);
+  t.turn(c.corner, -90);           // turn 1 -- north
+  t.waveFwd(c.eastSide, 145);      //   right-hand S
+  t.turn(c.corner, -90);           // turn 2 -- west
+  t.waveFwd(c.topEast, 110);
+  t.turn(c.kink, 90);              // right -- north, out to the big curve
+  t.fwd(c.bigLegs);
+  t.turn(c.big, -180);             // the big curve -- back south
+  t.fwd(c.bigLegs);
+  t.turn(c.kink, 90);              // right -- west again
+  t.waveFwd(A, -170);              //   FREE #1: the long back straight
+  t.turn(c.corner, -90);           // turn 3 -- south
+  t.waveFwd(B, -135);              //   FREE #2: left-hand S down the west side
+  t.turn(c.corner, -90);           // final corner -- east
+  t.fwd(c.straightIn);             // into the start line
+  return t;
+}
+
+export function buildStage1Path() {
+  const at = (a, b) => stage1Layout(a, b, true);
+  const p00 = at(0, 0), p10 = at(1000, 0), p01 = at(0, 1000);
+  const ax = (p10.x - p00.x) / 1000, ay = (p10.y - p00.y) / 1000;
+  const bx = (p01.x - p00.x) / 1000, by = (p01.y - p00.y) / 1000;
+  const det = ax * by - ay * bx;
+  const A = (-p00.x * by + p00.y * bx) / det;
+  const B = (ax * -p00.y + ay * p00.x) / det;
+  return stage1Layout(A, B, false).build(SPACING);
+}
+
+/**
+ * Stage 2 -- a loop of ordinary city streets.
+ *
+ * A street grid: blocks joined by square junctions, every corner the same
+ * radius -- and that radius is not a taste decision. The inside of a turn
+ * has to stay clear of the road's full built width (roadHalf 230 plus 248
+ * of gutter, kerb and pavement = 478) or the pavement ribbon folds through
+ * itself at the apex. 560 is the tightest a junction can be and still
+ * clear it.
+ *
+ * The first grid version was a jigsaw of two jogs round a rectangle, and
+ * read as monotonous (asked: "change it, lengthen it a little"). This one
+ * is 37% longer (39,300 against 28,600) and every part of it is a
+ * different kind of street driving:
+ *   - the start boulevard, the one long run to top speed;
+ *   - a crank (right-left) straight after it;
+ *   - round a single block: two rights 600 apart, the nearest thing a grid
+ *     has to a hairpin;
+ *   - a staircase of short blocks stepping down to the south-west, left
+ *     and right in turn;
+ *   - the west side home, with a jog of its own near the top.
+ * No two parallel stretches come closer than 1,720 (a block between their
+ * pavements), which render/city.test.js holds the town grid to as well.
+ *
+ * Closure is solved at build time from two free lengths (A due west along
+ * the bottom, B due north up the west side), the same way stage 3 does it.
+ */
+
+// Tightest a 90-degree junction can be before the inside of the pavement
+// ribbon pinches. See above.
+const S2_CORNER = 560;
+
+function stage2Layout(A, B, dry) {
+  const t = new Turtle(0, 0, 0, dry);
+  const R = S2_CORNER;
+  t.fwd(3600); t.turn(R, 90);    // south      the start boulevard
+  t.fwd(1100); t.turn(R, -90);   // east       crank
+  t.fwd(1200); t.turn(R, 90);    // south
+  t.fwd(2900); t.turn(R, 90);    // west       round the block:
+  t.fwd(600); t.turn(R, 90);     // north        two rights 600 apart
+  t.fwd(900); t.turn(R, -90);    // west
+  t.fwd(1500); t.turn(R, -90);   // south      the staircase
+  t.fwd(1800); t.turn(R, 90);    // west
+  t.fwd(1300); t.turn(R, -90);   // south
+  t.fwd(900); t.turn(R, 90);     // west
+  t.fwd(A); t.turn(R, 90);       // north      FREE #1 -- due west
+  t.fwd(2400); t.turn(R, 90);    // east       the jog on the way home
+  t.fwd(900); t.turn(R, -90);    // north
+  t.fwd(B); t.turn(R, 90);       // east       FREE #2 -- due north
+  t.fwd(1100);                   //            into the start line
+  return t;
+}
+
+export function buildStage2Path() {
+  const at = (a, b) => stage2Layout(a, b, true);
+  const p00 = at(0, 0), p10 = at(1000, 0), p01 = at(0, 1000);
+  const ax = (p10.x - p00.x) / 1000, ay = (p10.y - p00.y) / 1000;
+  const bx = (p01.x - p00.x) / 1000, by = (p01.y - p00.y) / 1000;
+  const det = ax * by - ay * bx;
+  const A = (-p00.x * by + p00.y * bx) / det;
+  const B = (ax * -p00.y + ay * p00.x) / det;
+  return stage2Layout(A, B, false).build(SPACING);
+}
+
+/**
+ * Stage 3 -- a genuine mountain pass: a switchback climb, a ridge, a
+ * hairpin descent and the valley road home.
+ *
+ * The layout this replaces was a boustrophedon of gentle S-waves joined by
+ * 1000-radius U-turns. Nothing in it was tighter than ~520 radius, and at
+ * this car's steering rates a 1000-radius corner is taken flat at ~590
+ * speed -- so the "touge" had no corner the player ever had to brake for,
+ * and the rival's drift, which only arms on a sustained corner, had almost
+ * nothing to arm on. It read as a wide serpentine test track.
+ *
+ * What makes this one a pass instead:
+ *
+ * - Eight switchback hairpins (six climbing, two on the descent) with
+ *   apexes of 330-450 radius. Those numbers come from the car, not from
+ *   taste: the player's turn rate gives a grip radius of ~394 at speed 400
+ *   and ~647 at 500, and a drift (driftMinSpeed 435 on this stage) tightens
+ *   it to ~330 at 435. So a 330-390 apex is exactly the corner you have to
+ *   brake to ~400 for, and can drift through if you commit -- which is the
+ *   whole point of the stage.
+ *
+ * - Each hairpin is a COMPOUND corner (see `hairpin` below), not a single
+ *   180 arc between two parallel straights. Two reasons, both structural.
+ *   The angled entry and exit add their own perpendicular travel, so a 330
+ *   apex still leaves ~1050 units between the two legs -- a plain 180 arc
+ *   would need a 525 radius for the same spacing, which is no longer a
+ *   hairpin. And every piece of it turns the same way with no straight in
+ *   between, so the rival's long-curve detector (getLongCurveRamp in
+ *   rival.js groups runs of same-signed turning and drops runs shorter than
+ *   longCurveMinLen) reads one ~2000-unit corner rather than three short
+ *   runs that each fail the test -- with straight legs the AI neither leans
+ *   onto its line nor drifts at the hairpins at all.
+ *
+ * - One long valley straight home (~5300 units, kinked once so it reads as
+ *   a road rather than a runway) so there is somewhere to spend the boost
+ *   and somewhere to overtake.
+ *
+ * Closure is SOLVED at build time, not fitted by hand. Two of the lengths
+ * (`A`, a due-south straight in the descent, and `B`, the due-west valley
+ * road) are left free; every other op is fixed. The end position is affine
+ * in both and the two are perpendicular, so walking the layout dry three
+ * times gives a 2x2 system whose solution closes the loop exactly. Edit any
+ * other leg and the two free lengths re-solve themselves -- the version of
+ * this stage that this replaces carried hand-fitted constants, plus a
+ * comment recording how many times they had to be re-swept by hand after
+ * each change.
+ *
+ * Geometry is verified in stages.test.js rather than trusted: the loop
+ * closes, no two stretches of road further apart along the route than one
+ * corner complex come closer than the road's full visual swath
+ * (2 * (roadHalf 190 + mountain bands 184) = 748), and the tightest radius
+ * anywhere on the built path stays inside what the car can drive.
+ */
+
+/**
+ * One switchback: a tight apex reached through a curved entry and exit
+ * rather than off a straight. `entryDeg` and `approachDeg` are each applied
+ * twice (in and out), so the apex itself turns 180 - 2*entryDeg -
+ * 2*approachDeg and the whole compound still reverses the heading exactly.
+ *
+ * The `approach` arc is deliberately huge (3000 radius) and shallow: it is
+ * the "straight" part of the corner, but drawn as a bend so the run of
+ * same-signed turning is never broken -- see the note above about the
+ * rival's corner detection.
+ */
+function hairpin(t, sign, { apex, entry = 600, entryDeg = 20, approach = 3000, approachDeg = 8 }) {
+  const apexDeg = 180 - 2 * entryDeg - 2 * approachDeg;
+  t.turn(entry, sign * entryDeg);
+  t.turn(approach, sign * approachDeg);
+  t.turn(apex, sign * apexDeg);
+  t.turn(approach, sign * approachDeg);
+  t.turn(entry, sign * entryDeg);
+  return t;
+}
+
+// How far south of the start straight the valley road runs home. The
+// closing hairpin's radius is exactly half of it, so that hairpin lands the
+// route back on y = 0 and the run-in to the start line is dead straight.
+const S3_VALLEY_DROP = 1250;
+// Straight still behind index 0 when the grid is laid out, so the start is
+// never on a corner.
+const S3_RUN_IN = 900;
+
+function stage3Layout(A, B, dry) {
+  const t = new Turtle(0, 0, 0, dry);
+  const L = -1, R = 1;
+
+  // valley: the start/finish straight along the foot of the pass
+  t.fwd(2500);
+
+  // the climb: six switchbacks, alternating. An even count matters -- each
+  // hairpin reverses the heading, so an odd number would leave the summit
+  // pointing back down the mountain.
+  hairpin(t, L, { apex: 360 });               t.fwd(1250);
+  hairpin(t, R, { apex: 330, entryDeg: 24 }); t.fwd(900);
+  hairpin(t, L, { apex: 390, entryDeg: 17 }); t.waveFwd(1750, 90);
+  hairpin(t, R, { apex: 345 });               t.fwd(1000);
+  hairpin(t, L, { apex: 370, entryDeg: 22 }); t.fwd(1450);
+  hairpin(t, R, { apex: 335 });               t.fwd(1300);
+
+  // summit ridge: over the crest and round onto the east face
+  t.turn(820, -32); t.fwd(1250);
+  t.turn(760, 32);  t.fwd(1100);
+  t.turn(900, 90);                            // now heading south
+
+  // descent: faster and flowing, with two switchbacks of its own.
+  // Wave amplitudes are held down deliberately: a sine bend's own radius is
+  // roughly (length / 2pi)^2 / amplitude, so 240 over 1500 units would be a
+  // 240-radius flick -- tighter than any hairpin on the stage -- hiding
+  // inside what reads on the map as a fast sweep. At 60 over 1500 it is a
+  // ~950-radius bend, comfortably wider than the 800-1050 corners it sits
+  // between. stages.test.js counts the sub-470 corners for exactly this
+  // reason: a wave that goes tight shows up as a ninth hairpin.
+  t.waveFwd(1500, 60);
+  hairpin(t, L, { apex: 420, entryDeg: 16, entry: 700 });
+  t.fwd(1150);
+  hairpin(t, R, { apex: 450, entryDeg: 14, entry: 750 });
+  t.fwd(A);                                   // FREE #1 -- due south
+  t.turn(950, -48); t.fwd(1100);
+  t.turn(1050, 48);
+  t.waveFwd(1300, 45);
+  t.turn(800, 90);                            // now heading west
+
+  // the valley road home: the one long straight, kinked once near its east
+  // end so it reads as a valley road, and so the rest of it clears the
+  // start straight it runs parallel to
+  t.fwd(B * 0.26);                            // FREE #2 -- due west
+  t.turn(1500, -20); t.fwd(700); t.turn(1500, 20);
+  t.fwd(B * 0.74);
+
+  if (dry) return t;
+  t.turn(S3_VALLEY_DROP / 2, 180);            // closing hairpin onto the start
+  t.fwd(S3_RUN_IN);                           // run-in to the start line
+  return t;
+}
+
+export function buildStage3Path() {
+  // Solve the two free lengths so the pre-closing point lands exactly where
+  // the closing hairpin needs it: S3_VALLEY_DROP south of the start line and
+  // S3_RUN_IN west of it, heading west.
+  const at = (a, b) => stage3Layout(a, b, true);
+  const p00 = at(0, 0), p10 = at(1000, 0), p01 = at(0, 1000);
+  const ax = (p10.x - p00.x) / 1000, ay = (p10.y - p00.y) / 1000;
+  const bx = (p01.x - p00.x) / 1000, by = (p01.y - p00.y) / 1000;
+  const det = ax * by - ay * bx;
+  const tx = -S3_RUN_IN - p00.x, ty = S3_VALLEY_DROP - p00.y;
+  const A = (tx * by - ty * bx) / det;
+  const B = (ax * ty - ay * tx) / det;
+  return stage3Layout(A, B, false).build(SPACING);
+}
+
+
+/**
+ * Stage 4 — metropolitan elevated expressway that crosses over itself.
+ *
+ * Shape: a big outer ring (long straights, 2100-radius sweepers, high-speed
+ * S-bends) with an inner elevated loop threaded through the middle of it.
+ * The route enters that inner loop on an elevated deck, runs it as a raised
+ * ring, comes back down, and then passes UNDER its own entry viaduct on the
+ * way out -- one genuine grade separation, at a right angle, both passes
+ * being live road the player and rival actually drive.
+ *
+ * That crossing is what the deckIds/zLevels metadata on TrackPath exists
+ * for: the two passes share an XY, so everything that asks "where am I on
+ * the route" has to ask locally rather than globally. The earlier layout
+ * only ever marked deck levels along a route that never actually overlapped
+ * itself, so nothing was exercising that. See TrackPath.nearestLocal and
+ * the hint plumbing in PlayerCar/RivalCar/Progress; without those, a car
+ * reaching the crossing snaps onto the other deck's centreline and its
+ * wall, racing line and lap progress all jump to the wrong stretch.
+ *
+ * Built with the Turtle above rather than hand-written coordinates. At a
+ * crossing there is no slack: the loop has to close exactly AND the two
+ * passes have to intersect where intended, and the previous layout's
+ * hand-solved coordinates were already at the limit of what was checkable
+ * by eye. Segment separation is asserted by the course test rather than
+ * trusted -- the road's full visual swath is 2*(roadHalf 360 + bands 104)
+ * = 928 units wide, so any two non-adjacent stretches closer than that
+ * would overlap on screen.
+ *
+ * Turtle log (screen space, +y is south; left turns are negative):
+ *   start (-7900, 6400) heading east
+ *   fwd 5700          south side, west half
+ *   turn L 1000       onto the entry viaduct
+ *   fwd 3000          entry viaduct north  <-- crossed later at y=3400
+ *   turn R 1000       into the inner loop
+ *   fwd 2800 / L / fwd 2000 / L / fwd 5800 / L / fwd 4000 / L
+ *                     inner elevated ring, clockwise on screen
+ *   fwd 3600          exit road east       <-- passes UNDER x=-1200
+ *   turn R 1000 / fwd 1000 / turn L 1000
+ *                     back down onto the south side
+ *   fwd 4100 / turn L 2100
+ *   waveFwd 8600      east side
+ *   turn L 2100
+ *   waveFwd 14400     north side, the long one
+ *   turn L 2100
+ *   waveFwd 8600      west side
+ *   turn L 2100       closes exactly on the start point
+ */
+export function buildStage4Path() {
+  const R = 2100; // outer sweepers
+  const r = 1000; // inner-loop and ramp corners
+
+  const path = new Turtle(-7900, 6400, 0)
+    .fwd(5700)          // south side, west half
+    .turn(r, -90)       // climb onto the entry viaduct
+    .fwd(3000)          // entry viaduct, northbound  (crossing at y = 3400)
+    .turn(r, 90)        // right, into the inner loop
+    .fwd(2800)          // inner loop, south side
+    .turn(r, -90)
+    .fwd(2000)          // inner loop, east side
+    .turn(r, -90)
+    .fwd(5800)          // inner loop, north side
+    .turn(r, -90)
+    .fwd(4000)          // inner loop, west side
+    .turn(r, -90)
+    .fwd(3600)          // exit road, eastbound  (passes under x = -1200)
+    .turn(r, 90)        // right, back toward the south side
+    .fwd(1000)
+    .turn(r, -90)
+    .fwd(4100)          // south side, east half
+    .turn(R, -90)       // south-east sweeper
+    .waveFwd(8600, 420) // east side
+    .turn(R, -90)       // north-east sweeper
+    .waveFwd(14400, 520, 2) // north side -- the long one
+    .turn(R, -90)       // north-west sweeper
+    .waveFwd(8600, -420)    // west side
+    .turn(R, -90)       // south-west sweeper, closes on the start point
+    .build(SPACING);
+
+  // Deck levels. The inner loop is the elevated ring: the route climbs onto
+  // it just before the entry viaduct, stays up for the whole ring, and comes
+  // back down on the last inner corner -- so the exit road is at ground
+  // level by the time it reaches the crossing and passes underneath.
+  // Fractions come from the measured layout (see the course test, which
+  // asserts the crossing falls inside the elevated range on one pass and
+  // the ground range on the other).
+  path.setLayerRange(0.000, 0.066, 0, 0); // ground: south side, west half
+  path.setLayerRange(0.066, 0.086, 1, 1); // ascent onto the viaduct
+  path.setLayerRange(0.086, 0.345, 1, 2); // elevated: viaduct + inner ring
+  path.setLayerRange(0.345, 0.370, 1, 1); // descent off the ring
+  path.setLayerRange(0.370, 1.000, 0, 0); // ground: exit road (under the
+                                          // viaduct) and the whole outer ring
+
+  // Tunnel on the long north straight, well inside it so neither fade
+  // reaches the sweepers at either end.
+  path.setTunnelRange(0.60, 0.65);
+  return path;
+}
+
+/**
+ * Stage 5 -- the last stage: one lap that is all three of the others, then
+ * climbs over the first of them on a viaduct.
+ *
+ * City streets with square junctions, a tunnel bored through the ridge, a
+ * switchback pass, and an expressway that runs the ridge west and turns
+ * south onto a viaduct straight down over the city street the lap started
+ * on -- crossing it twice, elevated, before dropping back to ground.
+ *
+ * One road width for the whole lap (roadHalf 240), because collision, the
+ * wall and the AI all take one number per stage. What changes per sector is
+ * the surface treatment and how tight the corners are allowed to be, and
+ * those two are linked: the inside of a turn has to clear that sector's
+ * built width or its outermost band folds through itself at the apex. The
+ * city's footpath takes it out to 416, so junctions are 520; the pass's
+ * rock band reaches 360, so the tightest apex is 420.
+ *
+ * The crossing is the reason the elevated metadata exists (see
+ * TrackPath.setLayerRange and the deck plumbing in main.js/player.js): two
+ * stretches of live road share an XY, so every "where am I on the route"
+ * lookup has to be local. Stage 4 proved that machinery on one crossing;
+ * this stage runs two, on a course four times as varied.
+ *
+ * Closure is solved at build time from two free lengths, as stages 2 and 3
+ * do. `S5_RIDGE` is NOT free: it sets how far west the ridge runs before
+ * the viaduct turns south, which is what decides whether the viaduct comes
+ * down over the city street at all. It was swept over a range and 13000 is
+ * the value that puts both crossings on the city's own blocks while leaving
+ * every other pair of stretches clear of the road's full swath.
+ */
+const S5_JUNCTION = 520;   // city junctions: must clear the 416 built width
+const S5_RIDGE = 13000;    // ridge run west -- sets where the viaduct falls
+
+function stage5Layout(A, B, dry) {
+  const t = new Turtle(0, 0, 0, dry);
+  const L = -1, R = 1;
+  const J = S5_JUNCTION;
+
+  // --- city: blocks and square junctions along the valley floor
+  t.fwd(3200); t.turn(J, 90);
+  t.fwd(1400); t.turn(J, -90);
+  t.fwd(2600); t.turn(J, -90);
+  t.fwd(1400); t.turn(J, 90);
+  t.fwd(3400);
+
+  // --- out of town, then straight through the ridge
+  t.turn(900, -34); t.fwd(1500);
+  t.turn(900, 34);
+  t.fwd(2600);                                  // the tunnel
+
+  // climb away from the approach road before the switchbacks start, or the
+  // bottom leg of the stack folds back on top of it
+  t.turn(800, -90); t.fwd(1800); t.turn(800, 90);
+
+  // --- the pass: four switchbacks with east-west legs, climbing north.
+  // An even count keeps the summit pointing the way the stack was entered.
+  hairpin(t, L, { apex: 440, entry: 700 });               t.fwd(1500);
+  hairpin(t, R, { apex: 420, entry: 700, entryDeg: 24 }); t.fwd(1100);
+  hairpin(t, L, { apex: 465, entry: 700, entryDeg: 17 }); t.waveFwd(1900, 90);
+  hairpin(t, R, { apex: 430, entry: 700 });               t.fwd(1400);
+
+  // --- over the crest and west onto the expressway
+  t.turn(900, -90); t.fwd(1200); t.turn(950, -90);
+
+  // --- expressway: the ridge run, then the viaduct south over the city
+  t.fwd(S5_RIDGE - 2400);
+  t.fwd(2400);                                  // ramp up onto the deck
+  t.turn(1700, -90);
+  t.fwd(A);                                     // FREE #1 -- due south
+  t.turn(1300, -90); t.fwd(1600);
+  t.turn(1300, 90);  t.fwd(900);
+  t.turn(1300, 90);
+  t.fwd(B);                                     // FREE #2 -- due west
+  t.turn(1000, 90);  t.fwd(1800);
+  t.turn(1000, 90);  t.fwd(600);
+  return t;
+}
+
+export function buildStage5Path() {
+  const at = (a, b) => stage5Layout(a, b, true);
+  const p00 = at(0, 0), p10 = at(1000, 0), p01 = at(0, 1000);
+  const ax = (p10.x - p00.x) / 1000, ay = (p10.y - p00.y) / 1000;
+  const bx = (p01.x - p00.x) / 1000, by = (p01.y - p00.y) / 1000;
+  const det = ax * by - ay * bx;
+  const A = (-p00.x * by + p00.y * bx) / det;
+  const B = (ax * -p00.y + ay * p00.x) / det;
+  const path = stage5Layout(A, B, false).build(SPACING);
+
+  // The tunnel, and the viaduct that carries the expressway over the city.
+  // Fractions read off the built path, not the turtle's running distance --
+  // resampling stretches it by about 6%.
+  path.setTunnelRange(0.200, 0.229);
+  path.setLayerRange(0.000, 0.612, 0, 0);   // ground: city, pass, ridge
+  path.setLayerRange(0.612, 0.669, 1, 1);   // up onto the deck
+  path.setLayerRange(0.669, 0.938, 1, 2);   // elevated, crossing the city
+  path.setLayerRange(0.938, 0.975, 1, 1);   // back down
+  path.setLayerRange(0.975, 1.000, 0, 0);   // ground, into the start
+  return path;
+}
+
+export const STAGE_PATHS = {
+  1: buildStage1Path,
+  2: buildStage2Path,
+  3: buildStage3Path,
+  4: buildStage4Path,
+  5: buildStage5Path,
+};

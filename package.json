@@ -1,0 +1,24 @@
+{
+  "name": "hirocf",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Top-down mobile racing game (HiRoCF) - PixiJS, single-page build",
+  "scripts": {
+    "dev": "http-server . -p 8080 -c-1",
+    "build:standalone": "node build/standalone.mjs",
+    "test": "vitest run",
+    "lint": "eslint src",
+    "format": "prettier --write .",
+    "build:pwa": "node build/pwa.mjs",
+    "build:pwa:bgm": "node build/pwa.mjs --with-bgm"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "eslint": "^10.1.0",
+    "lamejs": "^1.2.1",
+    "prettier": "^3.8.1",
+    "sharp": "^0.35.4",
+    "vitest": "^5.0.1"
+  }
+}
