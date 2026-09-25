@@ -1653,19 +1653,19 @@ export function buildAudio(ctx) {
    * - 'diesel' (stage 4): the truck's six-cylinder diesel.
    * All take the rival's update(speed, boosting, maxSpeed, level); lifting
    * (its speed falling) counts as off the throttle. Every one but the
-   * truck sits 3 dB under where it was first set (asked for).
+   * truck sits 6 dB under where it was first set (asked for, twice).
    */
   function makeRivalEngine(kind = 'i6') {
     let v, crackle = null, popGain = 0;
     if (kind === 'diesel') v = makeDieselEngine(0.38);
-    else if (kind === 'v10') v = makeV10Engine(0.21);
-    else if (kind === 'i4') v = makeInline4Engine(0.21);
+    else if (kind === 'v10') v = makeV10Engine(0.15);
+    else if (kind === 'i4') v = makeInline4Engine(0.15);
     else if (kind === 'straightpipe') {
-      v = makePipeEngine(0.94);
+      v = makePipeEngine(0.665);
       // pops go through the pipe's own bus, so distance takes them too
       crackle = makeCrackle(v.bus, { onPower: 5, burn: 0.025 });
-      popGain = 0.44;
-    } else v = makeInline6Engine(0.21);
+      popGain = 0.31;
+    } else v = makeInline6Engine(0.15);
     let lastSpeed = 0, thr = 1, lastT = 0;
     return {
       kind,
