@@ -626,7 +626,7 @@ export function buildAudio(ctx) {
    *   lower); gearTop: the box (see makeGearbox); out: node to feed instead
    *   of the master bus.
    */
-  function makeV8Engine(baseGain, { pitch = 1, gearTop = V8_GEAR_TOP, out = master } = {}) {
+  function makeV8Engine(baseGain, { pitch = 1, gearTop = V8_GEAR_TOP, out = master, boxSpec = {} } = {}) {
     const osc = ctx.createOscillator();
     osc.setPeriodicWave(v8Wave());
     osc.frequency.value = V8_IDLE_RPM / 120;
@@ -673,7 +673,7 @@ export function buildAudio(ctx) {
     idleOsc.start();
     noise.start();
 
-    const box = makeGearbox(gearTop);
+    const box = makeGearbox(gearTop, boxSpec);
     let stopped = false;
     let wobble = 0;
     let onThrottle = 1;
@@ -776,10 +776,9 @@ export function buildAudio(ctx) {
   const SAMPLE_BOXY_HZ = 320;
   const SAMPLE_BOXY_DB = -2.5;
   const SAMPLE_FADE_HIGH = 3000;
-  /** The recording's own rev range once moving (see makeSampledV8Engine's
-   *  `sweep`): where each gear starts, and the lowest it rolls off to. */
-  const SWEEP_FROM = 3700;
-  const SWEEP_FLOOR = 3100;
+  /** revFeel's redline on the recording's scale (see makeSampledV8Engine):
+   *  15% past its top, 5,777. */
+  const REV_TOP = 6650;
   /** How far ahead grains are queued, s: enough to ride out a frame that
    *  takes 100 ms (measured in-game at 15 fps under software rendering the
    *  grain stream stayed continuous), short enough that rpm still tracks
@@ -858,7 +857,7 @@ export function buildAudio(ctx) {
    */
   function makeSampledV8Engine(baseGain, {
     pitch = 1, gearTop = V8_GEAR_TOP, distant = false, muffleFloor = 600,
-    sweep = false, weightDb = SAMPLE_WEIGHT_DB, boxyDb = SAMPLE_BOXY_DB, run = SAMPLE_RUN, tol = SAMPLE_TOL,
+    revFeel = false, weightDb = SAMPLE_WEIGHT_DB, boxyDb = SAMPLE_BOXY_DB, run = SAMPLE_RUN, tol = SAMPLE_TOL,
   } = {}) {
     const grains = v8Grains();
     const srcMin = grains[0].rpm;
@@ -871,31 +870,28 @@ export function buildAudio(ctx) {
     // thinner and lighter than the source: at equal rpm the voice and the
     // recording measure within 1-2 dB per band, so the difference was never
     // in the grains, it was in the pitch they were being asked for.
-    const toSoundRpm = (rpm) => V8_IDLE_RPM + (rpm - V8_IDLE_RPM) * (srcMax - V8_IDLE_RPM) / (V8_REDLINE_RPM - V8_IDLE_RPM);
-    // `sweep` (the player): the rev pattern of the recording itself. It is
-    // of a car that, in every gear including the first, pulls from about
-    // 3,700 to 5,780 rpm and drops back by half again on each change (its
-    // own launch flares straight to 3,860 -- it never runs lower once
-    // moving). The game's close-ratio box, mapped by rpm, swept its top
-    // gears across 5,000-5,780 only: a note that barely moved, changing
-    // gear all the time. Mapped by how far through its gear the car is,
-    // every gear makes the recording's own sweep; the shift points are the
-    // game's. Rolling off in a gear lets it fall toward SWEEP_FLOOR before
-    // the downshift picks it up again.
-    const sweepRpm = (sf, gear, blip, boosting) => {
-      const lo = gear > 0 ? gearTop[gear - 1] : 0, hi = gearTop[gear];
-      const u = (sf - lo) / (hi - lo);
-      let r = SWEEP_FROM + (srcMax - SWEEP_FROM) * Math.min(1, u);
-      r = Math.max(SWEEP_FLOOR, r);
-      // pulling away: from idle to the flare over the first metres
-      if (gear === 0) r = V8_IDLE_RPM + (r - V8_IDLE_RPM) * Math.min(1, sf / 0.02);
-      return r * (1 + V8_BLIP_OVERSHOOT * blip) * (boosting ? 1.03 : 1);
-    };
+    const toSoundRpm = (rpm) => V8_IDLE_RPM + (rpm - V8_IDLE_RPM) * (soundTop - V8_IDLE_RPM) / (V8_REDLINE_RPM - V8_IDLE_RPM);
+    // `revFeel` (the player): the recording driven the way stage 5's V10
+    // is (makeV10Engine), which was asked for as the one that sounds right:
+    // rpm straight off the box (pitch climbing with the gear, a small drop
+    // on a quick change), level and brightness climbing with the revs --
+    // not with road speed -- a twin-clutch's 50 ms shift with a light dip,
+    // a bigger blip on the way down, a crack on each upshift and a burble
+    // off the throttle.
+    const boxSpec = revFeel ? { shiftTime: 0.05, overshoot: 0.18 } : {};
+    // ...and its box and rev range: six gears (the count asked for) but
+    // spaced as the V10's are, evenly (1.30 a step, from the V10's own
+    // first-gear share), so each change drops the revs the same small way
+    // and the engine lives near the top; and the redline taken past the
+    // top of the recording to REV_TOP, the last stretch re-pitched, so it
+    // screams higher at the limiter as the V10 does.
+    if (revFeel) gearTop = Array.from({ length: 6 }, (_, i) => Math.pow(1 / 0.275, -(5 - i) / 5));
+    const soundTop = revFeel ? REV_TOP : srcMax;
     const bus = ctx.createGain();
     bus.gain.value = 0;
     const synthOut = ctx.createGain();
-    const synth = makeV8Engine(baseGain, { pitch, gearTop, out: synthOut });
-    const box = makeGearbox(gearTop);
+    const synth = makeV8Engine(baseGain, { pitch, gearTop, out: synthOut, boxSpec });
+    const box = makeGearbox(gearTop, boxSpec);
 
     // Weight, put back. Over a full-throttle run the game spends far longer
     // near the top of each gear than the recording's steady climb does, so
@@ -928,6 +924,7 @@ export function buildAudio(ctx) {
       synthOut.connect(level);
     }
     level.connect(master);
+    const crackle = revFeel ? makeCrackle(level) : null;
 
     let stopped = false;
     let nextAt = 0;         // ctx time the next grain starts
@@ -952,13 +949,12 @@ export function buildAudio(ctx) {
         const t = ctx.currentTime;
         const dt = lastT ? Math.min(0.1, Math.max(0, t - lastT)) : 0;
         lastT = t;
-        const { sf, rpm, shifting, blip, up, gear } = box.step(speed, maxSpeed, boosting, t);
+        const { sf, rpm, shifting, blip, up } = box.step(speed, maxSpeed, boosting, t);
         box.up = up;
         // The same glide the synthesised voice gives its pitch: quick through
         // a shift, so the drop reads as a clutch opening, not a bog.
         const tau = shifting || blip > 0 ? 0.025 : 0.05;
-        const soundRpm = sweep ? sweepRpm(sf, gear, blip, boosting) : toSoundRpm(rpm);
-        rpmNow += (soundRpm - rpmNow) * (dt > 0 ? 1 - Math.exp(-dt / tau) : 1);
+        rpmNow += (toSoundRpm(rpm) - rpmNow) * (dt > 0 ? 1 - Math.exp(-dt / tau) : 1);
 
         level.gain.setTargetAtTime(distance, t, 0.08);
         if (muffle) muffle.frequency.setTargetAtTime(muffleFloor + (3800 - muffleFloor) * distance * distance, t, 0.1);
@@ -970,12 +966,19 @@ export function buildAudio(ctx) {
         // recording is full throttle throughout, so this is simply the
         // overrun treatment lifted for the blip's length.
         const thr = Math.max(onThrottle, blip);
-        const load = (0.55 + 0.45 * sf) * (0.55 + 0.45 * thr) * (1 + V8_BLIP_GAIN * blip);
-        const duck = shifting ? V8_SHIFT_DUCK : 1;
+        const rev = Math.max(0, Math.min(1, (rpm - V8_IDLE_RPM) / (V8_REDLINE_RPM - V8_IDLE_RPM)));
+        const load = revFeel
+          ? (0.4 + 0.6 * rev) * (0.5 + 0.5 * thr) * (1 + 0.3 * blip)
+          : (0.55 + 0.45 * sf) * (0.55 + 0.45 * thr) * (1 + V8_BLIP_GAIN * blip);
+        const duck = shifting ? (revFeel ? 0.6 : V8_SHIFT_DUCK) : 1;
         bus.gain.setTargetAtTime(
           baseGain * SAMPLE_LEVEL * load * duck * (boosting ? 1.15 : 1) * Math.sqrt(mix), t, shifting || blip > 0 ? 0.025 : 0.05,
         );
-        overrun.frequency.setTargetAtTime(1300 + 9700 * thr ** 2, t, blip > 0 ? 0.02 : 0.08);
+        // revFeel: the top end opens with the revs as well as the throttle
+        overrun.frequency.setTargetAtTime(
+          revFeel ? (1500 + rpm * 0.9) * (0.55 + 0.45 * thr) : 1300 + 9700 * thr ** 2, t, blip > 0 ? 0.02 : 0.08,
+        );
+        if (crackle) crackle.update(dt, { overrun: 1 - thr, rev, up, gain: baseGain * 0.35 });
 
         const state = { rpm, sf, shifting, up: box.up, blip, overrun: 1 - thr };
         if (mix <= 0) { nextAt = 0; return state; }
