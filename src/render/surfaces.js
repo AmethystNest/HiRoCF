@@ -1615,7 +1615,10 @@ function paintCrossing(g, path, k, half, { depth = 240, stripe = 30, gap = 30, s
   // Only ever the driver's own, BEFORE the crossing. The oncoming lane's
   // (beyond the crossing, on the right) is where a real one is, but from
   // this seat it reads as a stop line on the far side of the zebra.
-  if (stop === 'approach') quad(-half, -4, -back - 22, -back, 0.9);
+  // "Before" is +t here: t = (-ny, nx) with the path's normal on the
+  // driver's right runs BACK along the course, so the line that was at
+  // -back sat on the far side of the zebra after all.
+  if (stop === 'approach') quad(-half, -4, back, back + 22, 0.9);
 }
 
 /**
