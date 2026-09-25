@@ -1041,7 +1041,7 @@ export class Game {
     // --- rival ---
     this.rival = new RivalCar(path, cfg, rivalTuning(cfg.rival, this.difficulty));
     // this car's own engine note; kept across a restart of the same stage
-    const engineKind = cfg.rival.engine ?? 'sport';
+    const engineKind = cfg.rival.engine ?? 'i6';
     if (this.audio && this.rivalEngine?.kind !== engineKind) {
       this.rivalEngine?.silence();
       this.rivalEngine?.stop();

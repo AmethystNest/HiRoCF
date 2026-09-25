@@ -313,7 +313,7 @@ export const STAGES = {
     // big 180-degree curve added): on the line-follow bot the rival's lap
     // went from 0.929 of the player's to 0.900, the new corners suiting it
     // better; 665 measures 0.926, back where the stage was.
-    rival: { engine: 'sport', maxSpeed: 665, accel: 107, turn: 2.25, sprite: 'devilz', block: false, weave: false, raceLine: true, cornerSlow: 0.22, holdOpeningStraight: true, finalLapBoostOnly: true },
+    rival: { engine: 'i6', maxSpeed: 665, accel: 107, turn: 2.25, sprite: 'devilz', block: false, weave: false, raceLine: true, cornerSlow: 0.22, holdOpeningStraight: true, finalLapBoostOnly: true },
     bestKey: 'topdownRacer_stage1_best_ms',
   },
   2: {
@@ -387,7 +387,7 @@ export const STAGES = {
       // where two different test bots agreed about it (the gap reopened to
       // -8.0 and -7.8s against a -4.7s target, while on the other stages
       // the two bots disagreed by up to 2s and were left alone).
-      engine: 'sport', maxSpeed: 593, accel: 90, turn: 3.35, sprite: 'ae86',
+      engine: 'i4', maxSpeed: 593, accel: 90, turn: 3.35, sprite: 'ae86',
       drift: 0.62, driftVisualBoost: 0.5,
       // Takes its hairpin apexes out to the guardrail rather than the
       // pavement edge -- there is no off-road penalty left to pay for it,

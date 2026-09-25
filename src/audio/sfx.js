@@ -853,10 +853,9 @@ export function buildAudio(ctx) {
    *   and slower-revving, not like a slowed tape of this one).
    */
   /**
-   * @param opts.muffleFloor lowest the `distant` muffle closes to, Hz
    */
   function makeSampledV8Engine(baseGain, {
-    pitch = 1, gearTop = V8_GEAR_TOP, distant = false, muffleFloor = 600,
+    pitch = 1, gearTop = V8_GEAR_TOP,
     revFeel = false, weightDb = SAMPLE_WEIGHT_DB, boxyDb = SAMPLE_BOXY_DB, run = SAMPLE_RUN, tol = SAMPLE_TOL,
   } = {}) {
     const grains = v8Grains();
@@ -908,21 +907,10 @@ export function buildAudio(ctx) {
     weight.connect(boxy);
     boxy.connect(overrun);
     const preLevel = overrun;
-    // Both the recording and its synthesised low end leave through `level`
-    // (distance, for the rival) and, on a `distant` voice, `muffle` too: a
-    // car further off loses its top end before its body. The player's own
-    // voice has no muffle stage at all, so it is exactly what it was.
+    // Both the recording and its synthesised low end leave through `level`.
     const level = ctx.createGain();
-    const muffle = distant ? ctx.createBiquadFilter() : null;
-    if (muffle) {
-      muffle.type = 'lowpass'; muffle.frequency.value = 6000; muffle.Q.value = 0.5;
-      preLevel.connect(muffle);
-      synthOut.connect(muffle);
-      muffle.connect(level);
-    } else {
-      preLevel.connect(level);
-      synthOut.connect(level);
-    }
+    preLevel.connect(level);
+    synthOut.connect(level);
     level.connect(master);
     const crackle = revFeel ? makeCrackle(level) : null;
 
@@ -957,7 +945,6 @@ export function buildAudio(ctx) {
         rpmNow += (toSoundRpm(rpm) - rpmNow) * (dt > 0 ? 1 - Math.exp(-dt / tau) : 1);
 
         level.gain.setTargetAtTime(distance, t, 0.08);
-        if (muffle) muffle.frequency.setTargetAtTime(muffleFloor + (3800 - muffleFloor) * distance * distance, t, 0.1);
         const mix = Math.max(0, Math.min(1, (rpmNow - SAMPLE_FADE_LOW) / (SAMPLE_FADE_HIGH - SAMPLE_FADE_LOW)));
         synth.update(speed, boosting, maxSpeed, throttle, Math.sqrt(1 - mix));
 
@@ -1268,7 +1255,7 @@ export function buildAudio(ctx) {
     nf.type = 'bandpass'; nf.Q.value = spec.noise.q;
     const ng = ctx.createGain(); ng.gain.value = 0;
     noise.connect(nf); nf.connect(ng);
-    // distance: level and muffle, as makeSampledV8Engine's `distant`
+    // distance: quieter and duller the further off (level and a low-pass)
     const bus = ctx.createGain();
     const muffle = ctx.createBiquadFilter();
     muffle.type = 'lowpass'; muffle.Q.value = 0.5; muffle.frequency.value = 8000;
@@ -1284,6 +1271,7 @@ export function buildAudio(ctx) {
       /** the bus extra layers (turbo, clatter, crackle) join, before distance */
       bus,
       spec,
+      baseGain,
       update(speed, boosting, maxSpeed, throttle = 1, distance = 1) {
         if (stopped) return null;
         const t = ctx.currentTime;
@@ -1429,6 +1417,64 @@ export function buildAudio(ctx) {
   }
 
   /**
+   * Stage 1's car: an inline six, the V10's method with its own engine. An
+   * inline six fires three times a turn, evenly, and its half orders all
+   * but cancel -- the smooth, rising wail of a straight six rather than a
+   * V8's burble -- so the third order and its multiples carry it, the
+   * half orders are kept low, and it revs to 7,600 through a five-speed
+   * (the rivals' count), each change a quick manual one with a blip on the
+   * way down and a crack on the way up.
+   */
+  function makeInline6Engine(baseGain) {
+    const e = makeSynthEngine(baseGain, {
+      cyl: 6, maxOrder: 18, slope: 0.42, half: 0.28, boost: { 1.5: 0.8, 3: 2.4, 6: 1.5, 9: 1.15, 12: 1.05 },
+      idle: 850, redline: 7600, gearTop: gearTops(5, 1.3), shiftTime: 0.08, shiftDuck: 0.5, overshoot: 0.16,
+      hp: 60, shelf: { hz: 150, db: 3 }, peaks: [{ hz: 450, q: 0.9, db: 3 }, { hz: 1800, q: 1.1, db: 4 }],
+      lp: (rpm, thr) => (1500 + rpm * 0.55) * (0.55 + 0.45 * thr),
+      noise: { hz: (rpm) => 1500 + rpm * 0.25, q: 0.9, level: 0.12 },
+      muffleFloor: 1200,
+    });
+    return withCrackle(e, 0.25);
+  }
+
+  /**
+   * Stage 3's car: a high-revving twin-cam inline four. Twice a turn, and a
+   * four's half orders and second-order shake do not cancel, so it is
+   * rougher and buzzier than the six -- the second order leads, the first
+   * and the half orders stay in -- with a loud intake over the top of it,
+   * to 7,800 through a five-speed with heel-and-toe blips.
+   */
+  function makeInline4Engine(baseGain) {
+    const e = makeSynthEngine(baseGain, {
+      cyl: 4, maxOrder: 16, slope: 0.4, half: 0.5, boost: { 1: 1.2, 2: 2.6, 4: 1.5, 6: 1.1 },
+      idle: 900, redline: 7800, gearTop: gearTops(5, 1.28), shiftTime: 0.1, shiftDuck: 0.45, overshoot: 0.2,
+      hp: 70, shelf: { hz: 150, db: 1 }, peaks: [{ hz: 600, q: 1, db: 3 }, { hz: 2500, q: 1.2, db: 4 }],
+      lp: (rpm, thr) => (1600 + rpm * 0.6) * (0.55 + 0.45 * thr),
+      noise: { hz: (rpm) => 1800 + rpm * 0.3, q: 0.8, level: 0.17 },
+      muffleFloor: 1200,
+    });
+    return withCrackle(e, 0.2);
+  }
+
+  /** A synth engine with a crack on each upshift and a burble off the
+   *  throttle (makeCrackle), `pop` its loudness against the engine. */
+  function withCrackle(e, pop) {
+    const crackle = makeCrackle(e.bus);
+    let lastT = 0;
+    return {
+      update(speed, boosting, maxSpeed, throttle, distance) {
+        const st = e.update(speed, boosting, maxSpeed, throttle, distance);
+        if (!st) return null;
+        const t = ctx.currentTime; const dt = lastT ? Math.min(0.1, t - lastT) : 0; lastT = t;
+        crackle.update(dt, { overrun: st.overrun, rev: st.rev, up: st.up, gain: e.baseGain * pop });
+        return st;
+      },
+      silence() { e.silence(); },
+      stop() { e.stop(); },
+    };
+  }
+
+  /**
    * Stage 5's supercar: a naturally aspirated V10 to 8,700 rpm through a
    * seven-speed twin-clutch. Its firing order is the fifth (ten cylinders,
    * two turns), which at the top of each gear sits around 600-700 Hz --
@@ -1477,6 +1523,9 @@ export function buildAudio(ctx) {
    * speed up.
    */
   const PIPE_RPMS = [1200, 2200, 3400, 4800, 6400, 8000];
+  /** The CVT's revs (see makePipeEngine): where it holds them pulling away,
+   *  how far they climb by top speed, and where they sag to off the power. */
+  const CVT_HOLD = 5600, CVT_TOP = 6600, CVT_CRUISE = 2600;
   let pipeTrains = null;
   function pipeBuffers() {
     if (pipeTrains) return pipeTrains;
@@ -1545,15 +1594,27 @@ export function buildAudio(ctx) {
     const muffle = ctx.createBiquadFilter(); muffle.type = 'lowpass'; muffle.Q.value = 0.5;
     const level = ctx.createGain(); level.gain.value = 0;
     tone.connect(bus); bus.connect(muffle); muffle.connect(level); level.connect(master);
-    const box = makeGearbox(RIVAL_GEAR_TOP, { idle: 900, redline: 7800, shiftTime: 0.14, overshoot: 0.2 });
-    let onThrottle = 1, stopped = false;
+    // A CVT: no gears. On the throttle the revs flare to where the engine
+    // makes its power and are held there while the car gathers speed,
+    // climbing only a little; off it they sag back toward a cruise. The
+    // belt lets them move only so fast, so every change is a swell, never
+    // a step -- the one engine here with nothing to shift.
+    let cvtRpm = 900, onThrottle = 1, stopped = false, lastT = 0;
     return {
       bus,
       update(speed, boosting, maxSpeed, throttle = 1, distance = 1) {
         if (stopped) return null;
         const t = ctx.currentTime;
-        const st = box.step(speed, maxSpeed, boosting, t);
-        const glide = st.shifting || st.blip > 0 ? 0.025 : 0.05;
+        const dt = lastT ? Math.min(0.1, t - lastT) : 0; lastT = t;
+        const sf = Math.max(0, Math.min(1, speed / Math.max(1, maxSpeed)));
+        onThrottle += (throttle - onThrottle) * 0.2;
+        const moving = Math.min(1, sf / 0.03);
+        const want = 900 + moving * (onThrottle > 0.5
+          ? (CVT_HOLD - 900) + (CVT_TOP - CVT_HOLD) * sf
+          : (CVT_CRUISE - 900) + 1500 * sf);
+        cvtRpm += (want - cvtRpm) * (1 - Math.exp(-dt / (want > cvtRpm ? 0.35 : 0.7)));
+        const st = { rpm: cvtRpm * (boosting ? 1.04 : 1), sf, shifting: false, blip: 0, up: false };
+        const glide = 0.05;
         // the two trains either side of this rpm, crossfaded in log rpm
         const lr = Math.log(st.rpm);
         let k = 0;
@@ -1564,11 +1625,10 @@ export function buildAudio(ctx) {
           const gain = i === k ? Math.cos(w * Math.PI / 2) : i === k + 1 ? Math.sin(w * Math.PI / 2) : 0;
           v.g.gain.setTargetAtTime(gain, t, 0.04);
         });
-        onThrottle += (throttle - onThrottle) * 0.2;
-        const thr = Math.max(onThrottle, st.blip);
-        const rev = (st.rpm - 900) / (7800 - 900);
-        const load = (0.5 + 0.5 * rev) * (0.3 + 0.7 * thr) * (1 + 0.4 * st.blip);
-        const duck = st.shifting ? 0.35 : 1;
+        const thr = onThrottle;
+        const rev = Math.max(0, Math.min(1, (st.rpm - 900) / (7800 - 900)));
+        const load = (0.5 + 0.5 * rev) * (0.3 + 0.7 * thr);
+        const duck = 1;
         lp.frequency.setTargetAtTime((1300 + st.rpm * 0.45) * (0.45 + 0.55 * thr), t, 0.05);
         tone.gain.setTargetAtTime(baseGain * load * duck * (boosting ? 1.15 : 1), t, glide);
         level.gain.setTargetAtTime(distance, t, 0.08);
@@ -1584,32 +1644,27 @@ export function buildAudio(ctx) {
   }
 
   /**
-   * The rivals' engines, one per car (STAGES[n].rival.engine):
-   * - 'sport' (stages 1 and 3): the recorded V8, as the rival always had,
-   *   but at 0.95 of the player's pitch rather than 0.78, louder, and muffled
-   *   less with distance. At 0.78 its note sat around 100-150 Hz through
-   *   most of each gear, which a phone speaker barely plays: on a phone it
-   *   was all but gone.
+   * The rivals' engines, one per car (STAGES[n].rival.engine), all
+   * synthesised the way stage 5's V10 is:
+   * - 'i6' (stage 1), 'i4' (stage 3), 'v10' (stage 5): see above.
    * - 'straightpipe' (stage 2): a four-cylinder built from its own exhaust
-   *   pulses (makePipeEngine), the loudest of them, crackling on every
-   *   lift, blip and upshift and now and then on power.
-   * - 'diesel' (stage 4), 'v10' (stage 5): synthesised, see above.
+   *   pulses (makePipeEngine) through a CVT, the loudest of them, crackling
+   *   off the throttle and now and then on power.
+   * - 'diesel' (stage 4): the truck's six-cylinder diesel.
    * All take the rival's update(speed, boosting, maxSpeed, level); lifting
    * (its speed falling) counts as off the throttle.
    */
-  const RIVAL_PITCH = 0.95;
-  function makeRivalEngine(kind = 'sport') {
+  function makeRivalEngine(kind = 'i6') {
     let v, crackle = null, popGain = 0;
     if (kind === 'diesel') v = makeDieselEngine(0.38);
     else if (kind === 'v10') v = makeV10Engine(0.3);
+    else if (kind === 'i4') v = makeInline4Engine(0.3);
     else if (kind === 'straightpipe') {
-      v = makePipeEngine(1.0);
+      v = makePipeEngine(1.33);
       // pops go through the pipe's own bus, so distance takes them too
       crackle = makeCrackle(v.bus, { onPower: 5, burn: 0.025 });
       popGain = 0.62;
-    } else {
-      v = makeSampledV8Engine(0.42, { pitch: RIVAL_PITCH, gearTop: RIVAL_GEAR_TOP, distant: true, muffleFloor: 1300 });
-    }
+    } else v = makeInline6Engine(0.3);
     let lastSpeed = 0, thr = 1, lastT = 0;
     return {
       kind,
