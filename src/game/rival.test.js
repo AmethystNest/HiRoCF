@@ -135,11 +135,21 @@ describe('rival pace spec: stage 4 alone is slow away and near the player flat o
     expect(r.launchAccelUntil).toBeLessThan(top * (1 - c.rival.cornerSlow * tightest));
   });
 
+  it('stage 5: off the line at the player\'s rate on NORMAL too', () => {
+    const t = rivalTuning(STAGES[5].rival, 'normal');
+    const r = new RivalCar(STAGE_PATHS[5](), STAGES[5], t);
+    expect(r.accel).toBeCloseTo(PHYSICS.accel, 6);
+    expect(r.launchAccelAt(0)).toBeCloseTo(PHYSICS.accel * PHYSICS.launchBoostMul, 6);
+    expect(r.launchAccelAt(PHYSICS.launchBoostBelow + 1)).toBeCloseTo(PHYSICS.accel, 6);
+  });
+
   for (const id of [1, 2, 3, 5]) {
     it(`stage ${id}: no launch ramp -- it leaves the line on its own accel`, () => {
       expect(STAGES[id].rival.launchAccel).toBeUndefined();
       const r = new RivalCar(STAGE_PATHS[id](), STAGES[id], STAGES[id].rival);
-      expect(r.launchAccelAt(0)).toBeCloseTo(r.accel, 6);
+      // stage 5 gets the player's own launch boost on top (launchLikePlayer)
+      const boost = id === 5 ? PHYSICS.launchBoostMul : 1;
+      expect(r.launchAccelAt(0)).toBeCloseTo(r.accel * boost, 6);
     });
 
     it(`stage ${id}: not outright faster than the player in a straight line`, () => {

@@ -341,6 +341,9 @@ export class RivalCar {
       ? Math.min(tuning.launchAccel, tuning.accel)
       : tuning.accel;
     this.launchAccelUntil = tuning.launchAccelUntil ?? 300;
+    // Off the line exactly as the player: the player's own launch boost
+    // (PHYSICS.launchBoostBelow / launchBoostMul) on top of `accel`.
+    this.launchLikePlayer = tuning.launchLikePlayer ?? false;
     this.turn = tuning.turn;
     // 0 for every rival except stage 3's AE86 -- a per-stage "drift spec"
     // toggle, not a universal behaviour, since it changes how the car
@@ -528,6 +531,7 @@ export class RivalCar {
    * linear between the two. See the constructor for why.
    */
   launchAccelAt(speed) {
+    if (this.launchLikePlayer) return this.accel * (speed < P.launchBoostBelow ? P.launchBoostMul : 1);
     if (this.launchAccelUntil <= 0) return this.accel;
     // Squared, not linear: a rival with a big `accel` figure (stage 5's
     // 320) would otherwise be back past the player's launch rate within
