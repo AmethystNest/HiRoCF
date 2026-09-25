@@ -1,4 +1,4 @@
-import { Application, Assets, Container, Graphics, Sprite, Texture, Rectangle } from './pixi.js';
+import { Application, Assets, Container, Graphics, Mesh, Sprite, Texture, Rectangle } from './pixi.js';
 import { STAGES, PHYSICS, rivalTuning, CAR_SIZE, CAR_VISUAL_SCALE, CAR_HULL_SCALE, CAR_HULL_OFFSET, DRIFT_MARK_LIFE } from './config.js';
 import { STAGE_PATHS } from './track/stages.js';
 import { buildSurface, surfaceExtent, visibleBarrierHalf, buildRampStructure, buildTunnelStructure, buildElevatedDeckShadow, elevatedRuns, deckRuns, foldLimits, squeezedBarrier } from './render/surfaces.js';
@@ -561,8 +561,13 @@ export class Game {
     Object.assign(PHYSICS, BASE_PLAYER_PHYSICS, cfg.playerPhysics || {});
     const path = (STAGE_PATHS[stageId] || STAGE_PATHS[1])();
 
-    this.world.removeChildren();
-    if (this.miniMap) { this.app.stage.removeChild(this.miniMap.view); this.miniMap = null; }
+    // The last stage's display tree is destroyed, not just detached: left
+    // to PixiJS's own GC it lingers 60-90 s, so a quick retry or the next
+    // stage stacked a whole course on top (+6 MB of JS heap a load, and
+    // the same vertex data again on the GPU) -- the peak that takes an
+    // iPhone's tab down.
+    for (const old of this.world.removeChildren()) destroyStageTree(old);
+    if (this.miniMap) { this.app.stage.removeChild(this.miniMap.view); destroyStageTree(this.miniMap.view); this.miniMap = null; }
     this.finishFX.reset();
     this.sideBolts.reset();
     this._prevRaceState = null;
@@ -1875,6 +1880,27 @@ function conditionCarTexture(texture) {
   canvas.getContext('2d').drawImage(src, 0, 0);
   bridgeAlphaGaps(canvas, Math.round(Math.max(src.width, src.height) * CAR_ALPHA_GAP));
   return Texture.from(canvas);
+}
+
+/**
+ * Destroy a stage's display tree. Textures are shared between stages (car
+ * photos, the prop atlas, the FX sprites) and are kept; what is the
+ * stage's own goes: Graphics contexts, particle containers, Text, and --
+ * which destroy() alone leaves behind -- each Mesh's geometry (ribbon.js
+ * builds one per mesh, never shared), i.e. its vertex buffers.
+ */
+function destroyStageTree(root) {
+  const geometries = [];
+  const walk = (n) => {
+    if (n instanceof Mesh && n.geometry) geometries.push(n.geometry);
+    for (const c of n.children ?? []) walk(c);
+  };
+  walk(root);
+  // context: a Graphics given ANY options object skips destroying its own
+  // context (PixiJS checks `!options`), which then sits in the renderer's
+  // managed list with all its batches. None are shared between Graphics.
+  root.destroy({ children: true, context: true });
+  for (const g of geometries) g.destroy(true);
 }
 
 /**

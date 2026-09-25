@@ -25,8 +25,8 @@
 import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, readdirSync, copyFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import sharp from 'sharp';
 import { root, readPage, bundleBoot } from './lib/page.mjs';
+import { toWebp, rewriteImages } from './lib/images.mjs';
 
 const OUT = join(root, 'dist');
 const withBgm = process.argv.includes('--with-bgm');
@@ -43,71 +43,19 @@ const write = (rel, data) => {
   return rel;
 };
 
-// Below this, an image stays inline: a request costs more than the bytes.
-const INLINE_MAX = 8 * 1024;
-
-async function toWebp(buf) {
-  const meta = await sharp(buf).metadata();
-  // Near-lossless (60) for the cut-outs: at most 2/255 off per channel,
-  // where plain lossy WebP, even at quality 95, moved fine red and blue
-  // detail by up to 130/255 (its chroma is at half resolution) -- a
-  // grandstand crowd lost its colours. Lossless for the tiling textures.
-  const opts = meta.hasAlpha
-    ? { nearLossless: true, quality: 60, effort: 6 }
-    : { lossless: true, effort: 6 };
-  return sharp(buf).webp(opts).toBuffer();
-}
-
 async function imageFile(b64, prefix) {
   const webp = await toWebp(Buffer.from(b64, 'base64'));
   return write(`assets/${prefix}-${hash(webp)}.webp`, webp);
-}
-
-/** Every "data:<type>;base64,..." string literal in `text`, largest first. */
-function literals(text, type) {
-  const out = [];
-  const head = `"data:${type};base64,`;
-  let i = 0;
-  for (;;) {
-    const j = text.indexOf(head, i);
-    if (j < 0) break;
-    const k = text.indexOf('"', j + 1);
-    out.push({ start: j, end: k + 1, b64: text.slice(j + head.length, k) });
-    i = k + 1;
-  }
-  return out;
-}
-
-async function replaceLiterals(text, type, fn) {
-  const found = literals(text, type);
-  let out = '', at = 0;
-  for (const f of found) {
-    out += text.slice(at, f.start) + (await fn(f));
-    at = f.end;
-  }
-  return out + text.slice(at);
 }
 
 const { style: rawStyle, bodyTag, body, boot } = readPage();
 let bundle = await bundleBoot(boot);
 const before = bundle.length;
 
-// car photos and ground textures
-let images = 0;
-bundle = await replaceLiterals(bundle, 'image/png', async (f) => {
-  if (f.b64.length * 0.75 < INLINE_MAX) return bundle.slice(f.start, f.end);
-  images++;
-  return JSON.stringify(await imageFile(f.b64, 'tex'));
-});
-// the prop atlas: a JSON data URI whose own image is another data URI
-bundle = await replaceLiterals(bundle, 'application/json', async (f) => {
-  const json = JSON.parse(Buffer.from(f.b64, 'base64').toString('utf8'));
-  const img = json?.meta?.image;
-  if (typeof img !== 'string' || !img.startsWith('data:image/')) return bundle.slice(f.start, f.end);
-  images++;
-  json.meta.image = await imageFile(img.slice(img.indexOf(',') + 1), 'props');
-  return JSON.stringify(`data:application/json;base64,${Buffer.from(JSON.stringify(json)).toString('base64')}`);
-});
+// car photos, ground textures and the prop atlas
+const rewritten = await rewriteImages(bundle, imageFile);
+bundle = rewritten.bundle;
+const images = rewritten.count;
 const app = write(`app-${hash(bundle)}.js`, bundle);
 
 // the title screen's photograph, out of the stylesheet

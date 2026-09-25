@@ -30,8 +30,9 @@
  *  the engine. At 0.3 a track's body measured -23 dBFS RMS in game against
  *  the player's engine at -13 to -15, under it far enough to be lost on a
  *  phone speaker; 0.45 put it about -19.5, which played as too loud
- *  across the board. 0.32 (-3 dB) puts it about -22.5. */
-const BGM_LEVEL = 0.32;
+ *  across the board. 0.32 (-3 dB) puts it about -22.5; asked a touch
+ *  lower again, 0.27 (-1.5 dB) about -24. */
+const BGM_LEVEL = 0.27;
 const FADE_IN = 0.35;
 
 export function makeBgm(ctx, bus, el) {
@@ -54,6 +55,7 @@ export function makeBgm(ctx, bus, el) {
   let stage = null;
   let active = false;   // started for this race and not yet finished
   let stopTimer = 0;
+  let pending = false;  // this stage's track is not in the page yet (see sourceFor)
 
   // Embedded tracks decoded so far, by stage. Each is decoded once: the
   // blob URL is kept for the next visit to that stage and the base64 text
@@ -61,11 +63,20 @@ export function makeBgm(ctx, bus, el) {
   // would otherwise hold for the whole session, and a 3.5 MB decode (a
   // visible hitch on a phone) repeated on every stage load.
   const embedded = new Map();
+  // The standalone build puts the tracks AFTER the game's script, so the
+  // title is up and START works while the ~21 MB of music is still
+  // arriving (over the network it was the whole wait). A stage loaded
+  // before its track has been parsed picks it up once the page has.
+  const stillParsing = () => typeof document !== 'undefined' && document.readyState === 'loading';
   function sourceFor(stageId) {
     if (embedded.has(stageId)) return { url: embedded.get(stageId), owned: false };
+    // Not while the page is still arriving, even if the tag is there: its
+    // text can be half in, and atob() throws on a cut-off track.
+    if (stillParsing()) return { pending: true };
     const tag = typeof document !== 'undefined' ? document.getElementById(`bgm-${stageId}`) : null;
     if (tag) {
-      const bin = atob(tag.textContent.trim());
+      let bin;
+      try { bin = atob(tag.textContent.trim()); } catch { return null; }
       const bytes = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
       const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }));
@@ -105,6 +116,21 @@ export function makeBgm(ctx, bus, el) {
       url = src?.url ?? null;
       ownsUrl = !!src?.owned;
       if (url) { audio.src = url; audio.load(); } else { audio.removeAttribute('src'); audio.load(); }
+      pending = !!src?.pending;
+      if (pending) {
+        document.addEventListener('DOMContentLoaded', () => {
+          if (stage !== stageId || url) return;
+          pending = false;
+          const late = sourceFor(stageId);
+          if (!late?.url) return;
+          url = late.url;
+          ownsUrl = !!late.owned;
+          audio.src = url;
+          audio.load();
+          // the race may already be under way: join it
+          if (active) { const p = audio.play(); if (p && p.catch) p.catch(() => {}); }
+        }, { once: true });
+      }
     },
     get hasTrack() { return !!url; },
     get active() { return active; },
@@ -121,7 +147,8 @@ export function makeBgm(ctx, bus, el) {
     },
     /** Race start: from the top, faded in quickly. */
     start() {
-      if (!url) return;
+      // still arriving: counted as started, so it joins in when it lands
+      if (!url) { if (pending) { active = true; ramp(BGM_LEVEL, FADE_IN / 3); } return; }
       clearTimeout(stopTimer);
       active = true;
       try { audio.currentTime = 0; } catch { /* not loaded yet: it starts at 0 anyway */ }

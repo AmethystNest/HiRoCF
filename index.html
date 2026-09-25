@@ -1533,6 +1533,12 @@
     // comment on `audioCtx` above. Wrapped: construction can throw on a
     // browser with no Web Audio, and that has to stay a silent game
     // rather than a dead START button.
+    // iOS puts a bare AudioContext in the "ambient" session, which the
+    // ring/silent switch mutes: effects and engines stayed silent until the
+    // music's <audio> element (which ignores the switch) first played at
+    // GO. "playback" (Safari 16.4+) has to be declared before the context
+    // exists. Like the music, it pauses other apps' audio.
+    try{if(navigator.audioSession&&navigator.audioSession.type!=='playback')navigator.audioSession.type='playback';}catch{/* older iOS: as before */}
     if(!audioCtx){
       try{audioCtx=new (window.AudioContext||window.webkitAudioContext)();}
       catch{audioCtx=null;}

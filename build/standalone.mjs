@@ -10,14 +10,21 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { root, readPage, bundleBoot } from './lib/page.mjs';
+import { toWebp, rewriteImages } from './lib/images.mjs';
 
 const { style, bodyTag, body, boot } = readPage();
-const bundle = await bundleBoot(boot);
+// Images inline as WebP rather than PNG (build/lib/images.mjs): 7.4 MB of
+// base64 down to ~3.7 MB, which is that much less script to read and parse
+// before START does anything.
+const { bundle } = await rewriteImages(await bundleBoot(boot), async (b64) =>
+  `data:image/webp;base64,${(await toWebp(Buffer.from(b64, 'base64'))).toString('base64')}`);
 
 // Stage music, if prepared locally (build/tools/make-bgm.mjs; assets/bgm/ is
 // git-ignored). Each track goes in as inert base64 text in a non-script
 // <script> type, which the browser neither parses nor runs; src/audio/bgm.js
-// turns the current stage's into a blob: URL on demand.
+// turns the current stage's into a blob: URL on demand. They go AFTER the
+// game's script: in front of it, all ~21 MB had to arrive before START
+// could do anything, which over a phone's connection was the whole wait.
 const bgmDir = join(root, 'assets/bgm');
 const bgm = existsSync(bgmDir)
   ? readdirSync(bgmDir)
@@ -31,8 +38,8 @@ const out = `<!doctype html><html><head><meta charset=utf8><meta name=viewport c
 ${style}
 </head><body${bodyTag}>
 ${body}
-${bgm.join('\n')}
 <script>${bundle}</script>
+${bgm.join('\n')}
 </body></html>
 `;
 writeFileSync(join(root, 'build/index.standalone.html'), out);

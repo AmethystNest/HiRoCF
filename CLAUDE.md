@@ -10,10 +10,11 @@
   - `game/` — プレイヤー物理、ライバル AI、レース進行、記録（`records.js`: ベストタイム・★・ステージ解放・難易度を localStorage に保存。使えない環境でも落ちずにその回だけ保持）
   - `track/` — コース中心線、ステージレイアウト
   - `render/` — 路面・リボン・ミニマップ・プロップ・エフェクト、STAGE4 のモブ車画像(`mobcars.js`: 写真+塗装レイヤーを tint でランダム色に)
-- `build/standalone.mjs` — esbuild で `src/` を単一 HTML(`build/index.standalone.html`)にまとめる。配布物はこれ。
+- `build/standalone.mjs` — esbuild で `src/` を単一 HTML(`build/index.standalone.html`)にまとめる。配布物はこれ。画像は `build/lib/images.mjs` で WebP に再エンコードして埋め込み(PWA と同じ設定)、BGM はゲーム本体の script の**後ろ**に置く(回線越しでも BGM を読み終える前に START できる。`bgm.js` は未到着のトラックを DOMContentLoaded 後に拾う)。
 - `build/artifact.mjs` — Claude Artifact ホスト用の別ビルド(head 構成が異なるだけ)。
 - `build/pwa.mjs` — PWA ビルド。`dist/`(git 管理外)に静的サイトとして出力する。画像は bundle から抜き出して WebP 化(地面タイルは可逆、車・プロップは near-lossless)、manifest・アイコン(`build/pwa/icons/`)・Service Worker(`build/pwa/sw.js`: 起動に要る全ファイルをビルド単位でキャッシュ、BGM は初回再生時にキャッシュして Range 要求に 206 で応答)を付ける。**https で配信しないと SW が動かない**(localhost は可)。`npm run build:pwa` は BGM なし(公開配信してよい)、`npm run build:pwa:bgm` は BGM 入り(**非公開の配信先専用**)。画像変換に `sharp` を使う。
-- `build/lib/page.mjs` — standalone / PWA 共通の index.html 分解と bundle。
+- `build/lib/page.mjs` — standalone / PWA 共通の index.html 分解と bundle。`build/lib/images.mjs` — 同じく共通の WebP 変換。
+- ステージ切替時は旧ステージの表示ツリーを `destroyStageTree`(main.js)で破棄する。PixiJS 任せだと 60〜90 秒解放されず、リトライのたびにメモリが積み上がって iPhone で落ちる原因になる。Graphics は `destroy({context:true})` でないと自前の context が残る点に注意。
 - `assets/bgm/stage<N>.mp3` — ステージ BGM。市販曲なので **git 管理外**(`.gitignore`)。`node build/tools/make-bgm.mjs 1=<mp3> 2=<mp3> ...` で音量を揃えて 96kbps(5分超はフェードで切る。単一HTMLを 30MB 未満に収めるため)に再エンコードして置き、`build:standalone` が見つかった分だけ埋め込む。無ければその面は無音で動く。
 
 ステージは前のステージに（どの難易度でも）勝つと解放され、解放済みのステージはタイトル画面から選べる。難易度は NORMAL（ライバル速度・加速を落とした標準）と HARD（各ステージの元の調整そのまま、全ステージクリアで解放）。**HARD は現在保留で非表示**(`index.html` の `HARD_ON` で戻せる)。リザルトの TITLE ボタンからタイトルに戻り、解放済みステージを選べる。HUD の旗アイコン(`#stagePick`)は確認用の全ステージジャンプで、ユーザーの指示があるまで残す(後で削除予定)。確認用に URL に `?unlockall` を付けると保存内容を変えずに全ステージと HARD を開ける（例 `build/index.standalone.html?unlockall`）。
