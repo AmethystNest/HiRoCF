@@ -1661,10 +1661,10 @@ export function buildAudio(ctx) {
     else if (kind === 'v10') v = makeV10Engine(0.15);
     else if (kind === 'i4') v = makeInline4Engine(0.15);
     else if (kind === 'straightpipe') {
-      v = makePipeEngine(0.665);
+      v = makePipeEngine(0.53);
       // pops go through the pipe's own bus, so distance takes them too
       crackle = makeCrackle(v.bus, { onPower: 5, burn: 0.025 });
-      popGain = 0.31;
+      popGain = 0.25;
     } else v = makeInline6Engine(0.15);
     let lastSpeed = 0, thr = 1, lastT = 0;
     return {

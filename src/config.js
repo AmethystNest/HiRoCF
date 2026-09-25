@@ -313,7 +313,12 @@ export const STAGES = {
     // big 180-degree curve added): on the line-follow bot the rival's lap
     // went from 0.929 of the player's to 0.900, the new corners suiting it
     // better; 665 measures 0.926, back where the stage was.
-    rival: { engine: 'i6', maxSpeed: 665, accel: 107, turn: 2.25, sprite: 'devilz', block: false, weave: false, raceLine: true, cornerSlow: 0.22, holdOpeningStraight: true, finalLapBoostOnly: true },
+    // Brakes for the corners (brake: see RivalCar.cornerLimit) -- it used
+    // to arrive too fast and run wide into the wall, 9 hits in 3 laps --
+    // and is quicker on the straights to make up for it: 665 -> 711. Lap
+    // within 2% of before, no wall contact on either difficulty, off the
+    // road 15% -> 0.3%.
+    rival: { engine: 'i6', maxSpeed: 711, accel: 107, turn: 2.25, sprite: 'devilz', block: false, weave: false, raceLine: true, cornerSlow: 0.22, holdOpeningStraight: true, finalLapBoostOnly: true, brake: { decel: 900, grip: 0.9, lineGain: 1.3 } },
     bestKey: 'topdownRacer_stage1_best_ms',
   },
   2: {
@@ -338,7 +343,12 @@ export const STAGES = {
     // leading or chasing, with the body over the kerb no more than it
     // was (<= 3.3% of a lap). accel -- the getaway -- is left alone: 4s
     // off the line it is doing 469 against 466.
-    rival: { engine: 'straightpipe', maxSpeed: 670, accel: 120, turn: 3.05, sprite: 'prius', weaveBehind: true, weaveAmp: 0.85, weaveAhead: 1.1, weaveOffRoad: true, weaveLook: 1.3 },
+    // harass: once it leads with the player within 900, it sits on the
+    // player's predicted line with a smaller swerve (0.3), keeps to their
+    // pace 220 ahead instead of driving off, brake-checks now and then,
+    // and leans on a car drawing alongside (sideBlock). Against a test
+    // driver that tries to pass: in its path 15% -> ~25% of the time.
+    rival: { engine: 'straightpipe', maxSpeed: 670, accel: 120, turn: 3.05, sprite: 'prius', weaveBehind: true, weaveAmp: 0.85, weaveAhead: 1.1, weaveOffRoad: true, weaveLook: 1.3, harass: { gap: 900, weave: 0.3, look: 0.8, predict: 0.35, hold: 220, brakeCheck: true }, sideBlock: 0.5, sideBlockRate: 2.2 },
     bestKey: 'topdownRacer_stage2_best_ms',
   },
   3: {
@@ -387,14 +397,16 @@ export const STAGES = {
       // where two different test bots agreed about it (the gap reopened to
       // -8.0 and -7.8s against a -4.7s target, while on the other stages
       // the two bots disagreed by up to 2s and were left alone).
-      engine: 'i4', maxSpeed: 593, accel: 90, turn: 3.35, sprite: 'ae86',
+      // 593 -> 613 and cornerSlow 0.52 -> 0.48 below: laps 3.9% quicker,
+      // asked for, with accel (the getaway) as it was.
+      engine: 'i4', maxSpeed: 613, accel: 90, turn: 3.35, sprite: 'ae86',
       drift: 0.62, driftVisualBoost: 0.5,
       // Takes its hairpin apexes out to the guardrail rather than the
       // pavement edge -- there is no off-road penalty left to pay for it,
       // and on switchbacks this narrow the extra bite is most of what
       // makes the AE86 look like it is being driven.
       wallLine: true,
-      block: false, cornerSlow: 0.52, raceLine: true, driftDelay: 4.0,
+      block: false, cornerSlow: 0.48, raceLine: true, driftDelay: 4.0,
       cornerLookAhead: 46,   // ~1200 units: a hairpin here needs a real braking zone
       // The per-lap "big curve boost" is off on this stage. It fires on the
       // leading edge of a long corner and, while it runs, bypasses corner
@@ -504,6 +516,12 @@ export const STAGES = {
     // tint/recolour step is needed (an earlier flat sprite.tint on a white
     // photo dragged that red toward whatever the tint colour was).
     rival: {
+      // Brakes for the corners (brake) and keeps 50 back from the wall
+      // (wallLineGap): it ran wide off one bend and overran its line where
+      // the barrier closes in, 12 hits in 3 laps, now none. And its nitro
+      // on the player's own rules (a charge every ~22 s) instead of once
+      // on the last lap; lap time as it was.
+      brake: { decel: 900, grip: 0.9, lineGain: 1.3 }, wallLineGap: 50, nitro: 'player',
       engine: 'v10', maxSpeed: PHYSICS.maxSpeed, accel: PHYSICS.accel, turn: 2.85, sprite: 'r8',
       // 0.30 -> 0.34 -> 0.44. The first step was about holding the line,
       // not pace: measured over two laps when the line still stopped at

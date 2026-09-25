@@ -313,6 +313,16 @@ export class RivalCar {
     this.holdOpeningStraight = tuning.holdOpeningStraight ?? false;
     this.openingStraightReleased = false;
     this.finalLapBoostOnly = tuning.finalLapBoostOnly ?? false;
+    // `nitro: 'player'`: boosts on the player's own nitro rules instead --
+    // a charge every 100 / boostRecover seconds, none on the grid, the
+    // meter frozen while a burst runs -- fired on the first straight once
+    // it has one
+    this.playerNitro = tuning.nitro === 'player';
+    this.nitroCharge = 0;
+    this.nitroStock = 0;
+    // `brake`: brake for the corners coming, not just ease off -- see
+    // cornerLimit. { decel, grip, lineGain }
+    this.brakeModel = tuning.brake ?? null;
 
     this.accel = tuning.accel;
     // Getaway, opt-in per stage. A rival that sets `launchAccel` pulls away
@@ -372,6 +382,9 @@ export class RivalCar {
     // apex out to the BARRIER rather than stopping at the pavement edge:
     // the verge is just more road to cut across now. See `edgeLimit`.
     this.wallLine = tuning.wallLine ?? false;
+    // how far short of the barrier a wall line stays (stage 5 wants more:
+    // its line overran the wall where the barrier closes in)
+    this.wallLineGap = tuning.wallLineGap ?? WALL_LINE_GAP;
     this.noBigCurveSlow = tuning.noBigCurveSlow ?? false;
     // minimum arc length (world units) for a corner to count as "big", plus
     // how far the commitment ramp reaches in from each end of it and back
@@ -478,6 +491,17 @@ export class RivalCar {
     this.weaveOffRoad = tuning.weaveOffRoad ?? false;
     this._weaving = false;
     this._weaveAmp = null;
+    // stage 2: set on purpose to get in the player's way (see update).
+    // `gap` is how far behind the player may be for it to care; `weave` the
+    // swerve it keeps (fraction of roadHalf) while sitting in their path;
+    // `predict` how far ahead (s) it reads the player's sideways drift;
+    // `hold` the gap it slows down to keep rather than drive off; and
+    // `brakeCheck` a short lift-and-brake when they sit right on its tail.
+    this.harass = tuning.harass ?? null;
+    this._hPrevLat = null;
+    this._hLatVel = 0;
+    this._hBrakeTimer = 0;
+    this._hBrakeCool = 4;
 
     // --- rubber-band: easing off while actually in the lead keeps the race
     // close instead of letting one early gap snowball into an unreachable
@@ -550,6 +574,38 @@ export class RivalCar {
     return m;
   }
 
+  /**
+   * The fastest this car can be going now and still make every bend in
+   * the next stretch: for each point ahead, the speed at which its own
+   * steering (turn rate at that speed, as update() applies it) holds the
+   * bend's radius -- widened by `lineGain` for the racing line it takes --
+   * plus what `decel` of braking can take off over the distance to it.
+   * The rivals that use it brake into a corner instead of arriving at it
+   * too fast and running wide into the wall.
+   */
+  cornerLimit(here) {
+    const { decel, grip = 0.9, lineGain = 1.3, scan = 44 } = this.brakeModel;
+    const path = this.path, ms = P.moveScale;
+    const reach = Math.round(scan * P.paceScale);
+    let lim = Infinity;
+    for (let i = 2; i <= reach; i += 2) {
+      const c = path.curvature[path.wrap(here + i)];
+      if (c < 0.04) continue;
+      const R = ((4 * path.spacing) / (c * 0.55)) * lineGain;
+      // v with v*ms/R = grip * turn * steerScale(v): bisection
+      let lo = 0, hi = this.maxSpeed * 1.2;
+      for (let it = 0; it < 18; it++) {
+        const v = (lo + hi) / 2;
+        const ratio = Math.min(1, v / this.maxSpeed);
+        const w = grip * this.turn * 1.02 * (1 - 0.40 * Math.pow(ratio, 1.35));
+        if ((v * ms) / R < w) lo = v; else hi = v;
+      }
+      const d = i * path.spacing;
+      lim = Math.min(lim, Math.sqrt(lo * lo + (2 * decel * d) / ms));
+    }
+    return lim;
+  }
+
   nearestOnRoute(x, y) {
     const n = this.path.nearestLocal(x, y, this._routeHint, 90, this.wallHalf * 4);
     this._routeHint = n.index;
@@ -578,6 +634,12 @@ export class RivalCar {
     this.contactRecoveryTimer = 0;
     this.driftTrail.length = 0;
     this._weaveAmp = null;
+    this._hPrevLat = null;
+    this._hLatVel = 0;
+    this._hBrakeTimer = 0;
+    this._hBrakeCool = 4;
+    this.nitroCharge = 0;
+    this.nitroStock = 0;
   }
 
   update(dt, race) {
@@ -663,7 +725,7 @@ export class RivalCar {
     // so running the apex is not the same thing as scraping (the
     // containment below starts at the barrier itself).
     const carHalf = this.drawHalf ?? this.bodyHalf ?? 45;
-    const edgeLimit = (this.wallLine ? this.lineBarrier(here) - WALL_LINE_GAP : this.roadHalf - 2) - carHalf;
+    const edgeLimit = (this.wallLine ? this.lineBarrier(here) - this.wallLineGap : this.roadHalf - 2) - carHalf;
 
     if (this._perfectLine) {
       // Read straight off the solved line at the car's own position. It is
@@ -714,24 +776,50 @@ export class RivalCar {
     // to the limit sooner and holding it longer instead.
     let steerLine = this._raceLine;
     const ahead = race?.gap != null && race.gap > 0;
+    // --- harass: where the player is heading sideways, smoothed, so the
+    // block covers the line they are moving onto rather than chasing the
+    // one they have just left
+    let playerLat = null;
+    if (this.harass && race?.player) {
+      playerLat = path.lateralOf(race.player.x, race.player.y, near);
+      if (this._hPrevLat != null && dt > 0) {
+        const v = Math.max(-900, Math.min(900, (playerLat - this._hPrevLat) / dt));
+        this._hLatVel += (v - this._hLatVel) * (1 - Math.exp(-dt * 6));
+      }
+      this._hPrevLat = playerLat;
+    }
+    // 0..1: how hard it is on the player right now (ahead and close)
+    const harassing = this.harass && ahead && !warmingUp && race.gap < this.harass.gap
+      ? Math.min(1, 2 * (1 - race.gap / this.harass.gap)) : 0;
     this._weaving = false;
+    // how far the side block below may push the line: the weave's own
+    // limit while weaving, so an off-road weave is not pulled back on
+    let steerLimit = lineLimit;
     if (this.blockEnabled && race?.player && race.gap != null && (ahead || this.weaveBehind)) {
       this._weaving = true;
       this.weavePhase += dt * this.weaveSpeed;
-      const ampTarget = ahead ? (this.weaveAhead ?? this.weaveAmplitude) : this.weaveAmplitude;
+      let ampTarget = ahead ? (this.weaveAhead ?? this.weaveAmplitude) : this.weaveAmplitude;
+      // sitting in the player's path, a full-width swerve would open the
+      // door on every other half-cycle: keep a smaller swerve about their line
+      if (harassing > 0) ampTarget += (this.harass.weave - ampTarget) * harassing;
       this._weaveAmp = this._weaveAmp == null ? ampTarget : this._weaveAmp + (ampTarget - this._weaveAmp) * (1 - Math.exp(-dt * 1.5));
       // eased out through a corner when it weaves at full racing speed
       // (behind, or wherever weaveBehind is set): swerving on top of the
       // corner's own line there ran it over the kerb
       const cornerFade = this.weaveBehind ? 1 - Math.min(1, bigCurve * 1.5) : 1;
       const weave = Math.sin(this.weavePhase) * this.roadHalf * this._weaveAmp * cornerFade;
-      const center = ahead && race.gap < this.blockGapMax
+      let center = ahead && race.gap < this.blockGapMax
         ? path.lateralOf(race.player.x, race.player.y, near)
         : this._raceLine;
+      if (harassing > 0) {
+        const want = playerLat + this._hLatVel * this.harass.predict;
+        center = this._raceLine + (want - this._raceLine) * harassing;
+      }
       // off-road allowed: out to the barrier the course shows, less the
       // car's own drawn half-width and a margin, instead of the kerb
       const weaveLimit = this.weaveOffRoad ? this.lineBarrier(here) - (this.drawHalf ?? 45) - 14 : lineLimit;
       steerLine = Math.max(-weaveLimit, Math.min(weaveLimit, center + weave));
+      steerLimit = weaveLimit;
     } else {
       this.weavePhase = 0;
     }
@@ -758,7 +846,7 @@ export class RivalCar {
         }
       }
       this._sideBlockBias += (target - this._sideBlockBias) * (1 - Math.exp(-dt * this.sideBlockRate));
-      steerLine = Math.max(-lineLimit, Math.min(lineLimit, steerLine + this._sideBlockBias));
+      steerLine = Math.max(-steerLimit, Math.min(steerLimit, steerLine + this._sideBlockBias));
     }
 
     // --- aim at a point ahead, offset to this car's line. While drifting,
@@ -800,7 +888,7 @@ export class RivalCar {
     // held sideways at 28 degrees through a hairpin then tracked 14 units
     // shy of the line it had been given, leaving the apex it was built for
     // a car's width off the rail. The bias exists to be spent here.
-    const aimCap = this.wallLine ? this.lineBarrier(here) - WALL_LINE_GAP
+    const aimCap = this.wallLine ? this.lineBarrier(here) - this.wallLineGap
       : this._weaving && this.weaveOffRoad ? this.lineBarrier(here) - 10 : this.roadHalf - 20;
     let aimLine = Math.max(-aimCap, Math.min(aimCap, steerLine + Math.sign(steerLine) * driftAimBias));
 
@@ -826,7 +914,8 @@ export class RivalCar {
     // Weaving, it aims further up the road: from the usual point the
     // steering overshot every swerve at racing speed and carried the car
     // over the kerb; a longer look damps that.
-    let aimAt = this._weaving ? Math.round(lookAhead * this.weaveLook) : lookAhead;
+    // Holding up the player it looks nearer again, to follow their moves.
+    let aimAt = this._weaving ? Math.round(lookAhead * (this.weaveLook + ((this.harass?.look ?? 1) - this.weaveLook) * harassing)) : lookAhead;
     if (this._perfectLine && !warmingUp && this.contactRecoveryTimer <= 0) {
       aimAt = this._lineAim ?? lookAhead;
       const ahead = this._perfectLine[path.wrap(here + aimAt)] * this._lineScale;
@@ -880,6 +969,18 @@ export class RivalCar {
       this.wasInBigCurveBoostZone = false;
     }
 
+    // --- the player's own nitro rules (stage 5) ---
+    if (this.playerNitro && !warmingUp) {
+      if (this.boostTimer <= 0 && this.nitroStock < 1) {
+        this.nitroCharge += P.boostRecover * dt;
+        if (this.nitroCharge >= 100) { this.nitroCharge = 0; this.nitroStock = 1; }
+      }
+      if (this.nitroStock > 0 && this.boostTimer <= 0 && curveAhead < 0.18 && bigCurve < 0.05) {
+        this.nitroStock = 0;
+        this.boostTimer = P.boostDuration;
+        this._boostOnStraight = true;
+      }
+    }
     // --- one-shot boost saved for the final lap on a straight ---
     // curveAhead alone isn't enough of a guard: it's a LOCAL reading, and
     // even the gentlest big hairpin/sweeper dips below 0.18 at some points
@@ -890,7 +991,7 @@ export class RivalCar {
     // exit needed it most under control. bigCurve (already computed above)
     // is the same "am I currently in or near a big corner" signal the
     // racing line and drift use, so require it to be essentially zero too.
-    if (!this.boostUsed && race && race.lap >= race.totalLaps && curveAhead < 0.18 && bigCurve < 0.05) {
+    if (!this.playerNitro && !this.boostUsed && race && race.lap >= race.totalLaps && curveAhead < 0.18 && bigCurve < 0.05) {
       this.boostUsed = true;
       this.boostTimer = 2.35;
       this._boostOnStraight = true;
@@ -921,6 +1022,36 @@ export class RivalCar {
     // The Stage 3 big-corner special carries full speed even while leading;
     // don't let rubber-band slowdown masquerade as corner braking there.
     if (!fullBigCurveAttack && race?.gap != null && race.gap > 0) targetSpeed *= this.leadSlowdown;
+    // braking for what is coming: the fastest it can take each bend ahead
+    // and still stop turning in time (cornerLimit)
+    let braking = false;
+    let brakeDecel = this.brakeModel?.decel ?? 0;
+    if (this.brakeModel && !fullBigCurveAttack) {
+      const lim = this.cornerLimit(here);
+      if (lim < targetSpeed) { targetSpeed = lim; braking = this.speed > lim; }
+    }
+    // --- harass: don't drive off from a player it is holding up; keep to
+    // their pace at `hold` ahead, and now and then brake-check them
+    this._hBrakeCool = Math.max(0, this._hBrakeCool - dt);
+    this._hBrakeTimer = Math.max(0, this._hBrakeTimer - dt);
+    if (harassing > 0 && this.boostTimer <= 0) {
+      const pv = race.player.speed;
+      // never below the player's own speed: easing off any further just
+      // hands them the pass it is there to deny. Floored, or a player
+      // jammed against its tail (speed near 0) would hold it there too.
+      const hold = Math.max(this.maxSpeed * 0.6, pv + Math.max(0, race.gap - this.harass.hold) * 1.2);
+      if (hold < targetSpeed) { targetSpeed = hold; if (this.speed > hold) { braking = true; brakeDecel = 520; } }
+      if (this.harass.brakeCheck && this._hBrakeTimer <= 0 && this._hBrakeCool <= 0
+        && race.gap < 380 && Math.abs(playerLat - path.lateralOf(this.x, this.y, near)) < 70
+        && curveAhead < 0.2 && pv > this.maxSpeed * 0.5) {
+        this._hBrakeTimer = 0.45;
+        this._hBrakeCool = 5 + Math.random() * 3;
+      }
+      if (this._hBrakeTimer > 0) {
+        const check = pv * 0.8;
+        if (check < targetSpeed) { targetSpeed = check; braking = this.speed > check; brakeDecel = 900; }
+      }
+    } else this._hBrakeTimer = 0;
 
     if (this.boostTimer > 0) {
       this.speed += 430 * dt;
@@ -942,7 +1073,8 @@ export class RivalCar {
         const gap = this.maxSpeed - this.speed;
         const taper = Math.max(P.accelScaleMin, Math.min(1, gap / P.accelGapSpan));
         this.speed += this.launchAccelAt(this.speed) * taper * dt;
-      } else if (!fullBigCurveAttack) this.speed -= 430 * speedFactor * dt;
+      } else if (braking) this.speed = Math.max(targetSpeed, this.speed - brakeDecel * dt);
+      else if (!fullBigCurveAttack) this.speed -= 430 * speedFactor * dt;
       this.speed = Math.max(0, Math.min(this.maxSpeed, this.speed));
     }
     // Just run into the back of the player: back off to under its pace for
