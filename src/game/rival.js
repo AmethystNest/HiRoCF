@@ -355,6 +355,13 @@ export class RivalCar {
     // the rival LOOKS; the physical slip / racing line remain untouched.
     this.driftVisualBoost = tuning.driftVisualBoost ?? 0;
     this.driftVisualAngle = 0;
+    // [none, full]: the speeds (absolute) between which the drift comes
+    // in. Below the first it takes the corner on grip -- hung out at full
+    // angle at a crawl (off the line, or slowed by a hit) it read as the
+    // car being turned by hand rather than sliding.
+    this.driftSpeed = tuning.driftSpeed ?? null;
+    // top speed while behind the player, as a share of maxSpeed
+    this.chaseSpeed = tuning.chaseSpeed ?? 1;
     this.raceTime = 0;
     // fraction of maxSpeed shaved off per unit of upcoming curvature -- 0.45
     // reads as a normal rival braking hard for a corner; a drift-spec car like
@@ -700,7 +707,13 @@ export class RivalCar {
     // toward 0/1 over a short time instead of snapping, so committing to
     // and easing out of the drift both read as one continuous slide rather
     // than a pop.
-    const driftTarget = (this.driftIntensity > 0 && !warmingUp) ? bigCurve : 0;
+    let driftGate = 1;
+    if (this.driftSpeed) {
+      const [lo, hi] = this.driftSpeed;
+      const t = Math.max(0, Math.min(1, (this.speed - lo) / (hi - lo)));
+      driftGate = t * t * (3 - 2 * t);
+    }
+    const driftTarget = (this.driftIntensity > 0 && !warmingUp) ? bigCurve * driftGate : 0;
     const driftSmooth = 1 - Math.exp(-dt * 6.0); // ~0.17s time constant
     this._driftAmt += (driftTarget - this._driftAmt) * driftSmooth;
 
@@ -804,9 +817,10 @@ export class RivalCar {
       if (harassing > 0) ampTarget += (this.harass.weave - ampTarget) * harassing;
       this._weaveAmp = this._weaveAmp == null ? ampTarget : this._weaveAmp + (ampTarget - this._weaveAmp) * (1 - Math.exp(-dt * 1.5));
       // eased out through a corner when it weaves at full racing speed
-      // (behind, or wherever weaveBehind is set): swerving on top of the
-      // corner's own line there ran it over the kerb
-      const cornerFade = this.weaveBehind ? 1 - Math.min(1, bigCurve * 1.5) : 1;
+      // (behind, or wherever weaveBehind is set), or out to the wall
+      // (weaveOffRoad): swerving on top of the corner's own line there ran
+      // it over the kerb
+      const cornerFade = this.weaveBehind || this.weaveOffRoad ? 1 - Math.min(1, bigCurve * 1.5) : 1;
       const weave = Math.sin(this.weavePhase) * this.roadHalf * this._weaveAmp * cornerFade;
       let center = ahead && race.gap < this.blockGapMax
         ? path.lateralOf(race.player.x, race.player.y, near)
@@ -874,7 +888,7 @@ export class RivalCar {
     // after the track had already started straightening out from under it,
     // over-rotating the nose inward right when the corner needed less of
     // that, not more -- which is what sent the car drifting wide on exit.
-    const driftAimBias = bigCurve * this.driftIntensity * 70;
+    const driftAimBias = bigCurve * driftGate * this.driftIntensity * 70;
     // capped so the aim point can never land past the actual pavement --
     // without this, full lean (steerLine near insideLimit) plus full bias
     // could ask for a point beyond roadHalf, off the road entirely, which
@@ -1016,9 +1030,12 @@ export class RivalCar {
     }
 
     const fullBigCurveAttack = this.noBigCurveSlow && bigCurve >= 0.35;
+    // chasing (chaseSpeed): a higher top while the player is ahead
+    const top = this.chaseSpeed !== 1 && race?.gap != null && race.gap < 0 && !warmingUp
+      ? this.maxSpeed * this.chaseSpeed : this.maxSpeed;
     let targetSpeed = fullBigCurveAttack
-      ? this.maxSpeed
-      : this.maxSpeed * (1 - this.cornerSlow * speedFactor);
+      ? top
+      : top * (1 - this.cornerSlow * speedFactor);
     // The Stage 3 big-corner special carries full speed even while leading;
     // don't let rubber-band slowdown masquerade as corner braking there.
     if (!fullBigCurveAttack && race?.gap != null && race.gap > 0) targetSpeed *= this.leadSlowdown;
@@ -1070,12 +1087,14 @@ export class RivalCar {
         // taper took another 73% off its last few km/h while the rival had
         // none to take, so a scaling meant to slow both down equally put
         // stage 3's rival 10.3s a lap ahead where it had been 4.7s.
-        const gap = this.maxSpeed - this.speed;
+        const gap = top - this.speed;
         const taper = Math.max(P.accelScaleMin, Math.min(1, gap / P.accelGapSpan));
         this.speed += this.launchAccelAt(this.speed) * taper * dt;
       } else if (braking) this.speed = Math.max(targetSpeed, this.speed - brakeDecel * dt);
       else if (!fullBigCurveAttack) this.speed -= 430 * speedFactor * dt;
-      this.speed = Math.max(0, Math.min(this.maxSpeed, this.speed));
+      // back from a chase to the usual top: eased down, not snapped
+      const cap = this.chaseSpeed !== 1 && this.speed > top ? Math.max(top, this.speed - 400 * dt) : top;
+      this.speed = Math.max(0, Math.min(cap, this.speed));
     }
     // Just run into the back of the player: back off to under its pace for
     // the moment the contact lasts, as a driver would, rather than keep

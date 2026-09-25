@@ -550,6 +550,10 @@
     background:radial-gradient(130% 100% at 50% -20%,rgba(255,255,255,.24),rgba(255,255,255,.04) 64%),
                rgba(24,30,38,.9);
     box-shadow:0 10px 24px rgba(0,0,0,.44),inset 0 1px 0 rgba(255,255,255,.26)}
+  /* the way back to the title (and its stage choice): quieter than the
+     main action above it */
+  #finishCard button.sec{margin-top:8px;height:clamp(34px,5vh,44px);background:rgba(24,30,38,.72);
+    box-shadow:none;opacity:.86;letter-spacing:.2em}
   #finishCard button:active{transform:scale(.97);border-color:rgba(255,255,255,.7)}
   /* Rating: three stars, earned ones landing in turn after the card. */
   #finishCard .stars{display:flex;justify-content:center;gap:6px;margin:clamp(2px,.6vh,6px) 0 0}
@@ -621,6 +625,7 @@
   .diffNote{margin-top:8px;font-size:11px;font-weight:700;letter-spacing:.08em;color:#e7ecf1;
     opacity:.8;text-shadow:0 1px 4px rgba(0,0,0,.7)}
   #stageList .diffSeg{margin:0 0 12px}
+  .diffSeg[hidden]{display:none}
 
   /* Landscape phones. Even at its clamp floors the portrait card is
      ~197px, which is over half of a 360px-tall viewport and back on top
@@ -1000,6 +1005,7 @@
     <div class="best" id="finishBest"></div>
     <div class="hint" id="finishHint"></div>
     <button id="retryBtn">NEXT STAGE</button>
+    <button id="finishTitle" class="sec">TITLE</button>
   </div>
 </div>
 
@@ -1015,7 +1021,11 @@
   // stored, for checking a late stage directly.
   const {createRecords,nextStarGap}=await import('./src/game/records.js');
   const records=createRecords(undefined,{unlockAll:new URLSearchParams(location.search).has('unlockall')});
-  const DIFFS=['normal','hard'];
+  // HARD is on hold (asked for): not offered anywhere, and a stored
+  // choice of it falls back to NORMAL. Flip to bring it back as it was.
+  const HARD_ON=false;
+  if(!HARD_ON&&records.difficulty!=='normal')records.difficulty='normal';
+  const DIFFS=HARD_ON?['normal','hard']:['normal'];
   const DIFF_NOTE={normal:'ライバル: 標準',hard:'ライバル: 速い'};
   const diffLabel=d=>String(d).toUpperCase();
   const titleDiffNote=document.getElementById('titleDiffNote');
@@ -1033,7 +1043,8 @@
         b.setAttribute('aria-disabled',open?'false':'true');
       }
     }
-    titleDiffNote.textContent=records.isDifficultyUnlocked('hard')
+    titleDiffNote.textContent=!HARD_ON?''
+      :records.isDifficultyUnlocked('hard')
       ?DIFF_NOTE[records.difficulty]
       :`${DIFF_NOTE[records.difficulty]} · HARD は全ステージクリアで解放`;
   };
@@ -1050,6 +1061,8 @@
       });
       seg.appendChild(b);
     }
+    // one difficulty is no choice: no switch on screen
+    if(DIFFS.length<2)seg.hidden=true;
   }
   // Stage choice on the title: every stage already won, plus the next one
   // to win (records.isUnlocked); START races the one picked. It starts on
@@ -1226,7 +1239,7 @@
         const tag=out.newBest?'<span class="tag">NEW RECORD</span>':'';
         finishBest.innerHTML=out.best!=null?`${tag}BEST ${fmtTime(out.best/1000)} · ${diffLabel(game.difficulty)}`:'';
         const nextName=out.unlocked!=null?stages[out.unlocked]?.name:null;
-        if(out.hardUnlocked)finishHint.innerHTML='<span class="open">全ステージクリア！ HARD が解放されました</span>';
+        if(out.hardUnlocked)finishHint.innerHTML=HARD_ON?'<span class="open">全ステージクリア！ HARD が解放されました</span>':'<span class="open">全ステージクリア！</span>';
         else if(nextName)finishHint.innerHTML=`<span class="open">${nextName} が解放されました</span>`;
         else if(!res.won)finishHint.textContent='勝利で★1';
         else if(out.stars>=3)finishHint.textContent='★★★ 圧勝';
@@ -1382,6 +1395,24 @@
         game.audio?.click();
         const place=game.race?.positionOf(game.playerEntry)??2;
         goToStage((place===1&&game.stageId<LAST_STAGE)?game.stageId+1:game.stageId);
+      });
+
+      // Back to the title from the result: its stage chips offer every
+      // stage won so far. Lined up on the stage NEXT STAGE would have
+      // gone to, so START from there is the same as that button.
+      el('finishTitle').addEventListener('pointerdown',e=>{
+        e.preventDefault();
+        game.audio?.click();
+        const place=game.race?.positionOf(game.playerEntry)??2;
+        goToStage((place===1&&game.stageId<LAST_STAGE)?game.stageId+1:game.stageId);
+        // stopping the loop leaves the last engine ramp running (openPause)
+        app.ticker.stop();
+        game.playerEngine?.silence();
+        game.rivalEngine?.silence();
+        game.playerSqueal?.silence();
+        game.rivalSqueal?.silence();
+        game.bgm?.pause();
+        showTitle();   // ticker stays stopped until START
       });
 
       // --- pause ---

@@ -496,7 +496,7 @@ export class Traffic {
     c._hitCool = 0.25;
     if (closing > 0) {
       const into = Math.max(0, hx * hit.nx + hy * hit.ny);   // 1 = straight into it
-      const lose = closing / ms * (0.35 + 0.35 * into);
+      const lose = closing / ms * (0.42 + 0.42 * into);
       p.speed = Math.max(0, p.speed - lose);
       const push = closing * 0.75;
       const side = (this.rng() - 0.5) * 2;

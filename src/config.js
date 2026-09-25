@@ -250,7 +250,8 @@ export const DIFFICULTY = {
 
 /** The rival's tuning for a stage at a difficulty (HARD: as tuned). */
 export function rivalTuning(rival, difficulty = 'normal') {
-  const d = DIFFICULTY[difficulty] || DIFFICULTY.normal;
+  // a stage may set its own multipliers for a difficulty (rival.difficulty)
+  const d = { ...(DIFFICULTY[difficulty] || DIFFICULTY.normal), ...(rival.difficulty?.[difficulty] ?? {}) };
   // `topVsPlayer`: a top speed held to this share of the player's (PHYSICS
   // as the stage has set it up), whatever the difficulty would give it
   const cap = rival.topVsPlayer != null ? PHYSICS.maxSpeed * rival.topVsPlayer : Infinity;
@@ -318,7 +319,10 @@ export const STAGES = {
     // and is quicker on the straights to make up for it: 665 -> 711. Lap
     // within 2% of before, no wall contact on either difficulty, off the
     // road 15% -> 0.3%.
-    rival: { engine: 'i6', maxSpeed: 711, accel: 107, turn: 2.25, sprite: 'devilz', block: false, weave: false, raceLine: true, cornerSlow: 0.22, holdOpeningStraight: true, finalLapBoostOnly: true, brake: { decel: 900, grip: 0.9, lineGain: 1.3 } },
+    // Then asked a little under the player rather than well under: top
+    // 760 (the player's) and NORMAL at 0.96 of it (730, was 640). The
+    // launch is the same accel, so the first 4 s match to the unit.
+    rival: { engine: 'i6', maxSpeed: 760, difficulty: { normal: { speed: 0.96 } }, accel: 107, turn: 2.25, sprite: 'devilz', block: false, weave: false, raceLine: true, cornerSlow: 0.22, holdOpeningStraight: true, finalLapBoostOnly: true, brake: { decel: 900, grip: 0.9, lineGain: 1.3 } },
     bestKey: 'topdownRacer_stage1_best_ms',
   },
   2: {
@@ -343,12 +347,16 @@ export const STAGES = {
     // leading or chasing, with the body over the kerb no more than it
     // was (<= 3.3% of a lap). accel -- the getaway -- is left alone: 4s
     // off the line it is doing 469 against 466.
+    // Weaves only while it leads now (asked for); behind or alongside it
+    // gets in the way instead (side block), and chases at chaseSpeed x its
+    // top (NORMAL 648 -> 713 behind). Brakes for the corners like stage 1
+    // -- flat out at the chase speed it hit the wall 6 times in 3 laps.
     // harass: once it leads with the player within 900, it sits on the
     // player's predicted line with a smaller swerve (0.3), keeps to their
     // pace 220 ahead instead of driving off, brake-checks now and then,
     // and leans on a car drawing alongside (sideBlock). Against a test
     // driver that tries to pass: in its path 15% -> ~25% of the time.
-    rival: { engine: 'straightpipe', maxSpeed: 670, accel: 120, turn: 3.05, sprite: 'prius', weaveBehind: true, weaveAmp: 0.85, weaveAhead: 1.1, weaveOffRoad: true, weaveLook: 1.3, harass: { gap: 900, weave: 0.3, look: 0.8, predict: 0.35, hold: 220, brakeCheck: true }, sideBlock: 0.5, sideBlockRate: 2.2 },
+    rival: { engine: 'straightpipe', maxSpeed: 720, chaseSpeed: 1.1, brake: { decel: 900, grip: 0.9, lineGain: 1.3 }, accel: 120, turn: 3.05, sprite: 'prius', weaveAmp: 0.85, weaveAhead: 1.1, weaveOffRoad: true, weaveLook: 1.3, harass: { gap: 900, weave: 0.3, look: 0.8, predict: 0.35, hold: 220, brakeCheck: true }, sideBlock: 0.5, sideBlockRate: 2.2 },
     bestKey: 'topdownRacer_stage2_best_ms',
   },
   3: {
@@ -397,9 +405,14 @@ export const STAGES = {
       // where two different test bots agreed about it (the gap reopened to
       // -8.0 and -7.8s against a -4.7s target, while on the other stages
       // the two bots disagreed by up to 2s and were left alone).
+      // 613 -> 681 (NORMAL 552 -> 613): quicker all round, the launch
+      // (accel) left as it was. driftSpeed: no drift below the dial's 150
+      // km/h (326, where the player's own DRIFT starts, PHYSICS.driftDial),
+      // the full angle from 207 km/h (450) -- leading at a crawl through a
+      // hairpin it used to hang out the full 29 degrees at 364.
       // 593 -> 613 and cornerSlow 0.52 -> 0.48 below: laps 3.9% quicker,
       // asked for, with accel (the getaway) as it was.
-      engine: 'i4', maxSpeed: 613, accel: 90, turn: 3.35, sprite: 'ae86',
+      engine: 'i4', maxSpeed: 681, driftSpeed: [326, 450], accel: 90, turn: 3.35, sprite: 'ae86',
       drift: 0.62, driftVisualBoost: 0.5,
       // Takes its hairpin apexes out to the guardrail rather than the
       // pavement edge -- there is no off-road penalty left to pay for it,
@@ -428,7 +441,7 @@ export const STAGES = {
     // Other cars on the expressway (game/traffic.js): ~100 km/h, changing
     // lanes now and then, in the player's way; scattered by the truck, and
     // driven back into their lane after.
-    traffic: { count: 5 },
+    traffic: { count: 8 },
     playerPhysics: { wallInset: 3, wallSpeedMul: 0.82 },
     wallTriggerExtra: 6,
     rival: {
@@ -477,7 +490,7 @@ export const STAGES = {
       // Traffic it runs into (game/traffic.js hitRival): cars thrown less
       // hard than at 1 and the truck losing more of its own speed per hit,
       // still harder than the player's car knocks them.
-      trafficHit: { forward: 1.0, out: [0.4, 0.7], spin: [4, 8], lift: [180, 0.09], keep: 0.93 },
+      trafficHit: { forward: 1.0, out: [0.4, 0.7], spin: [4, 8], lift: [180, 0.09], keep: 0.9 },
     },
     bestKey: 'topdownRacer_stage4_best_ms',
   },
