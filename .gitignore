@@ -10,3 +10,4 @@ assets/bgm/
 
 # PWA build output (build/pwa.mjs)
 dist/
+dist-artifact/

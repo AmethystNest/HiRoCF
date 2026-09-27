@@ -28,13 +28,18 @@ import { createHash } from 'node:crypto';
 import { root, readPage, bundleBoot } from './lib/page.mjs';
 import { toWebp, rewriteImages } from './lib/images.mjs';
 
-const OUT = join(root, 'dist');
 const withBgm = process.argv.includes('--with-bgm');
+// --artifact: the same files for a claude.ai Artifact (the phone test link)
+// instead of a site of its own -- dist-artifact/. The host wraps the page in
+// its own <head>/<body> and allows no service worker, so the page is the
+// body fragment only, with no manifest, icons or sw.js.
+const artifact = process.argv.includes('--artifact');
+const OUT = join(root, artifact ? 'dist-artifact' : 'dist');
 const hash = (buf) => createHash('sha256').update(buf).digest('hex').slice(0, 10);
 
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(join(OUT, 'assets'), { recursive: true });
-mkdirSync(join(OUT, 'icons'), { recursive: true });
+if (!artifact) mkdirSync(join(OUT, 'icons'), { recursive: true });
 
 const files = [];      // written paths relative to OUT, for the precache
 const write = (rel, data) => {
@@ -67,7 +72,7 @@ if (jpg) {
   style = style.replace(jpg[0], `url(${rel})`);
 }
 
-for (const f of readdirSync(join(root, 'build/pwa/icons'))) {
+if (!artifact) for (const f of readdirSync(join(root, 'build/pwa/icons'))) {
   copyFileSync(join(root, 'build/pwa/icons', f), join(OUT, 'icons', f));
   files.push(`icons/${f}`);
 }
@@ -91,7 +96,7 @@ const manifest = {
     { src: 'icons/maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
   ],
 };
-write('manifest.webmanifest', JSON.stringify(manifest, null, 2));
+if (!artifact) write('manifest.webmanifest', JSON.stringify(manifest, null, 2));
 
 const html = `<!doctype html><html lang="ja"><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
@@ -112,7 +117,25 @@ ${body}
 <script>if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));</script>
 </body></html>
 `;
-write('index.html', html);
+// The Artifact page: what goes inside the host's <body>. Its skeleton brings
+// its own viewport meta, which a game has to replace to stop pinch and
+// double-tap zoom, and owns <body>, so the page's body classes (pre-race:
+// HUD and pads off the grid shot) are put on at boot, before first paint.
+const bodyClass = /class="([^"]*)"/.exec(bodyTag)?.[1] ?? '';
+const artifactHtml = `<title>HiRoCF Top-Down Racer</title>${withBgm ? '' : '\n<meta name="hirocf-bgm" content="none">'}
+${style}
+<script>
+(() => {
+  const m = document.querySelector('meta[name="viewport"]') || document.head.appendChild(document.createElement('meta'));
+  m.name = 'viewport';
+  m.content = 'width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no';
+  for (const c of ${JSON.stringify(bodyClass)}.split(' ')) if (c) document.body.classList.add(c);
+})();
+</script>
+${body}
+<script src="${app}"></script>
+`;
+write('index.html', artifact ? artifactHtml : html);
 
 // stage music: copied only on request, never precached (see sw.js)
 let tracks = 0;
@@ -126,6 +149,10 @@ if (withBgm && existsSync(join(root, 'assets/bgm'))) {
 }
 
 // the service worker last: its version is every precached file's content
+if (artifact) {
+  console.log(`dist-artifact/: ${files.length} files, script ${(readFileSync(join(OUT, app)).length / 1024).toFixed(0)} KB, bgm tracks ${tracks}`);
+  process.exit(0);
+}
 const precache = ['./', ...files];
 const version = hash(Buffer.concat(files.map((f) => readFileSync(join(OUT, f)))));
 const sw = readFileSync(join(root, 'build/pwa/sw.js'), 'utf8')

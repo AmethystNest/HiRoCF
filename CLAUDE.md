@@ -11,7 +11,8 @@
   - `track/` — コース中心線、ステージレイアウト
   - `render/` — 路面・リボン・ミニマップ・プロップ・エフェクト、STAGE4 のモブ車画像(`mobcars.js`: 写真+塗装レイヤーを tint でランダム色に)
 - `build/standalone.mjs` — esbuild で `src/` を単一 HTML(`build/index.standalone.html`)にまとめる。配布物はこれ。画像は `build/lib/images.mjs` で WebP に再エンコードして埋め込み(PWA と同じ設定)、BGM はゲーム本体の script の**後ろ**に置く(回線越しでも BGM を読み終える前に START できる。`bgm.js` は未到着のトラックを DOMContentLoaded 後に拾う)。
-- `build/artifact.mjs` — Claude Artifact ホスト用の別ビルド(head 構成が異なるだけ)。
+- `build/artifact.mjs` — 旧 Artifact 用ビルド(src をモジュールのまま載せる方式)。**今は使わない**(下の `build:artifact` に置き換え)。
+- **スマホ確認用リンク(毎回渡す)**: https://claude.ai/artifact/TVwH1EijKM5bLocKZNQfsL — `npm run build:artifact`(= `node build/pwa.mjs --artifact --with-bgm`)で `dist-artifact/`(git 管理外)を作り、Artifact ツールでこの URL に publish(`file_path: dist-artifact/index.html`、他のファイルは `files` で同じ相対パスに。ハッシュ名が変わった古いファイルは `null` で消す。現在の一覧は `action:list, scope:files` で確認)。Artifact は Service Worker 不可・`<head>` はホスト側なので、ページは本文だけ・SW/manifest なしで出力している。BGM 入りなのでリンクは**非公開のまま**(共有しない)。
 - `build/pwa.mjs` — PWA ビルド。`dist/`(git 管理外)に静的サイトとして出力する。画像は bundle から抜き出して WebP 化(地面タイルは可逆、車・プロップは near-lossless)、manifest・アイコン(`build/pwa/icons/`)・Service Worker(`build/pwa/sw.js`: 起動に要る全ファイルをビルド単位でキャッシュ、BGM は初回再生時にキャッシュして Range 要求に 206 で応答)を付ける。**https で配信しないと SW が動かない**(localhost は可)。`npm run build:pwa` は BGM なし(公開配信してよい)、`npm run build:pwa:bgm` は BGM 入り(**非公開の配信先専用**)。画像変換に `sharp` を使う。
 - `build/lib/page.mjs` — standalone / PWA 共通の index.html 分解と bundle。`build/lib/images.mjs` — 同じく共通の WebP 変換。
 - ステージ切替時は旧ステージの表示ツリーを `destroyStageTree`(main.js)で破棄する。PixiJS 任せだと 60〜90 秒解放されず、リトライのたびにメモリが積み上がって iPhone で落ちる原因になる。Graphics は `destroy({context:true})` でないと自前の context が残る点に注意。
@@ -55,7 +56,7 @@ npm パッケージが実際に入っているか(`package.json`/`node_modules`)
 - 最高品質を選んだ場合、「まず動けばよい」のような簡易方針を許可なく最終方針にしない。使えるライブラリ・API・既存コードを踏まえて目的に対する最適解を選ぶ。
 - 実装中に制約(パフォーマンス、API の限界、既存コードとの整合性など)が判明したら、黙って簡易な方式に変えない。制約の内容・品質への影響・代替案をその場で伝える。
 - 「エラーなく動いた」は完成の条件ではない。機能・見た目・操作性・性能(フレームレート等)・安定性を実際に検証してから完成とする。
-- 成果物一式を渡すときは ZIP にせず、`build/index.standalone.html` などのファイルをそのまま渡す。
+- 成果物は**スマホ確認用リンク(上記 Artifact)を毎回更新して渡す**。単一 HTML(`build/index.standalone.html`)は必須ではない(ユーザー了承済み: PWA 版で良い)。ファイルを渡す場合も ZIP にしない。
 
 ## 検証の型(このプロジェクトで確立した方法)
 
