@@ -12,7 +12,7 @@
     "format": "prettier --write .",
     "build:pwa": "node build/pwa.mjs",
     "build:pwa:bgm": "node build/pwa.mjs --with-bgm",
-    "build:artifact": "node build/pwa.mjs --artifact --with-bgm"
+    "build:artifact": "node build/artifact.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

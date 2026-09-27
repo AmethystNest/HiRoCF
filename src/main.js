@@ -2005,7 +2005,15 @@ export async function boot({ stageId = 1, difficulty = 'normal', onReady, audioC
   app.ticker.maxFPS = 60;
   document.getElementById('app').appendChild(app.canvas);
 
-  const urls = [...Object.values(TEXTURES), ...Object.values(CARS), PROP_ATLAS];
+  // Every image here is a data: URL (or, in the PWA, a file). Pixi's default
+  // is to fetch() it into an ImageBitmap, and a fetch -- even of a data: URL
+  // -- is a network request: under a content-security-policy whose
+  // connect-src does not list data: (the claude.ai Artifact host, the phone
+  // test link) the load fails and START does nothing. Decoding through an
+  // <img> needs img-src only. PROP_ATLAS is decoded by hand below, never
+  // loaded: it used to sit in this list as well, fetched for nothing.
+  Assets.setPreferences({ preferWorkers: false, preferCreateImageBitmap: false });
+  const urls = [...Object.values(TEXTURES), ...Object.values(CARS)];
   const loaded = await Assets.load(urls);
   // stage 4's traffic: every model's photo and its paint layer, mipmapped
   // like the car art below (they are drawn as small as the cars)
