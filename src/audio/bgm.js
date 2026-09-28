@@ -35,16 +35,15 @@
 const BGM_LEVEL = 0.27;
 const FADE_IN = 0.35;
 
-/** Per-stage trim on top of BGM_LEVEL. make-bgm.mjs already matches every
- *  track's INTEGRATED loudness (-8.1 LUFS, see assets/bgm/manifest.json),
- *  but that is a whole-track average: measuring momentary (3 s window)
- *  loudness on the current tracks instead -- closer to what a 1-3 minute
- *  race actually plays -- found stage 3 (median -8.1 LUFS) sitting where it
- *  should, with 1/2/4/5 a little hotter moment-to-moment (-8.3/-8.2/-7.7/
- *  -8.1) despite matching on the integrated figure; asked down further on
- *  top of that. Values are linear gain (10^(dB/20)) for stage 3's median
- *  plus about another 1 dB. */
-const STAGE_TRIM = { 1: 0.91, 2: 0.90, 3: 1, 4: 0.85, 5: 0.89 };
+/** Per-stage trim on top of BGM_LEVEL, to sit every track at stage 3's
+ *  level (the one that was judged right). make-bgm.mjs already matches the
+ *  INTEGRATED loudness; the median momentary K-weighted loudness (3 s
+ *  window) of the current tracks is -8.3/-8.2/-8.1/-7.7/-8.1 LUFS for
+ *  stages 1..5, so only stage 4 is measurably hotter (+0.4 dB -> 0.96).
+ *  Measured band-limited to a phone speaker (250 Hz-8 kHz) the order
+ *  reverses (stage 3 is the loudest by 0.6-2.3 dB), so K-weighting, the
+ *  standard measure, is what this follows. Linear gain, 10^(dB/20). */
+const STAGE_TRIM = { 1: 1, 2: 1, 3: 1, 4: 0.96, 5: 1 };
 
 export function makeBgm(ctx, bus, el) {
   const audio = el || new Audio();
