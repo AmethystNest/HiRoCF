@@ -35,6 +35,17 @@
 const BGM_LEVEL = 0.27;
 const FADE_IN = 0.35;
 
+/** Per-stage trim on top of BGM_LEVEL. make-bgm.mjs already matches every
+ *  track's INTEGRATED loudness (-8.1 LUFS, see assets/bgm/manifest.json),
+ *  but that is a whole-track average: measuring momentary (3 s window)
+ *  loudness on the current tracks instead -- closer to what a 1-3 minute
+ *  race actually plays -- found stage 3 (median -8.1 LUFS) sitting where it
+ *  should, with 1/2/4/5 a little hotter moment-to-moment (-8.3/-8.2/-7.7/
+ *  -8.1) despite matching on the integrated figure; asked down further on
+ *  top of that. Values are linear gain (10^(dB/20)) for stage 3's median
+ *  plus about another 1 dB. */
+const STAGE_TRIM = { 1: 0.91, 2: 0.90, 3: 1, 4: 0.85, 5: 0.89 };
+
 export function makeBgm(ctx, bus, el) {
   const audio = el || new Audio();
   audio.loop = true;
@@ -147,12 +158,13 @@ export function makeBgm(ctx, bus, el) {
     },
     /** Race start: from the top, faded in quickly. */
     start() {
+      const level = BGM_LEVEL * (STAGE_TRIM[stage] ?? 1);
       // still arriving: counted as started, so it joins in when it lands
-      if (!url) { if (pending) { active = true; ramp(BGM_LEVEL, FADE_IN / 3); } return; }
+      if (!url) { if (pending) { active = true; ramp(level, FADE_IN / 3); } return; }
       clearTimeout(stopTimer);
       active = true;
       try { audio.currentTime = 0; } catch { /* not loaded yet: it starts at 0 anyway */ }
-      ramp(BGM_LEVEL, FADE_IN / 3);
+      ramp(level, FADE_IN / 3);
       const p = audio.play();
       if (p && p.catch) p.catch(() => {});
     },
