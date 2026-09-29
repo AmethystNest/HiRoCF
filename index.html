@@ -951,6 +951,15 @@
     transition:opacity .9s ease,filter 1.4s ease}
   #endingOverlay.video #endingVideo{opacity:1}
   #endingOverlay.roll #endingVideo{opacity:.32;filter:brightness(.7)}
+  #endingLoad{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);text-align:center;
+    font-size:11px;font-weight:800;letter-spacing:.5em;text-indent:.5em;color:rgba(255,255,255,.4)}
+  #endingLoad[hidden],#endingPlay[hidden]{display:none}
+  #endingPlay{position:absolute;left:50%;top:50%;width:84px;height:84px;margin:-42px 0 0 -42px;z-index:2;
+    border-radius:50%;border:1px solid rgba(255,255,255,.5);color:#fff;touch-action:manipulation;
+    background:radial-gradient(130% 100% at 50% -20%,rgba(255,255,255,.3),rgba(255,255,255,.05) 64%),rgba(20,24,30,.8);
+    box-shadow:0 12px 30px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.3);
+    display:flex;align-items:center;justify-content:center}
+  #endingPlay svg{width:36px;height:36px;margin-left:4px}
   #endingRoll{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
     justify-content:center;text-align:center;padding:0 24px;pointer-events:none;opacity:0;
     transition:opacity .8s ease}
@@ -1106,6 +1115,8 @@
 
 <div id="endingOverlay" hidden>
   <video id="endingVideo" playsinline webkit-playsinline preload="none"></video>
+  <div id="endingLoad" hidden>LOADING</div>
+  <button id="endingPlay" hidden aria-label="play"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg></button>
   <div id="endingRoll"></div>
   <button id="endingSkip" aria-label="skip">SKIP</button>
 </div>
@@ -1425,6 +1436,9 @@
             paintRecord(race.result??{won,time:game.playerEntry.progress.finishTime??race.time,gap:null});
             stageBtn.textContent=(won&&game.stageId<LAST_STAGE)?'NEXT STAGE':(won?'ENDING':'RETRY');
             finishOverlay.hidden=false;
+            // the ending's clip is fetched while the card is read, so the tap
+            // on ENDING finds it ready (see playEnding)
+            if(won&&game.stageId===LAST_STAGE)prefetchEnding();
             // Side lightning lands WITH the card, not back at the line
             // -- the strike is what announces the result.
             game.strikeResultBolts(won);
@@ -1528,13 +1542,53 @@
       // a build without it goes straight to the credits), then the credits
       // built from what this save actually holds. SKIP and the credits'
       // TITLE button both end it. Every phase change is idempotent because
-      // the clip's own events, the safety timer and SKIP can all race.
-      const endingEl=el('endingOverlay'),endingVideo=el('endingVideo'),endingRoll=el('endingRoll'),endingSkip=el('endingSkip');
+      // the clip's own events, the timers and SKIP can all race.
+      //
+      // Getting the clip on screen is the fragile part on the phone link, so
+      // it is tried several ways and the reasons for any failure are shown:
+      //  1. fetched whole into a blob: URL, ahead of the tap (fetch of a
+      //     published file is allowed, and a blob has no Range requests --
+      //     iOS will not play a <video> from a server that does not answer
+      //     them). Prefetched when the result card shows, so the tap that
+      //     starts it can call play() itself, inside the gesture.
+      //  2. the file's own URL in src, per format (mp4 for iPhone, webm).
+      //  3. blocked by autoplay rules anyway: a PLAY button to tap.
+      // Nothing playing: the credits alone.
+      const endingEl=el('endingOverlay'),endingVideo=el('endingVideo'),endingRoll=el('endingRoll'),
+        endingSkip=el('endingSkip'),endingPlay=el('endingPlay'),endingLoad=el('endingLoad');
       let endingBusy=false,endingDone=null;
-      const endingSource=()=>{
-        if(endingVideo.canPlayType('video/mp4; codecs="avc1.4D401E, mp4a.40.2"'))return 'assets/ending/ending.mp4';
-        if(endingVideo.canPlayType('video/webm; codecs="vp9, opus"'))return 'assets/ending/ending.webm';
-        return null;
+      const endingFormats=()=>[
+        {file:'assets/ending/ending.mp4',type:'video/mp4',test:'video/mp4; codecs="avc1.4D401E, mp4a.40.2"'},
+        {file:'assets/ending/ending.webm',type:'video/webm',test:'video/webm; codecs="vp9, opus"'},
+      ].filter(f=>endingVideo.canPlayType(f.test));
+      let endingBlobUrl=null,endingPrefetch=null,endingFetchErr='';
+      const prefetchEnding=()=>{
+        if(endingPrefetch)return endingPrefetch;
+        const f=endingFormats()[0];
+        if(!f){endingFetchErr='no playable format';return (endingPrefetch=Promise.resolve());}
+        endingPrefetch=fetch(f.file)
+          .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.blob();})
+          .then(b=>{endingBlobUrl=URL.createObjectURL(new Blob([b],{type:f.type}));})
+          .catch(e=>{endingFetchErr=`${f.file} fetch: ${e?.message||e}`;});
+        return endingPrefetch;
+      };
+      // resolves 'ok' once frames are playing, 'blocked' if only a tap can
+      // start it, otherwise why not. Calls play() before its first await.
+      const attemptVideo=(src)=>new Promise(resolve=>{
+        const v=endingVideo;
+        let fin=false;
+        const end=(r)=>{if(fin)return;fin=true;clearTimeout(t);v.onplaying=null;v.onerror=null;resolve(r);};
+        const t=setTimeout(()=>end('timeout'),5000);
+        v.onplaying=()=>end('ok');
+        v.onerror=()=>end(`error ${v.error?.code??'?'} ${v.error?.message||''}`.trim());
+        v.src=src;
+        const p=v.play();
+        if(p&&p.catch)p.catch(e=>end(e&&e.name==='NotAllowedError'?'blocked':`play ${e?.name||e}`));
+      });
+      const reportEnding=(errs)=>{
+        const msg='ENDING VIDEO '+errs.join(' | ');
+        console.warn(msg);
+        try{window.dispatchEvent(new ErrorEvent('error',{message:msg}));}catch{/* shown in the console only */}
       };
       const buildRoll=()=>{
         const ids=STAGE_IDS,rows=[];
@@ -1565,23 +1619,23 @@
         finishOverlay.hidden=true;
         buildRoll();
         endingEl.classList.remove('video','roll');
+        endingPlay.hidden=true;endingLoad.hidden=false;
         endingEl.hidden=false;
         void endingEl.offsetWidth;
         endingEl.classList.add('on');
-        let phase='video',safety=0;
+        let phase='video';
         const toRoll=()=>{
           if(phase!=='video')return;
           phase='roll';
-          clearTimeout(safety);
           endingEl.classList.remove('video');
           endingEl.classList.add('roll');
+          endingPlay.hidden=true;endingLoad.hidden=true;
           // the stage-5 track under the credits, from the top
           game.bgm?.load(LAST_STAGE);game.bgm?.start();
         };
         endingDone=()=>{
           if(phase==='done')return;
           phase='done';
-          clearTimeout(safety);
           endingDone=null;
           game.bgm?.fadeOut(0.6);
           try{endingVideo.pause();}catch{/* nothing playing */}
@@ -1589,6 +1643,7 @@
           setTimeout(()=>{
             endingEl.hidden=true;
             endingEl.classList.remove('video','roll');
+            endingVideo.onended=null;endingVideo.onerror=null;endingVideo.onplaying=null;
             endingVideo.removeAttribute('src');endingVideo.load();
             endingRoll.textContent='';
             endingBusy=false;
@@ -1596,17 +1651,46 @@
           },650);
         };
         endingSkip.onpointerdown=e=>{e.preventDefault();game.audio?.click();endingDone?.();};
-        const src=endingSource();
-        if(!src){toRoll();return;}
+        const playing=()=>{
+          endingLoad.hidden=true;endingPlay.hidden=true;
+          if(phase==='video')endingEl.classList.add('video');
+          endingVideo.onerror=toRoll;
+        };
         endingVideo.muted=!!game.audio?.muted;
-        endingVideo.onplaying=()=>{clearTimeout(safety);if(phase==='video')endingEl.classList.add('video');};
         endingVideo.onended=toRoll;
-        endingVideo.onerror=toRoll;
-        // nothing playing 6 s in (blocked, missing, stalled): credits instead
-        safety=setTimeout(toRoll,6000);
-        endingVideo.src=src;
-        const p=endingVideo.play();
-        if(p&&p.catch)p.catch(toRoll);
+        const run=async()=>{
+          const errs=[];
+          let r;
+          // 1: the prefetched blob. Ready = play() runs inside this tap.
+          if(!endingBlobUrl)await prefetchEnding();
+          if(endingBlobUrl){
+            r=await attemptVideo(endingBlobUrl);
+            if(r==='ok'||r==='blocked')return {r,errs};
+            errs.push(`blob: ${r}`);
+          }else errs.push(endingFetchErr||'blob: not fetched');
+          // 2: the files themselves
+          for(const f of endingFormats()){
+            r=await attemptVideo(f.file);
+            if(r==='ok'||r==='blocked')return {r,errs};
+            errs.push(`${f.file}: ${r}`);
+          }
+          return {r:'fail',errs};
+        };
+        prefetchEnding();
+        run().then(({r,errs})=>{
+          if(phase!=='video')return;
+          if(r==='ok')playing();
+          else if(r==='blocked'){
+            // the tap did not carry over (a fetch in between): one more tap does
+            endingLoad.hidden=true;endingPlay.hidden=false;
+            endingPlay.onpointerup=e=>{
+              e.preventDefault();
+              endingVideo.onplaying=playing;
+              const p=endingVideo.play();
+              if(p&&p.catch)p.catch(err=>{reportEnding([...errs,`tap play ${err?.name||err}`]);toRoll();});
+            };
+          }else{reportEnding(errs);toRoll();}
+        });
       };
 
       // --- pause ---
