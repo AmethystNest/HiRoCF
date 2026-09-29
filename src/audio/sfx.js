@@ -360,26 +360,37 @@ export function buildAudio(ctx) {
     const s = Math.max(0.05, Math.min(1, strength));
     const t0 = ctx.currentTime + 0.005;
     const L = 1.4 * s;                          // level: every layer scales with the hit
-    boom({ from: 110, to: 34, dur: 0.32, gain: 0.4 * s });
+    // The weight of the hit sits in the body, 120 Hz to 1 kHz -- the part a
+    // phone speaker actually plays. Measured on the first version, that band
+    // was 18 dB under both the sub (which a phone cannot play) and the
+    // bright crunch above it, which is what made it sound light and tinny.
+    // Even a small bump keeps some of it (`w` never falls to 0).
+    const w = 0.45 + 0.55 * s;
+    boom({ from: 150, to: 48, dur: 0.34, gain: 0.42 * w });           // the sub
+    boom({ from: 270, to: 95, dur: 0.24, gain: 0.5 * w });            // the "don" of the bodies
     burst({ at: t0, hz: 260, type: 'lowpass', q: 0.7, gain: 0.34 * L, decay: 0.05 });
+    // body of the crunch: dense low-mid noise, and two crumple thuds after it
+    burst({ at: t0, hz: 750, type: 'lowpass', q: 0.8, gain: 0.55 * w * 1.4, decay: 0.09, send: 0.16 });
+    burst({ at: t0 + 0.012, hz: 480, type: 'bandpass', q: 1.1, gain: 0.34 * w * 1.4, decay: 0.07, send: 0.14 });
+    burst({ at: t0 + 0.05 + 0.03 * s, hz: 360, type: 'bandpass', q: 1.0, gain: 0.22 * w * 1.4, decay: 0.06, send: 0.14 });
     const hits = 5 + Math.round(9 * s);
     for (let i = 0; i < hits; i++) {
       const at = t0 + Math.pow(Math.random(), 1.6) * (0.08 + 0.16 * s);
       burst({
-        at, hz: 450 + Math.random() * 2600, q: 1.2 + Math.random() * 2, gain: (0.10 + 0.14 * Math.random()) * L * (1 - (at - t0) * 2.5),
+        at, hz: 450 + Math.random() * 2600, q: 1.2 + Math.random() * 2, gain: (0.10 + 0.14 * Math.random()) * L * 0.8 * (1 - (at - t0) * 2.5),
         decay: 0.008 + Math.random() * 0.02, pan: (Math.random() - 0.5) * 0.6,
       });
     }
     [520, 870, 1430].forEach((hz, i) => burst({
-      at: t0 + 0.004, hz: hz * (0.9 + Math.random() * 0.2), q: 11, gain: (0.09 - i * 0.02) * L, decay: 0.07 + 0.06 * s, send: 0.2,
+      at: t0 + 0.004, hz: hz * (0.9 + Math.random() * 0.2), q: 11, gain: (0.09 - i * 0.02) * L * 0.85, decay: 0.07 + 0.06 * s, send: 0.2,
     }));
     if (s > 0.35) {
       const g = (s - 0.35) / 0.65;
-      burst({ at: t0 + 0.02, hz: 3800, type: 'highpass', q: 0.6, gain: 0.13 * 1.4 * g, decay: 0.12 + 0.12 * g, send: 0.25 });
+      burst({ at: t0 + 0.02, hz: 3800, type: 'highpass', q: 0.6, gain: 0.13 * 1.4 * g * 0.7, decay: 0.12 + 0.12 * g, send: 0.25 });
       const glints = 6 + Math.round(12 * g);
       for (let i = 0; i < glints; i++) {
         const at = t0 + 0.03 + Math.pow(Math.random(), 1.4) * (0.25 + 0.35 * g);
-        burst({ at, hz: 3000 + Math.random() * 5000, q: 14 + Math.random() * 10, gain: (0.05 + 0.07 * Math.random()) * 1.4 * g, decay: 0.01 + Math.random() * 0.025, send: 0.3, pan: (Math.random() - 0.5) * 0.9 });
+        burst({ at, hz: 3000 + Math.random() * 5000, q: 14 + Math.random() * 10, gain: (0.05 + 0.07 * Math.random()) * 1.4 * g * 0.7, decay: 0.01 + Math.random() * 0.025, send: 0.3, pan: (Math.random() - 0.5) * 0.9 });
       }
     }
   }
