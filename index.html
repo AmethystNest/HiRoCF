@@ -702,6 +702,7 @@
      under 220px even at four icons). */
   .iconRow{position:fixed;left:14px;z-index:15;display:flex;gap:8px;
     top:calc(max(10px,env(safe-area-inset-top)) + 58px)}
+  .iconRow.testRow{top:calc(max(10px,env(safe-area-inset-top)) + 116px)}
   .iconBtn{
     position:relative;
     width:46px;height:46px;border-radius:50%;
@@ -991,6 +992,9 @@
     animation-delay:calc(var(--i) * .42s + .4s);touch-action:manipulation}
   #endingOverlay.roll #endingRoll button{animation-play-state:running}
   #endingRoll button:active{transform:scale(.97);border-color:rgba(255,255,255,.7)}
+  #endingOverlay.closing #endingVideo,#endingOverlay.closing #endingRoll,#endingOverlay.closing #endingSkip,
+  #endingOverlay.closing #endingLoad,#endingOverlay.closing #endingPlay{
+    opacity:0!important;transition:opacity .5s ease!important;pointer-events:none}
   #endingSkip{position:absolute;right:max(14px,env(safe-area-inset-right));
     top:calc(max(12px,env(safe-area-inset-top)) + 2px);z-index:2;height:34px;padding:0 16px;border-radius:999px;
     border:1px solid rgba(255,255,255,.3);background:rgba(10,13,17,.55);color:rgba(255,255,255,.85);
@@ -1047,6 +1051,16 @@
   <button id="stagePick" class="iconBtn" aria-label="choose stage">
     <svg class="icon" viewBox="0 0 24 24"><path d="M6 3v18" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/><path d="M6 4.5h11.5l-2.3 3.25L17.5 11H6z" fill="currentColor"/></svg>
     <span class="badge" id="stageBadge">1/5</span>
+  </button>
+</div>
+
+<!-- Testing-only: cross the line now. A second row under the icons -- a fifth
+     icon in the first would run into the minimap on a phone. Kept until the
+     user says to remove it, like the stage picker above. -->
+<div class="iconRow testRow">
+  <button id="goalPick" class="iconBtn" aria-label="test: finish the race now">
+    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v18" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/><path d="M8 4h11v9H8z" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 4h3.67v3H8zM15.33 4H19v3h-3.67zM11.67 7h3.66v3h-3.66zM8 10h3.67v3H8zM15.33 10H19v3h-3.67z" fill="currentColor"/></svg>
+    <span class="badge">GOAL</span>
   </button>
 </div>
 
@@ -1212,14 +1226,18 @@
     titleScreen.classList.add('leaving');
     titleScreen.addEventListener('transitionend',()=>{titleScreen.hidden=true},{once:true});
   };
-  // Coming BACK to the title (from pause): un-hide first, then drop
-  // `leaving` after a reflow, or the browser coalesces the two and the
-  // fade never runs.
+  // Coming BACK to the title (from pause, the result, the ending): shown at
+  // once, see showTitle.
   const showTitle=()=>{
     paintDiff();paintStages();
+    // Opaque from its first frame. It used to fade back in (the same .46s
+    // as on START), and for that long the game behind it -- the stage
+    // just reloaded to its grid -- showed through.
+    titleScreen.style.transition='none';
     titleScreen.hidden=false;
-    void titleScreen.offsetWidth;
     titleScreen.classList.remove('leaving');
+    void titleScreen.offsetWidth;
+    titleScreen.style.transition='';
     titleStart.disabled=false;
   };
   // Set once the game is up: what START does on every press after the
@@ -1419,7 +1437,12 @@
           lapPopupTimer=0;
           lapPopup.classList.remove('show');
           // Music out at the flag, clear of the fanfare 1.9 s later.
-          if(finishDelay===0)game.bgm?.fadeOut(2.2);
+          if(finishDelay===0){
+            game.bgm?.fadeOut(2.2);
+            // a win on the last stage goes straight to the ending: its clip
+            // is fetched while the finish effect plays
+            if(race.winner===game.playerEntry&&game.stageId===LAST_STAGE)prefetchEnding();
+          }
           finishDelay+=dt;
           // Held back until the finish effect (render/finishfx.js) has run
           // its banner and title and cleared out of the way.
@@ -1427,21 +1450,25 @@
             shownFinish=true;
             const place=race.positionOf(game.playerEntry);
             const won=place===1;
-            game.audio?.fanfare(won);
-            finishCard.classList.toggle('win',won);
-            finishRibbon.textContent=won?'WINNER':'FINISHED';
-            finishStage.textContent=won?`${game.cfg.name} CLEAR`:`${game.cfg.name} RESULT`;
-            finishPlace.textContent=won?'WIN':'LOSE';
-            finishTime.textContent=fmtTime(game.playerEntry.progress.finishTime??race.time);
+            // recorded whatever comes next (the ending's credits read it)
             paintRecord(race.result??{won,time:game.playerEntry.progress.finishTime??race.time,gap:null});
-            stageBtn.textContent=(won&&game.stageId<LAST_STAGE)?'NEXT STAGE':(won?'ENDING':'RETRY');
-            finishOverlay.hidden=false;
-            // the ending's clip is fetched while the card is read, so the tap
-            // on ENDING finds it ready (see playEnding)
-            if(won&&game.stageId===LAST_STAGE)prefetchEnding();
-            // Side lightning lands WITH the card, not back at the line
-            // -- the strike is what announces the result.
-            game.strikeResultBolts(won);
+            if(won&&game.stageId===LAST_STAGE){
+              // the last stage won: no card, on to the ending (it has its own
+              // sound, so no fanfare over it either)
+              playEnding();
+            } else {
+              game.audio?.fanfare(won);
+              finishCard.classList.toggle('win',won);
+              finishRibbon.textContent=won?'WINNER':'FINISHED';
+              finishStage.textContent=won?`${game.cfg.name} CLEAR`:`${game.cfg.name} RESULT`;
+              finishPlace.textContent=won?'WIN':'LOSE';
+              finishTime.textContent=fmtTime(game.playerEntry.progress.finishTime??race.time);
+              stageBtn.textContent=(won&&game.stageId<LAST_STAGE)?'NEXT STAGE':(won?'RETRY FINAL STAGE':'RETRY');
+              finishOverlay.hidden=false;
+              // Side lightning lands WITH the card, not back at the line
+              // -- the strike is what announces the result.
+              game.strikeResultBolts(won);
+            }
           }
         }
       });
@@ -1490,6 +1517,15 @@
       };
       stagePick.addEventListener('pointerdown',e=>{e.preventDefault();game.audio?.click();buildRows();stageOverlay.hidden=false});
       stageClose.addEventListener('pointerdown',e=>{e.preventDefault();game.audio?.click();stageOverlay.hidden=true});
+      // testing only (see the markup): put the player over the line now, so a
+      // win -- and on the last stage the ending -- can be reached in a tap
+      el('goalPick').addEventListener('pointerdown',e=>{
+        e.preventDefault();
+        game.audio?.click();
+        if(game.race?.state!=='racing')return;
+        const pr=game.playerEntry.progress;
+        pr.total=Math.max(pr.total,game.path.length*game.race.totalLaps)+500;
+      });
       syncPickLabel();
       // A new difficulty is used from the next race. On the title the grid
       // behind it is reloaded straight away, so START races at it; in the
@@ -1511,8 +1547,6 @@
         e.preventDefault();
         game.audio?.click();
         const place=game.race?.positionOf(game.playerEntry)??2;
-        // a win on the last stage has nowhere further to go: the ending
-        if(place===1&&game.stageId===LAST_STAGE){playEnding();return;}
         goToStage((place===1&&game.stageId<LAST_STAGE)?game.stageId+1:game.stageId);
       });
 
@@ -1639,16 +1673,23 @@
           endingDone=null;
           game.bgm?.fadeOut(0.6);
           try{endingVideo.pause();}catch{/* nothing playing */}
-          endingEl.classList.remove('on');
+          // What is on the black goes first; the title is put up UNDER the
+          // black; only then does the black lift. Fading the whole overlay
+          // out over the game instead showed the stage behind it (the
+          // finished race) for as long as the fade took.
+          endingEl.classList.add('closing');
           setTimeout(()=>{
-            endingEl.hidden=true;
-            endingEl.classList.remove('video','roll');
-            endingVideo.onended=null;endingVideo.onerror=null;endingVideo.onplaying=null;
-            endingVideo.removeAttribute('src');endingVideo.load();
-            endingRoll.textContent='';
-            endingBusy=false;
             toTitle();
-          },650);
+            endingEl.classList.remove('on');
+            setTimeout(()=>{
+              endingEl.hidden=true;
+              endingEl.classList.remove('video','roll','closing');
+              endingVideo.onended=null;endingVideo.onerror=null;endingVideo.onplaying=null;
+              endingVideo.removeAttribute('src');endingVideo.load();
+              endingRoll.textContent='';
+              endingBusy=false;
+            },700);
+          },550);
         };
         endingSkip.onpointerdown=e=>{e.preventDefault();game.audio?.click();endingDone?.();};
         const playing=()=>{
