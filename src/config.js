@@ -413,6 +413,8 @@ export const STAGES = {
       // 593 -> 613 and cornerSlow 0.52 -> 0.48 below: laps 3.9% quicker,
       // asked for, with accel (the getaway) as it was.
       engine: 'i4', maxSpeed: 681, driftSpeed: [326, 450], accel: 90, turn: 3.35, sprite: 'ae86',
+      // its nitro is wings of light, not a flame (render/wingsfx.js)
+      boostFx: 'wings',
       drift: 0.62, driftVisualBoost: 0.5,
       // Takes its hairpin apexes out to the guardrail rather than the
       // pavement edge -- there is no off-road penalty left to pay for it,
