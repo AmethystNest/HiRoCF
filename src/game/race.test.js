@@ -118,3 +118,63 @@ describe('race result', () => {
     expect(res.gap).toBeCloseTo(2.5, 5);
   });
 });
+
+describe('the battle ends when either car finishes', () => {
+  const path = { length: 1000 };
+  // progress is set by hand each "frame"; update() only reads it
+  function racing(playerTotal, rivalTotal) {
+    const r = new Race(path, { totalLaps: 3, startBack: 0 });
+    const p = r.addCar({}, { isPlayer: true }), o = r.addCar({});
+    for (const e of [p, o]) e.progress.update = () => {};
+    Object.assign(p.progress, { total: playerTotal });
+    Object.assign(o.progress, { total: rivalTotal });
+    r.state = 'racing';
+    return { r, p, o };
+  }
+
+  it('keeps racing while neither is over the line', () => {
+    const { r } = racing(2990, 2980);
+    r.update(0.016);
+    expect(r.state).toBe('racing');
+    expect(r.winner).toBeNull();
+  });
+
+  it('ends the race, lost, when the rival crosses first -- the player need not finish', () => {
+    const { r, p, o } = racing(2950, 3001);
+    r.update(0.016);
+    expect(r.state).toBe('finished');
+    expect(r.winner).toBe(o);
+    expect(p.progress.finished).toBe(false);
+    expect(r.positionOf(p)).toBe(2);
+    expect(r.result).toMatchObject({ won: false, finished: false });
+  });
+
+  it('ends the race, won, when the player crosses first', () => {
+    const { r, p } = racing(3001, 2950);
+    r.update(0.016);
+    expect(r.state).toBe('finished');
+    expect(r.winner).toBe(p);
+    expect(r.result).toMatchObject({ won: true, finished: true });
+  });
+
+  it('gives a same-tick finish to the car further along', () => {
+    const a = racing(3004, 3001);
+    a.r.update(0.016);
+    expect(a.r.winner).toBe(a.p);
+    expect(a.r.result.won).toBe(true);
+    const b = racing(3001, 3004);
+    b.r.update(0.016);
+    expect(b.r.winner).toBe(b.o);
+    expect(b.r.result.won).toBe(false);
+    expect(b.r.positionOf(b.p)).toBe(2);
+  });
+
+  it('stops counting once it is over', () => {
+    const { r, o } = racing(2950, 3001);
+    r.update(0.016);
+    const t = r.time;
+    r.update(0.016);
+    expect(r.time).toBe(t);
+    expect(r.winner).toBe(o);
+  });
+});

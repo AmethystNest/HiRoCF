@@ -55,6 +55,9 @@ describe('records', () => {
     expect(c).toMatchObject({ newBest: true, best: 88000, previousBest: 90123, stars: 0 });
     expect(r.get(1, 'normal')).toEqual({ best: 88000, stars: 3, cleared: true });
     expect(r.get(1, 'hard')).toEqual({ best: null, stars: 0, cleared: false });
+    // ...but a race the rival ended before the player got there has no time of the player's
+    const d = r.submit(1, 'normal', { won: false, finished: false, time: 60, gap: 0 });
+    expect(d).toMatchObject({ newBest: false, best: 88000, stars: 0 });
   });
 
   it('persists across loads, including the difficulty chosen', () => {

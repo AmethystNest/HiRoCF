@@ -166,7 +166,9 @@ export function createRecords(
       const before = rec(id, d);
       // floored, as the clock on screen is, so the two never disagree by 1 ms
       const ms = Math.floor(result.time * 1000);
-      const newBest = ms > 0 && (before.best == null || ms < before.best);
+      // a race the player never finished (the rival took the flag first) has
+      // no time of its own to keep
+      const newBest = result.finished !== false && ms > 0 && (before.best == null || ms < before.best);
       const i = stageIds.indexOf(id);
       const next = i >= 0 && i < stageIds.length - 1 ? stageIds[i + 1] : null;
       const wasOpen = next != null && this.isUnlocked(next);

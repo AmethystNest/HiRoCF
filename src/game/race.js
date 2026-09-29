@@ -80,6 +80,9 @@ export class Race {
     this.lapAnnounce = null;
     // Set once, when the player's race is over (see resultFor).
     this.result = null;
+    // The entry that crossed the line first. The battle ends with it: the
+    // first car home, either car, closes the race.
+    this.winner = null;
   }
 
   addCar(car, { isPlayer = false, name = '' } = {}) {
@@ -121,7 +124,14 @@ export class Race {
         e.progress.finishTime = this.time;
       }
     }
-    if (this.player?.progress.finished) {
+    // Whoever crosses first ends it -- the player no longer has to reach
+    // the line for the race to be over. Two cars over it on the same tick
+    // go to the one further along.
+    const home = this.entries.filter((e) => e.progress.finished);
+    if (home.length) {
+      this.winner = home.reduce((a, b) =>
+        (b.progress.finishTime < a.progress.finishTime
+          || (b.progress.finishTime === a.progress.finishTime && b.progress.total > a.progress.total)) ? b : a);
       this.state = 'finished';
       this.result = this.resultFor(this.player);
     }
@@ -137,7 +147,10 @@ export class Race {
    */
   resultFor(entry) {
     const others = this.entries.filter((e) => e !== entry);
-    const won = others.every((o) => !o.progress.finished);
+    const won = this.winner ? this.winner === entry : others.every((o) => !o.progress.finished);
+    // false when the other car took the flag first and this one never
+    // reached the line: `time` is then the winner's, not one of its own
+    const finished = !!entry.progress.finished;
     const t = entry.progress.finishTime ?? this.time;
     let gap = Infinity;
     for (const o of others) {
@@ -150,7 +163,7 @@ export class Race {
       }
       gap = Math.min(gap, g);
     }
-    return { won, time: t, gap: Number.isFinite(gap) ? gap : null };
+    return { won, finished, time: t, gap: Number.isFinite(gap) ? gap : null };
   }
 }
 

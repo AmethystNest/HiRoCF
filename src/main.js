@@ -469,13 +469,13 @@ export class Game {
    * as the trailing car goes on driving, so the zoom crawls for as long
    * as the result card is up.
    *
-   * Measured from the PLAYER, not from the pair's midpoint: the camera
-   * stays pinned to the car that just finished (see finishFraming), so
+   * Measured from the WINNER, not from the pair's midpoint: the camera
+   * stays pinned to the car that just finished first (see finishFraming), so
    * the rival's whole offset has to fit on one side of the anchor
    * rather than half of it on each.
    */
   solveFinishZoom(W, H) {
-    const p = this.player, r = this.rival;
+    const { car: p, other: r } = this.finishFocus();
     if (!p || !r) return FINISH_CAM_SOLO_ZOOM;
     const carW = CAR_SIZE.player.w * this.worldScale;
     const carH = CAR_SIZE.player.h * this.worldScale;
@@ -525,10 +525,11 @@ export class Game {
   }
 
   /**
-   * Where to point the post-race camera: at the car that just crossed,
-   * full stop. Pinning the pivot to the player is what keeps the shot
-   * centred and still -- the camera tracks the one car it is about, and
-   * nothing the rival does afterwards can pull the frame off it.
+   * Where to point the post-race camera: at the car that crossed first,
+   * full stop -- the player's when it won, the rival's when the rival did.
+   * Pinning the pivot to that one car is what keeps the shot centred and
+   * still -- the camera tracks the one car it is about, and nothing the
+   * other does afterwards can pull the frame off it.
    *
    * Cannot reuse gridFraming here: that one centres on the midpoint of
    * the pair and sizes itself for two cars side by side at grid
@@ -536,7 +537,7 @@ export class Game {
    * immediately after it.
    */
   finishFraming(W, H) {
-    const p = this.player;
+    const p = this.finishFocus().car;
     return {
       x: p?.x ?? 0,
       y: p?.y ?? 0,
@@ -545,6 +546,13 @@ export class Game {
       anchorY: H * (FINISH_CARD_BAND + (1 - FINISH_CARD_BAND) / 2),
       zoom: this._finishZoom,
     };
+  }
+
+  /** The car the post-race shot is about (the winner) and the one it is not. */
+  finishFocus() {
+    return this.race?.winner === this.rivalEntry
+      ? { car: this.rival, other: this.player }
+      : { car: this.player, other: this.rival };
   }
 
   cycleZoom() {
@@ -1626,18 +1634,25 @@ export class Game {
     // have to fit in. Both return to the racing framing on the same blend
     // as the zoom, so the three move as one.
     const blend = this.startCameraBlend();
-    let pivotX = p.x, pivotY = p.y, anchorY = H * 0.62;
+    let pivotX = p.x, pivotY = p.y, anchorY = H * 0.62, camAngle = p.angle;
     this.camZoom = 1;
     if (blend > 0) {
-      const grid = this.race.state === 'finished' ? this.finishFraming(W, H) : this.gridFraming(W, H);
+      const finished = this.race.state === 'finished';
+      const grid = finished ? this.finishFraming(W, H) : this.gridFraming(W, H);
       pivotX += (grid.x - p.x) * blend;
       pivotY += (grid.y - p.y) * blend;
       anchorY += (grid.anchorY - anchorY) * blend;
       this.camZoom += (grid.zoom - 1) * blend;
+      // The rival took the flag: the camera turns to face the way it is
+      // heading, by the short way round, as it moves onto it.
+      if (finished) {
+        const f = this.finishFocus().car;
+        camAngle += Math.atan2(Math.sin(f.angle - p.angle), Math.cos(f.angle - p.angle)) * blend;
+      }
     }
     this.world.pivot.set(pivotX, pivotY);
     this.world.position.set(W / 2 + shakeX, anchorY + shakeY);
-    this.world.rotation = -(p.angle + Math.PI / 2);
+    this.world.rotation = -(camAngle + Math.PI / 2);
     this.world.scale.set(this.zoom * this.camZoom);
 
     // Cull about whatever the camera is actually looking at, not the
