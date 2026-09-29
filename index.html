@@ -84,9 +84,19 @@
   .hud .nitroWrap.ready .nitroLabel{color:#bfefff;text-shadow:0 0 8px rgba(100,210,255,.9)}
   .hud .nitroWrap.firing .nitroLabel{color:#ffd79a;text-shadow:0 0 8px rgba(255,150,40,.9)}
   .hud .nitroWrap.firing .nitroLabel{opacity:1;color:#ffd489;text-shadow:0 0 8px rgba(255,180,60,.7)}
-  /* Below the icon row now, not directly under LAP/POS -- see .iconRow. */
-  .hud .note{position:absolute;left:14px;top:calc(max(10px,env(safe-area-inset-top)) + 90px);
-    font-size:11px;opacity:.5;font-weight:600}
+  /* LAP/POS and the clock as two dark chips, the way the icon row below
+     them is glass, rather than bare text on whatever road is behind. No
+     backdrop blur: it would be two more full-rate blurs over the canvas
+     on a phone, and the plain dark fill reads just as well. */
+  .hud .top>div{padding:6px 12px 7px;border-radius:14px;
+    background:linear-gradient(180deg,rgba(255,255,255,.10),rgba(255,255,255,.02)),rgba(9,12,16,.55);
+    border:1px solid rgba(255,255,255,.16);
+    box-shadow:0 6px 16px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.2)}
+  #lap{font-size:15px;letter-spacing:.05em;line-height:1.15}
+  #pos{margin-top:2px;font-size:12px;letter-spacing:.09em;line-height:1.15;opacity:.78;
+    transition:color .2s ease,opacity .2s ease}
+  #pos.lead{color:#ffd64a;opacity:1}
+  #time{font-size:17px;line-height:1.3;font-variant-numeric:tabular-nums;letter-spacing:.03em}
 
   .controls{position:fixed;left:0;right:0;bottom:0;
     padding:0 9px calc(env(safe-area-inset-bottom) + 12px);
@@ -691,7 +701,7 @@
      starting no closer than screenW-144, against a row that tops out
      under 220px even at four icons). */
   .iconRow{position:fixed;left:14px;z-index:15;display:flex;gap:8px;
-    top:calc(max(10px,env(safe-area-inset-top)) + 38px)}
+    top:calc(max(10px,env(safe-area-inset-top)) + 58px)}
   .iconBtn{
     position:relative;
     width:46px;height:46px;border-radius:50%;
@@ -864,7 +874,7 @@
     box-shadow:0 14px 34px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.32),
                0 0 0 0 rgba(255,59,48,0);
     touch-action:manipulation;-webkit-tap-highlight-color:transparent;
-    animation:titleStartPulse 2.2s ease-in-out infinite;
+    animation:titleUp .6s cubic-bezier(.16,1,.3,1) .78s backwards,titleStartPulse 2.2s ease-in-out 1.4s infinite;
     transition:transform .12s ease,background .12s ease,box-shadow .12s ease}
   #titleScreen #titleStart:active{
     transform:scale(.96);animation-play-state:paused;
@@ -880,6 +890,38 @@
                     0 0 0 9px rgba(255,59,48,0)}
   }
 
+  /* Arrival. The logo drops in and settles, the tagline follows with a red
+     rule drawn under it, then the stage chips and START rise in turn --
+     transform/opacity only, so it costs the phone nothing. `:not(.leaving)`
+     keeps the words still while the whole screen fades out on START, and
+     re-showing the title (un-hiding it) plays it again. */
+  #titleScreen:not(.leaving) h1{animation:titleLogoIn .85s cubic-bezier(.16,1,.3,1) backwards}
+  #titleScreen:not(.leaving) .sub{animation:titleUp .6s cubic-bezier(.16,1,.3,1) .28s backwards}
+  #titleScreen .sub::after{content:'';display:block;height:2px;width:min(56vw,220px);margin:12px auto 0;
+    background:linear-gradient(90deg,transparent,#ff3b30 20%,#ff3b30 80%,transparent);
+    box-shadow:0 0 12px rgba(255,59,48,.7);transform-origin:center}
+  #titleScreen:not(.leaving) .sub::after{animation:titleRule .7s cubic-bezier(.16,1,.3,1) .5s backwards}
+  #titleScreen:not(.leaving) .stageChips button{animation:titleUp .5s cubic-bezier(.16,1,.3,1) backwards}
+  #titleScreen:not(.leaving) .stageChips button:nth-child(1){animation-delay:.5s}
+  #titleScreen:not(.leaving) .stageChips button:nth-child(2){animation-delay:.56s}
+  #titleScreen:not(.leaving) .stageChips button:nth-child(3){animation-delay:.62s}
+  #titleScreen:not(.leaving) .stageChips button:nth-child(4){animation-delay:.68s}
+  #titleScreen:not(.leaving) .stageChips button:nth-child(5){animation-delay:.74s}
+  #titleScreen:not(.leaving) .stageInfo{animation:titleUp .5s cubic-bezier(.16,1,.3,1) .7s backwards}
+  /* the menu sits mid-screen over the busiest part of the photo (roof,
+     glass, tarmac): a soft dark pool behind it keeps the chips and the
+     BEST line readable whichever way the picture falls */
+  #titleScreen .startWrap::before{content:'';position:absolute;z-index:-1;inset:-34px -26px -30px;
+    background:radial-gradient(closest-side,rgba(5,7,10,.5),rgba(5,7,10,0));pointer-events:none}
+  @keyframes titleLogoIn{
+    from{opacity:0;transform:translateY(-26px) scale(1.14)}
+    to{opacity:1;transform:none}}
+  @keyframes titleUp{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:none}}
+  @keyframes titleRule{from{opacity:0;transform:scaleX(0)}to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion:reduce){
+    #titleScreen *{animation:none!important}
+  }
+
   /* Short screens (landscape phones): the title menu, now three rows deep,
      would
      sit centred straight over the logo, so it is anchored to the bottom
@@ -893,6 +935,60 @@
     .stageChips button .k{display:none}
     .stageInfo{margin-bottom:7px}
   }
+
+  /* --- ending ----------------------------------------------------------
+     After a win on the last stage: the clip (contained, so a portrait
+     phone gets it full width between black bars), then the credits over a
+     dimmed still of its last frame. Above the title (200), which it never
+     needs to share the screen with. */
+  #endingOverlay{position:fixed;inset:0;z-index:300;background:#000;color:#fff;
+    opacity:0;visibility:hidden;transition:opacity .6s ease,visibility 0s linear .6s;
+    touch-action:manipulation;overflow:hidden}
+  #endingOverlay.on{opacity:1;visibility:visible;transition:opacity .6s ease}
+  #endingOverlay[hidden]{display:none}
+  #endingVideo{position:absolute;left:0;top:50%;width:100%;height:auto;max-height:100%;
+    transform:translateY(-50%);object-fit:contain;background:#000;opacity:0;
+    transition:opacity .9s ease,filter 1.4s ease}
+  #endingOverlay.video #endingVideo{opacity:1}
+  #endingOverlay.roll #endingVideo{opacity:.32;filter:brightness(.7)}
+  #endingRoll{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;text-align:center;padding:0 24px;pointer-events:none;opacity:0;
+    transition:opacity .8s ease}
+  #endingOverlay.roll #endingRoll{opacity:1}
+  #endingRoll .rollIn{display:flex;flex-direction:column;align-items:center;gap:7px;
+    animation:endDrift 26s linear both;animation-play-state:paused}
+  #endingOverlay.roll #endingRoll .rollIn{animation-play-state:running}
+  @keyframes endDrift{from{transform:translateY(34px)}to{transform:translateY(-34px)}}
+  #endingRoll .ln{opacity:0;animation:endLine .9s cubic-bezier(.16,1,.3,1) both paused;
+    animation-delay:calc(var(--i) * .42s + .4s)}
+  #endingOverlay.roll #endingRoll .ln{animation-play-state:running}
+  @keyframes endLine{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+  #endingRoll .big{font-size:min(8.2vw,40px);line-height:1.1;white-space:nowrap;padding:0 .3em}
+  #endingRoll .logo{font-size:min(15vw,66px);font-weight:900;line-height:1;font-family:Arial,system-ui,sans-serif;
+    -webkit-text-stroke:1.5px rgba(5,7,10,.55);margin-top:14px;
+    filter:drop-shadow(0 3px 3px rgba(0,0,0,.55)) drop-shadow(0 0 22px rgba(255,59,48,.35))}
+  #endingRoll .logo .r{color:#ff3b30}
+  #endingRoll .hd{margin-top:14px;font-size:11px;font-weight:800;letter-spacing:.5em;text-indent:.5em;
+    color:rgba(255,255,255,.5)}
+  #endingRoll .tx{font-size:15px;font-weight:700;letter-spacing:.06em;color:#eef3f8;font-variant-numeric:tabular-nums}
+  #endingRoll .tx small{font-size:11px;letter-spacing:.2em;opacity:.55;margin-right:.9em}
+  #endingRoll .thanks{margin-top:8px;font-size:12px;font-weight:800;letter-spacing:.42em;text-indent:.42em;
+    color:#ffd64a;text-shadow:0 0 14px rgba(255,214,74,.45)}
+  #endingRoll button{pointer-events:auto;margin-top:22px;width:min(70vw,240px);height:48px;border-radius:16px;
+    border:1px solid rgba(255,255,255,.28);color:#fff;font-size:14px;font-weight:900;letter-spacing:.3em;text-indent:.3em;
+    background:radial-gradient(130% 100% at 50% -20%,rgba(255,255,255,.26),rgba(255,255,255,.04) 64%),rgba(24,30,38,.9);
+    box-shadow:0 10px 24px rgba(0,0,0,.44),inset 0 1px 0 rgba(255,255,255,.26);
+    opacity:0;animation:endLine .9s cubic-bezier(.16,1,.3,1) both paused;
+    animation-delay:calc(var(--i) * .42s + .4s);touch-action:manipulation}
+  #endingOverlay.roll #endingRoll button{animation-play-state:running}
+  #endingRoll button:active{transform:scale(.97);border-color:rgba(255,255,255,.7)}
+  #endingSkip{position:absolute;right:max(14px,env(safe-area-inset-right));
+    top:calc(max(12px,env(safe-area-inset-top)) + 2px);z-index:2;height:34px;padding:0 16px;border-radius:999px;
+    border:1px solid rgba(255,255,255,.3);background:rgba(10,13,17,.55);color:rgba(255,255,255,.85);
+    font-size:11px;font-weight:900;letter-spacing:.24em;text-indent:.24em;touch-action:manipulation;
+    opacity:0;transition:opacity .5s ease .9s}
+  #endingOverlay.on #endingSkip{opacity:1}
+  #endingOverlay.roll #endingSkip{opacity:0;pointer-events:none;transition-delay:0s}
 </style>
 </head>
 <body class="pre-race">
@@ -916,7 +1012,6 @@
     <div><div id="lap">LAP 1/3</div><div id="pos">POS 2/2</div></div>
     <div id="time">00:00.000</div>
   </div>
-  <div class="note" id="note">v2.0 · PIXI RENDER CORE</div>
   <div class="speed"><span id="speed">0</span><small>km/h</small></div>
   <div class="nitroWrap" id="nitroWrap">
     <div class="nitroBar"><i id="nitroFill"></i></div>
@@ -1007,6 +1102,12 @@
     <button id="retryBtn">NEXT STAGE</button>
     <button id="finishTitle" class="sec">TITLE</button>
   </div>
+</div>
+
+<div id="endingOverlay" hidden>
+  <video id="endingVideo" playsinline webkit-playsinline preload="none"></video>
+  <div id="endingRoll"></div>
+  <button id="endingSkip" aria-label="skip">SKIP</button>
 </div>
 
 <script type="module">
@@ -1223,7 +1324,7 @@
         finishStage.textContent=`${game.cfg.name} CLEAR`;
         stageBtn.textContent=game.stageId<LAST_STAGE?'NEXT STAGE':'RETRY FINAL STAGE';
         lapEl.textContent=`LAP 1/${game.race?.totalLaps??3}`;
-        posEl.textContent='POS 2/2';
+        posEl.textContent='POS 2/2';posEl.classList.remove('lead');
         timeEl.textContent='00:00.000';
       };
       syncStageUI();
@@ -1279,7 +1380,9 @@
         if(race.lapAnnounce!=null){showLapPopup(race.lapAnnounce,race.totalLaps);race.lapAnnounce=null}
         const lap=Math.min(game.playerEntry.progress.lap,race.totalLaps);
         lapEl.textContent=`LAP ${lap}/${race.totalLaps}`;
-        posEl.textContent=`POS ${race.positionOf(game.playerEntry)}/2`;
+        const pos=race.positionOf(game.playerEntry);
+        posEl.textContent=`POS ${pos}/2`;
+        posEl.classList.toggle('lead',pos===1);
         timeEl.textContent=fmtTime(race.time);
         vsOverlay.classList.toggle('vis',race.state==='vs');
         signalOverlay.hidden=race.state!=='countdown';
@@ -1320,7 +1423,7 @@
             finishPlace.textContent=won?'WIN':'LOSE';
             finishTime.textContent=fmtTime(game.playerEntry.progress.finishTime??race.time);
             paintRecord(race.result??{won,time:game.playerEntry.progress.finishTime??race.time,gap:null});
-            stageBtn.textContent=(won&&game.stageId<LAST_STAGE)?'NEXT STAGE':(won?'RETRY FINAL STAGE':'RETRY');
+            stageBtn.textContent=(won&&game.stageId<LAST_STAGE)?'NEXT STAGE':(won?'ENDING':'RETRY');
             finishOverlay.hidden=false;
             // Side lightning lands WITH the card, not back at the line
             // -- the strike is what announces the result.
@@ -1394,15 +1497,15 @@
         e.preventDefault();
         game.audio?.click();
         const place=game.race?.positionOf(game.playerEntry)??2;
+        // a win on the last stage has nowhere further to go: the ending
+        if(place===1&&game.stageId===LAST_STAGE){playEnding();return;}
         goToStage((place===1&&game.stageId<LAST_STAGE)?game.stageId+1:game.stageId);
       });
 
-      // Back to the title from the result: its stage chips offer every
-      // stage won so far. Lined up on the stage NEXT STAGE would have
+      // Freeze the race shell and put the title up. Its stage chips offer
+      // every stage won so far, lined up on the stage NEXT STAGE would have
       // gone to, so START from there is the same as that button.
-      el('finishTitle').addEventListener('pointerdown',e=>{
-        e.preventDefault();
-        game.audio?.click();
+      const toTitle=()=>{
         const place=game.race?.positionOf(game.playerEntry)??2;
         goToStage((place===1&&game.stageId<LAST_STAGE)?game.stageId+1:game.stageId);
         // stopping the loop leaves the last engine ramp running (openPause)
@@ -1413,7 +1516,98 @@
         game.rivalSqueal?.silence();
         game.bgm?.pause();
         showTitle();   // ticker stays stopped until START
+      };
+      el('finishTitle').addEventListener('pointerdown',e=>{
+        e.preventDefault();
+        game.audio?.click();
+        toTitle();
       });
+
+      // --- ending ---
+      // The clip (assets/ending/, published beside the page like the music;
+      // a build without it goes straight to the credits), then the credits
+      // built from what this save actually holds. SKIP and the credits'
+      // TITLE button both end it. Every phase change is idempotent because
+      // the clip's own events, the safety timer and SKIP can all race.
+      const endingEl=el('endingOverlay'),endingVideo=el('endingVideo'),endingRoll=el('endingRoll'),endingSkip=el('endingSkip');
+      let endingBusy=false,endingDone=null;
+      const endingSource=()=>{
+        if(endingVideo.canPlayType('video/mp4; codecs="avc1.4D401E, mp4a.40.2"'))return 'assets/ending/ending.mp4';
+        if(endingVideo.canPlayType('video/webm; codecs="vp9, opus"'))return 'assets/ending/ending.webm';
+        return null;
+      };
+      const buildRoll=()=>{
+        const ids=STAGE_IDS,rows=[];
+        let i=0;
+        const ln=(cls,html)=>rows.push(`<div class="ln ${cls}" style="--i:${i++}">${html}</div>`);
+        ln('','<span class="chrome rake big">CONGRATULATIONS</span>');
+        ln('tx',`ALL ${ids.length} STAGES CLEAR`);
+        ln('hd','RIVALS');
+        for(const id of ids)ln('tx',`<small>STAGE ${id}</small>${stages[id].rivalName}`);
+        const stars=ids.reduce((n,id)=>n+records.get(id).stars,0);
+        const bests=ids.map(id=>records.get(id).best);
+        ln('hd','RESULT');
+        ln('tx',`<small>STARS</small>★ ${stars} / ${ids.length*3}`);
+        if(bests.every(b=>b!=null))ln('tx',`<small>TOTAL BEST</small>${fmtTime(bests.reduce((a,b)=>a+b,0)/1000)}`);
+        ln('logo','<span>Hi</span><span class="r">R</span><span>o</span><span class="r">CF</span>');
+        ln('thanks','THANK YOU FOR PLAYING');
+        endingRoll.innerHTML=`<div class="rollIn">${rows.join('')}<button id="endingTitle" style="--i:${i}">TITLE</button></div>`;
+        endingRoll.querySelector('#endingTitle').addEventListener('pointerdown',e=>{e.preventDefault();game.audio?.click();endingDone?.();});
+      };
+      const playEnding=()=>{
+        if(endingBusy)return;
+        endingBusy=true;
+        // the race is over: nothing under the ending should keep running
+        app.ticker.stop();
+        game.playerEngine?.silence();game.rivalEngine?.silence();
+        game.playerSqueal?.silence();game.rivalSqueal?.silence();
+        game.bgm?.pause();
+        finishOverlay.hidden=true;
+        buildRoll();
+        endingEl.classList.remove('video','roll');
+        endingEl.hidden=false;
+        void endingEl.offsetWidth;
+        endingEl.classList.add('on');
+        let phase='video',safety=0;
+        const toRoll=()=>{
+          if(phase!=='video')return;
+          phase='roll';
+          clearTimeout(safety);
+          endingEl.classList.remove('video');
+          endingEl.classList.add('roll');
+          // the stage-5 track under the credits, from the top
+          game.bgm?.load(LAST_STAGE);game.bgm?.start();
+        };
+        endingDone=()=>{
+          if(phase==='done')return;
+          phase='done';
+          clearTimeout(safety);
+          endingDone=null;
+          game.bgm?.fadeOut(0.6);
+          try{endingVideo.pause();}catch{/* nothing playing */}
+          endingEl.classList.remove('on');
+          setTimeout(()=>{
+            endingEl.hidden=true;
+            endingEl.classList.remove('video','roll');
+            endingVideo.removeAttribute('src');endingVideo.load();
+            endingRoll.textContent='';
+            endingBusy=false;
+            toTitle();
+          },650);
+        };
+        endingSkip.onpointerdown=e=>{e.preventDefault();game.audio?.click();endingDone?.();};
+        const src=endingSource();
+        if(!src){toRoll();return;}
+        endingVideo.muted=!!game.audio?.muted;
+        endingVideo.onplaying=()=>{clearTimeout(safety);if(phase==='video')endingEl.classList.add('video');};
+        endingVideo.onended=toRoll;
+        endingVideo.onerror=toRoll;
+        // nothing playing 6 s in (blocked, missing, stalled): credits instead
+        safety=setTimeout(toRoll,6000);
+        endingVideo.src=src;
+        const p=endingVideo.play();
+        if(p&&p.catch)p.catch(toRoll);
+      };
 
       // --- pause ---
       // The ticker drives game.update AND the HUD ticker below, so

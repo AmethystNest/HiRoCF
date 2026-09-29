@@ -11,3 +11,7 @@ assets/bgm/
 # PWA build output (build/pwa.mjs)
 dist/
 dist-artifact/
+
+# Ending clip (user-supplied, not redistributed in the public repo); build/artifact.mjs
+# publishes whatever is there and the ending falls back to text without it.
+assets/ending/

@@ -72,4 +72,16 @@ if (existsSync(join(root, 'assets/bgm'))) {
     tracks++;
   }
 }
-console.log(`dist-artifact/index.html ${(html.length / 1024 / 1024).toFixed(2)} MB, bgm tracks ${tracks}`);
+// The ending clip (mp4 for iPhone, webm as the other choice), also a
+// separate file: index.html asks for assets/ending/ending.{mp4,webm} when
+// the credits roll and goes straight to the credits if it cannot play it.
+let clips = 0;
+if (existsSync(join(root, 'assets/ending'))) {
+  mkdirSync(join(OUT, 'assets/ending'), { recursive: true });
+  for (const f of readdirSync(join(root, 'assets/ending'))) {
+    if (!/^ending\.(mp4|webm)$/.test(f)) continue;
+    copyFileSync(join(root, 'assets/ending', f), join(OUT, 'assets/ending', f));
+    clips++;
+  }
+}
+console.log(`dist-artifact/index.html ${(html.length / 1024 / 1024).toFixed(2)} MB, bgm tracks ${tracks}, ending clips ${clips}`);
