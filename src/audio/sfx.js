@@ -1215,6 +1215,7 @@ export function buildAudio(ctx) {
    *   slope, half: fall-off of the orders and level of the half orders
    *   boost: { order: multiplier } on top of that
    *   idle, redline, gearTop, shiftTime, shiftDuck, overshoot: the box
+   *   pitch: multiplier on the whole voice's frequency (1 = as the revs say)
    *   hp, shelf {hz, db}, peaks [{hz, q, db}]: fixed EQ
    *   lp(rpm, thr): the low-pass that opens with revs and throttle
    *   noise { hz(rpm), q, level }: intake / turbulence
@@ -1279,7 +1280,7 @@ export function buildAudio(ctx) {
         const glide = st.shifting || st.blip > 0 ? 0.03 : 0.06;
         wobble = wobble * 0.86 + (Math.random() - 0.5) * 0.4;
         osc.detune.setTargetAtTime(wobble * 18, t, 0.03);
-        osc.frequency.setTargetAtTime(st.rpm / 120, t, glide);
+        osc.frequency.setTargetAtTime((st.rpm / 120) * (spec.pitch ?? 1), t, glide);
         onThrottle += (throttle - onThrottle) * 0.18;
         const thr = Math.max(onThrottle, st.blip);
         const rev = (st.rpm - spec.idle) / (spec.redline - spec.idle);
@@ -1487,6 +1488,9 @@ export function buildAudio(ctx) {
     const e = makeSynthEngine(baseGain, {
       cyl: 10, maxOrder: 20, slope: 0.35, half: 0.4, boost: { 2.5: 1.2, 5: 2.3, 10: 1.5, 15: 1.1 },
       idle: 1100, redline: 8700, gearTop: gearTops(7, 1.24), shiftTime: 0.05, shiftDuck: 0.6, overshoot: 0.18,
+      // a touch higher than the revs alone give (asked for: +9%, about a
+      // semitone and a half) -- the box and the EQ are left where they were
+      pitch: 1.09,
       hp: 70, shelf: { hz: 150, db: 2 }, peaks: [{ hz: 700, q: 0.9, db: 3 }, { hz: 2200, q: 1.2, db: 5 }],
       lp: (rpm, thr) => (1800 + rpm * 0.6) * (0.55 + 0.45 * thr),
       noise: { hz: (rpm) => 2000 + rpm * 0.25, q: 0.9, level: 0.12 },

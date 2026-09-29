@@ -149,6 +149,23 @@ const FINISH_CAR_FILL = 0.72;
 const RIVAL_UNDER_ALPHA = 0.3;
 /** Post-race autopilot's braking for traffic, dial units per second. */
 const POST_RACE_BRAKE = 700;
+/**
+ * After the flag the cars drive themselves and are still solid, and two of
+ * them can wedge each other for good: the player slows to stay clear of a
+ * traffic car that is holding back for the player, and neither ever gives
+ * way (found by ramming traffic just before the line: 3 in 250 never moved
+ * again). A car that has covered less than POST_STALL_MOVE in POST_STALL_SECS
+ * is let through everything until it has gone POST_GHOST_DIST.
+ */
+const POST_STALL_SECS = 1.0;
+const POST_STALL_MOVE = 60;
+// Also stalled: crawling (a car shoved along at a walking pace covers more
+// than POST_STALL_MOVE and still never gets away), against a cruise of ~276
+// and traffic at ~216 in the same dial units.
+const POST_CRAWL_SPEED = 100;
+const POST_CRAWL_SECS = 1.5;
+const POST_GHOST_DIST = 1400;
+const POST_GHOST_CLEAR = 450;
 
 /**
  * How loud a sound made `d` world units from the player is, 0..1. The
@@ -346,6 +363,7 @@ export class Game {
     this.sideBolts = buildSideBolts();
     app.stage.addChildAt(this.sideBolts.view, app.stage.getChildIndex(this.finishFX.view));
     this._prevRaceState = null;
+    this._stall = null;
     this._finishCamTimer = 0;
     this._finishZoom = FINISH_CAM_SOLO_ZOOM;
   }
@@ -1253,6 +1271,22 @@ export class Game {
     }
   }
 
+  /** Notice an autopilot car that has stopped dead, and let it through. */
+  trackPostStall(key, car, dt, clear) {
+    const st = ((this._stall ??= {})[key] ??= { x: car.x, y: car.y, t: 0, slow: 0, ghost: null });
+    if (st.ghost) {
+      if (clear && Math.hypot(car.x - st.ghost.x, car.y - st.ghost.y) > POST_GHOST_DIST) {
+        st.ghost = null; st.x = car.x; st.y = car.y; st.t = 0; st.slow = 0;
+      }
+      return;
+    }
+    st.t += dt;
+    st.slow = car.speed < POST_CRAWL_SPEED ? st.slow + dt : 0;
+    if (Math.hypot(car.x - st.x, car.y - st.y) > POST_STALL_MOVE) { st.x = car.x; st.y = car.y; st.t = 0; }
+    else if (st.t > POST_STALL_SECS) st.ghost = { x: car.x, y: car.y };
+    if (!st.ghost && st.slow > POST_CRAWL_SECS) st.ghost = { x: car.x, y: car.y };
+  }
+
   /**
    * The player's autopilot after the finish: the side of the road it was
    * given at the flag (_postRaceLane), unless traffic is in the way -- then
@@ -1263,7 +1297,7 @@ export class Game {
   postRacePlayerLane(dt) {
     const CRUISE = 410;
     const base = this._postRaceLane.player;
-    if (!this.traffic) return { lat: base, speed: CRUISE };
+    if (!this.traffic || this._stall?.player?.ghost) return { lat: base, speed: CRUISE };
     const p = this.player;
     if (!this._postPass) this._postPass = { want: base, lat: base };
     const pass = this._postPass;
@@ -1350,15 +1384,17 @@ export class Game {
     } else if (state === 'finished') {
       // Still solid after the flag: the two racers against each other and
       // against the traffic, which the player's autopilot steers round
-      // (see postRacePlayerLane) and the truck does not.
-      if ((p.deckId ?? 0) === (this.rival.deckId ?? 0)) {
+      // (see postRacePlayerLane) and the truck does not -- except a car that
+      // has stopped dead (see POST_STALL_SECS), which passes through.
+      const ghosting = !!(this._stall?.player?.ghost || this._stall?.rival?.ghost);
+      if (!ghosting && (p.deckId ?? 0) === (this.rival.deckId ?? 0)) {
         resolveContacts(
           [p, this.rival],
           [{ w: CAR_SIZE.player.w * this.worldScale, h: CAR_SIZE.player.h * this.worldScale }, this.rivalHullSize],
           dt,
         );
       }
-      this.updateTraffic(dt, true);
+      this.updateTraffic(dt, !ghosting);
       // Race is over: clear any remaining drift state/visual yaw for BOTH cars,
       // then keep them circulating under AI control. This prevents a car from
       // staying visually sideways forever if it crosses the line mid-drift.
@@ -1380,6 +1416,16 @@ export class Game {
       const pass = this.postRacePlayerLane(dt);
       autoDrivePostRace(p, this.path, dt, pass.speed, pass.lat);
       autoDrivePostRace(this.rival, this.path, dt, 390, this._postRaceLane.rival);
+      // a car may only stop passing through things once nothing is close
+      // enough to touch it, or it lands back inside whatever it was passing
+      const clearOf = (car, others) => others.every((o) => Math.hypot(o.x - car.x, o.y - car.y) > POST_GHOST_CLEAR)
+        && (!this.traffic || this.traffic.cars.every((c) => Math.hypot(c.x - car.x, c.y - car.y) > POST_GHOST_CLEAR));
+      this.trackPostStall('player', p, dt, clearOf(p, [this.rival]));
+      this.trackPostStall('rival', this.rival, dt, clearOf(this.rival, [p]));
+      // The camera shake only ever decays in player.update(), which is not
+      // called any more. A knock taken after the line (traffic, the rival)
+      // raised it and nothing lowered it again: the picture stayed shaking.
+      p.shake = Math.max(0, (p.shake || 0) - dt * 26);
     }
     this.race.update(dt);
 
@@ -1483,6 +1529,7 @@ export class Game {
       const halfGap = Math.min(wantedGap, safeGap);
       this._postRaceLane = { player: sign * halfGap, rival: -sign * halfGap };
       this._postPass = null;
+      this._stall = null;
 
       const place = this.race.positionOf(this.playerEntry);
       this.finishFX.trigger(place, this.app.screen.width, this.app.screen.height);

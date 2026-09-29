@@ -34,7 +34,10 @@
   /* + var(--rowH) + 9px: the NITRO bar sits a row above the right-hand
      pads (see #actSide), so everything stacked over the pads goes up by
      that row. */
-  .hud .speed{position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + var(--ctrlH) + var(--rowH) + 77px);
+  /* Sits right on top of the nitro gauge (its top edge is +52px: the bar,
+     the caption and their gap), as low as it can go -- higher, it ran into
+     the tail of the car. */
+  .hud .speed{position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + var(--ctrlH) + var(--rowH) + 55px);
     text-align:center;font-size:22px;letter-spacing:.02em}
   .hud .speed small{font-size:11px;opacity:.75;margin-left:4px;font-weight:600}
   .hud .nitroWrap{position:absolute;left:50%;transform:translateX(-50%);
@@ -262,7 +265,7 @@
      readout and gauge up over the car, so the pads give some height back. */
   @media (max-height:740px) and (min-height:521px){
     :root{ --ctrlH: min(22vw, 104px); --rowH: 40px; }
-    .hud .speed{bottom:calc(env(safe-area-inset-bottom) + var(--ctrlH) + var(--rowH) + 70px)}
+    .hud .speed{bottom:calc(env(safe-area-inset-bottom) + var(--ctrlH) + var(--rowH) + 40px)}
     .hud .nitroWrap{bottom:calc(env(safe-area-inset-bottom) + var(--ctrlH) + var(--rowH) + 24px)}
     /* no room for the caption under the gauge; the NITRO bar says it */
     .hud .nitroLabel{display:none}
