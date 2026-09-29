@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { hullCircles, resolveContacts, Race } from './race.js';
+import { overlapDepth } from './hull.js';
 
 // resolveContacts decides who is who from the constructor name, so the
 // stand-ins here carry the real names. Everything else it touches (x, y,
@@ -176,5 +177,80 @@ describe('the battle ends when either car finishes', () => {
     r.update(0.016);
     expect(r.time).toBe(t);
     expect(r.winner).toBe(o);
+  });
+});
+
+describe('resolveContacts with hulls cut from the drawn cars', () => {
+  const rect = (w, h) => [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]];
+  const SIZE = { w: 70, h: 120, poly: rect(70, 120) };
+
+  it('leaves no overlap after a rear-end and hands the front car speed', () => {
+    const p = new PlayerCar({ x: 0, y: 0, speed: 650 });
+    const r = new RivalCar({ x: 118, y: 0, speed: 400 });
+    resolveContacts([p, r], [SIZE, SIZE], 1 / 60);
+    expect(overlapDepth(p, SIZE, r, SIZE)).toBeLessThan(0.5);
+    expect(r.speed).toBeGreaterThan(400);
+    expect(p.speed).toBeLessThan(650);
+  });
+
+  it('touches when the bodies touch, not before', () => {
+    const p = new PlayerCar({ x: 0, y: 0, speed: 300 });
+    const r = new RivalCar({ x: 122, y: 0, speed: 300 });
+    resolveContacts([p, r], [SIZE, SIZE], 1 / 60);
+    expect(p.carImpact).toBeFalsy();
+    expect(p.x).toBe(0);
+  });
+
+  it('turns a car hit off its middle, by the side the hit is on, and not one hit dead centre', () => {
+    const hitAt = (offset) => {
+      const p = new PlayerCar({ x: 0, y: offset, speed: 650 });
+      const r = new RivalCar({ x: 118, y: 0, speed: 400 });
+      resolveContacts([p, r], [SIZE, SIZE], 1 / 60);
+      return r.yawKick;
+    };
+    const right = hitAt(25), left = hitAt(-25), centre = hitAt(0);
+    expect(right).toBeLessThan(-0.05);          // tail pushed on its right: the nose swings left
+    expect(left).toBeGreaterThan(0.05);
+    expect(right).toBeCloseTo(-left, 6);
+    expect(Math.abs(centre)).toBeLessThan(0.01);
+  });
+
+  it('never turns a car by more than its cap', () => {
+    const p = new PlayerCar({ x: 0, y: 30, speed: 900 });
+    const r = new RivalCar({ x: 90, y: 0, angle: Math.PI / 2, speed: 900 });
+    resolveContacts([p, r], [SIZE, SIZE], 1 / 60);
+    expect(Math.abs(p.yawKick ?? 0)).toBeGreaterThan(0);
+    expect(Math.abs(p.yawKick)).toBeLessThanOrEqual(2.5);
+    expect(Math.abs(r.yawKick)).toBeLessThanOrEqual(2.5);
+  });
+
+  it('turns the player by 60% of what the same hit turns a rival', () => {
+    const kickOf = (car) => {
+      const other = new RivalCar({ x: 118, y: 0, speed: 400 });
+      resolveContacts([car, other], [SIZE, SIZE], 1 / 60);
+      return car.yawKick;
+    };
+    const asPlayer = kickOf(new PlayerCar({ x: 0, y: 25, speed: 650 }));
+    const asRival = kickOf(new RivalCar({ x: 0, y: 25, speed: 650 }));
+    expect(Math.abs(asRival)).toBeGreaterThan(0.05);
+    expect(asPlayer / asRival).toBeCloseTo(0.6, 3);
+  });
+
+  it('gives no turn to cars that are moving apart', () => {
+    const p = new PlayerCar({ x: 0, y: 0, speed: 300 });
+    const r = new RivalCar({ x: 118, y: 20, speed: 500 });   // overlapping, but pulling away
+    resolveContacts([p, r], [SIZE, SIZE], 1 / 60);
+    expect(r.yawKick ?? 0).toBe(0);
+    expect(p.yawKick ?? 0).toBe(0);
+  });
+
+  it('turns a contact only once, however many frames it lasts', () => {
+    const p = new PlayerCar({ x: 0, y: 25, speed: 650 });
+    const r = new RivalCar({ x: 118, y: 0, speed: 400 });
+    resolveContacts([p, r], [SIZE, SIZE], 1 / 60);
+    const first = r.yawKick;
+    resolveContacts([p, r], [SIZE, SIZE], 1 / 60);
+    resolveContacts([p, r], [SIZE, SIZE], 1 / 60);
+    expect(r.yawKick).toBeCloseTo(first, 6);
   });
 });

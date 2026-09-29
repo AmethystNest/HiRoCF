@@ -1,4 +1,5 @@
 import { Application, Assets, Container, Graphics, Mesh, Sprite, Texture, Rectangle } from './pixi.js';
+import { silhouetteFractions, scalePolygon } from './game/hull.js';
 import { STAGES, PHYSICS, rivalTuning, CAR_SIZE, CAR_VISUAL_SCALE, CAR_HULL_SCALE, CAR_HULL_OFFSET, DRIFT_MARK_LIFE } from './config.js';
 import { STAGE_PATHS } from './track/stages.js';
 import { buildSurface, surfaceExtent, visibleBarrierHalf, buildRampStructure, buildTunnelStructure, buildElevatedDeckShadow, elevatedRuns, deckRuns, foldLimits, squeezedBarrier } from './render/surfaces.js';
@@ -14,7 +15,7 @@ import { buildContactFX } from './render/contactfx.js';
 import { LAYOUTS } from './track/layouts.js';
 import { PlayerCar } from './game/player.js';
 import { RivalCar } from './game/rival.js';
-import { Race, resolveContacts, autoDrivePostRace } from './game/race.js';
+import { Race, resolveContacts, autoDrivePostRace, YAW_DECAY } from './game/race.js';
 import { Traffic } from './game/traffic.js';
 import { MOB_CARS, MOB_PAINTS, glossFor } from './render/mobcars.js';
 import { buildViewMask } from './render/viewmask.js';
@@ -364,6 +365,8 @@ export class Game {
     app.stage.addChildAt(this.sideBolts.view, app.stage.getChildIndex(this.finishFX.view));
     this._prevRaceState = null;
     this._stall = null;
+    if (this.player) this.player.yawKick = 0;
+    if (this.rival) this.rival.yawKick = 0;
     this._finishCamTimer = 0;
     this._finishZoom = FINISH_CAM_SOLO_ZOOM;
   }
@@ -1174,6 +1177,10 @@ export class Game {
     // drawn on or the collision hull the two cars use against each other.
     this.player.wallBody = drawnBody(this.playerSprite);
     this.rival.wallBody = drawnBody(this.rivalSprite);
+    // The two racers' collision hulls, cut from the drawn silhouettes (see
+    // game/hull.js). Traffic still uses the circle chain from w/h alone.
+    this.playerHullSize = { w: CAR_SIZE.player.w * this.worldScale, h: CAR_SIZE.player.h * this.worldScale, poly: spriteHull(this.playerSprite) };
+    this.rivalHullSize.poly = spriteHull(this.rivalSprite);
 
     // Now that both cars exist, sparks draw over them -- see contactFX
     // setup near driftGfx above.
@@ -1372,7 +1379,7 @@ export class Game {
         resolveContacts(
           [p, this.rival],
           [
-            { w: CAR_SIZE.player.w * this.worldScale, h: CAR_SIZE.player.h * this.worldScale },
+            this.playerHullSize,
             // rivalHullSize, not rivalSize -- already in world units (see
             // where it's built above), so no further * worldScale here.
             this.rivalHullSize,
@@ -1390,7 +1397,7 @@ export class Game {
       if (!ghosting && (p.deckId ?? 0) === (this.rival.deckId ?? 0)) {
         resolveContacts(
           [p, this.rival],
-          [{ w: CAR_SIZE.player.w * this.worldScale, h: CAR_SIZE.player.h * this.worldScale }, this.rivalHullSize],
+          [this.playerHullSize, this.rivalHullSize],
           dt,
         );
       }
@@ -1426,6 +1433,14 @@ export class Game {
       // called any more. A knock taken after the line (traffic, the rival)
       // raised it and nothing lowered it again: the picture stayed shaking.
       p.shake = Math.max(0, (p.shake || 0) - dt * 26);
+    }
+    // The turn a hit off the middle of a car gave it (see resolveContacts),
+    // played out and let die away; the car's own steering brings it straight.
+    for (const car of [p, this.rival]) {
+      if (!car.yawKick) continue;
+      car.angle += car.yawKick * dt;
+      car.yawKick *= Math.exp(-YAW_DECAY * dt);
+      if (Math.abs(car.yawKick) < 0.01) car.yawKick = 0;
     }
     this.race.update(dt);
 
@@ -1846,6 +1861,28 @@ const CAR_ALPHA_GAP = 0.09;
  * 3's carry as much empty canvas as car, the R8's almost none -- so the
  * sprite's own width says nothing reliable about where its bodywork ends.
  */
+const hullFractionCache = new WeakMap();
+/** The drawn silhouette of a sprite as a convex polygon in world units,
+ *  texture axes (see game/hull.js). Cut from the photo's alpha once per
+ *  texture, at most 256 px on a side, and scaled to how it is drawn now. */
+function spriteHull(sprite) {
+  const tex = sprite.texture;
+  let fr = hullFractionCache.get(tex);
+  if (fr === undefined) {
+    const f = tex.frame;
+    const k = Math.min(1, 256 / Math.max(f.width, f.height));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(f.width * k));
+    c.height = Math.max(1, Math.round(f.height * k));
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(tex.source.resource, f.x, f.y, f.width, f.height, 0, 0, c.width, c.height);
+    fr = silhouetteFractions(ctx.getImageData(0, 0, c.width, c.height).data, c.width, c.height);
+    hullFractionCache.set(tex, fr);
+  }
+  if (!fr) return undefined;
+  return scalePolygon(fr, sprite.width, sprite.height);
+}
+
 const bodyFractionCache = new WeakMap();
 function drawnBody(sprite) {
   const tex = sprite.texture;

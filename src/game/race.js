@@ -8,6 +8,7 @@
  */
 import { RACE, PHYSICS as P } from '../config.js';
 import { setContact } from './contact.js';
+import { worldPolygon, polygonContact } from './hull.js';
 
 export class Progress {
   /**
@@ -327,6 +328,20 @@ export function autoDrivePostRace(car, path, dt, targetSpeed, laneOffset = 0) {
 /** Share of the way to a shared speed a rear-end takes both cars. */
 const SHUNT_SHARE = 0.4;
 
+/**
+ * A hit off the middle of a car turns it. `YAW_KICK` is the yaw rate, rad/s,
+ * a full-speed hit right at the end of a car's length gives it; it dies away
+ * at `YAW_DECAY` per second, so the heading moves by about YAW_KICK / YAW_DECAY
+ * (0.5 rad, 29 degrees) at the very most and the car is steered straight
+ * again by its driver. The player gets `YAW_PLAYER` of it: a nudge to feel,
+ * not a spin to recover from.
+ */
+export const YAW_KICK = 2.0;
+export const YAW_DECAY = 4;
+const YAW_PLAYER = 0.6;
+const YAW_MAX = 2.5;
+const YAW_CLOSING = 400;
+
 /** Push overlapping cars apart; side rubbing is cheap, head-on costs speed. */
 export function resolveContacts(cars, sizes, dt = 1 / 60, passes = 4) {
   // Per-car "was this one touched during this call" flag, for the impact
@@ -340,30 +355,36 @@ export function resolveContacts(cars, sizes, dt = 1 / 60, passes = 4) {
   const contactAt = new Array(cars.length).fill(null);
 
   const shunted = new Set();
+  const kicked = new Set();
   for (let pass = 0; pass < passes; pass++) {
     for (let i = 0; i < cars.length; i++) {
       for (let j = i + 1; j < cars.length; j++) {
         const a = cars[i], b = cars[j];
-        const ah = hullCircles(a, sizes[i]);
-        const bh = hullCircles(b, sizes[j]);
-
         let best = null;
-        for (const ac of ah) {
-          for (const bc of bh) {
-            const dx = bc.x - ac.x, dy = bc.y - ac.y;
-            const d = Math.hypot(dx, dy) || 0.0001;
-            const overlap = ac.r + bc.r - d;
-            if (overlap > 0 && (!best || overlap > best.overlap)) {
-              // The touch point sits on the line between the two circle
-              // centres, ac.r along it -- that is where the panels are
-              // actually rubbing, and where the sparks belong.
-              best = {
-                overlap,
-                nx: dx / d,
-                ny: dy / d,
-                x: ac.x + (dx / d) * ac.r,
-                y: ac.y + (dy / d) * ac.r,
-              };
+        if (sizes[i].poly && sizes[j].poly) {
+          // Both hulls cut from the drawn car (game/hull.js): touching means
+          // the visible bodies touch.
+          best = polygonContact(worldPolygon(a, sizes[i].poly), worldPolygon(b, sizes[j].poly));
+        } else {
+          const ah = hullCircles(a, sizes[i]);
+          const bh = hullCircles(b, sizes[j]);
+          for (const ac of ah) {
+            for (const bc of bh) {
+              const dx = bc.x - ac.x, dy = bc.y - ac.y;
+              const d = Math.hypot(dx, dy) || 0.0001;
+              const overlap = ac.r + bc.r - d;
+              if (overlap > 0 && (!best || overlap > best.overlap)) {
+                // The touch point sits on the line between the two circle
+                // centres, ac.r along it -- that is where the panels are
+                // actually rubbing, and where the sparks belong.
+                best = {
+                  overlap,
+                  nx: dx / d,
+                  ny: dy / d,
+                  x: ac.x + (dx / d) * ac.r,
+                  y: ac.y + (dy / d) * ac.r,
+                };
+              }
             }
           }
         }
@@ -408,6 +429,34 @@ export function resolveContacts(cars, sizes, dt = 1 / 60, passes = 4) {
         const ahx = Math.cos(a.angle), ahy = Math.sin(a.angle);
         const bhx = Math.cos(b.angle), bhy = Math.sin(b.angle);
         const headingDot = ahx * bhx + ahy * bhy;
+
+        // The first frame of a contact only (as the shunt below): an impulse
+        // along the normal, at the contact point, turns each car by how far
+        // off its middle that point is. The lever is the point's offset
+        // across the normal over the car's half-length.
+        {
+          const key = i * 64 + j;
+          if (!kicked.has(key) && (a._carContactCooldown ?? 0) <= 0 && (b._carContactCooldown ?? 0) <= 0) {
+            const closing = (ahx * a.speed - bhx * b.speed) * best.nx + (ahy * a.speed - bhy * b.speed) * best.ny;
+            if (closing > 0) {
+              kicked.add(key);
+              const cf = Math.min(1, closing / YAW_CLOSING);
+              const lever = (car, size, sign) => {
+                const rx = best.x - car.x, ry = best.y - car.y;
+                return Math.max(-1, Math.min(1, sign * (rx * best.ny - ry * best.nx) / Math.max(1, size.h / 2)));
+              };
+              const kick = (car, size, sign, otherMass, ownMass, isPlayer) => {
+                if (car.yawKick === undefined) car.yawKick = 0;
+                const share = Math.min(1.5, (2 * otherMass) / (otherMass + ownMass));
+                const dk = -sign * YAW_KICK * lever(car, size, 1) * cf * share * (isPlayer ? YAW_PLAYER : 1);
+                car.yawKick = Math.max(-YAW_MAX, Math.min(YAW_MAX, car.yawKick + dk));
+              };
+              // a is pushed by the impulse -n at its contact point, b by +n
+              kick(a, sizes[i], 1, bm, am, aIsPlayer);
+              kick(b, sizes[j], -1, am, bm, bIsPlayer);
+            }
+          }
+        }
 
         // Rear-end contact: if one car is travelling toward the other from
         // behind and has the greater speed, transfer part of that closing
