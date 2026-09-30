@@ -178,7 +178,7 @@ export function buildBoostWings() {
     view.rotation = car.angle + Math.PI / 2 + (car.driftVisualAngle || 0);
     clock += dt;
 
-    const boosting = !!car.boosting;
+    const boosting = !!(car.wingsOpen ?? car.boosting);
     const rootX = 0.30 * size.w * s, rootY = -0.02 * size.h * s;
     const scale = (1.1 * size.h * s) / FEATHER_LEN;
 
@@ -189,7 +189,7 @@ export function buildBoostWings() {
       p.x = 0; p.y = 0; p.age = 0;
     }
     wasBoosting = boosting;
-    amt += ((boosting ? 1 : 0) - amt) * (1 - Math.exp(-dt * (boosting ? 14 : 3.5)));
+    amt += ((boosting ? 1 : 0) - amt) * (1 - Math.exp(-dt * (boosting ? 14 : 1.3)));
     if (amt < 0.004) amt = 0;
     pop *= Math.exp(-dt * 6);
 
@@ -214,7 +214,7 @@ export function buildBoostWings() {
       halo.alpha = 0;
     }
 
-    if (boosting && amt > 0.5) {
+    if (amt > (boosting ? 0.5 : 0.4)) {
       accum += dt * FEATHER_RATE;
       while (accum >= 1) { accum -= 1; spawnFeather(s, rootX, rootY, size, scale); }
     } else accum = 0;

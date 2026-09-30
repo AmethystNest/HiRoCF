@@ -14,6 +14,10 @@ import { bodyPastBarrier } from './race.js';
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 /** How hard a rival brakes to back off after running into the player. */
 const BACK_OFF_BRAKE = 1600;
+// how fast a boost's extra speed drains away once it ends (per second)
+const BOOST_BLEED = 140;
+// the wings' minimum time open from the start of a boost (seconds)
+const WINGS_MIN_OPEN = 1.5;
 // what a boosted car brakes at, for deciding where a corner boost is safe
 const CORNER_BOOST_MODEL = { decel: 430, grip: 0.9, lineGain: 1.3 };
 
@@ -541,6 +545,8 @@ export class RivalCar {
    *  car exactly like it does the player, which uses its own boost input
    *  flag rather than a bare timer. */
   get boosting() { return this.boostTimer > 0; }
+  /** Wings stay open at least WINGS_MIN_OPEN s from the start of a boost, even if the boost itself is cut short. */
+  get wingsOpen() { return this.boostTimer > 0 || this._wingsT > 0; }
 
   /**
    * Acceleration available at a given speed: `launchAccel` from a
@@ -1056,11 +1062,11 @@ export class RivalCar {
       const inCorner = bigCurve >= 0.2 && here / path.curvature.length >= this.finalLapCornerBoostFrom;
       if (!inCorner) this._cornerLatch = false;
       if (finalLap && (inCorner || this._cornerBoost)) {
-        const cap = this.cornerLimit(here, CORNER_BOOST_MODEL) * 0.92;
-        const room = cap > this.speed + 25;
+        const cap = this.cornerLimit(here, CORNER_BOOST_MODEL) * 0.98;
+        const room = cap > this.speed + 12;
         // worth starting only with real room to climb: at the mouth of a
         // hairpin the ceiling is the car's own speed and it would just flicker
-        const roomToStart = cap > this.speed + 110;
+        const roomToStart = cap > this.speed + 80;
         // ...and on the way OUT of the corner (the long-curve amount is
         // falling), not while still braking for it
         const L = this._longCurveAmount;
@@ -1168,7 +1174,14 @@ export class RivalCar {
       }
     } else this._hBrakeTimer = 0;
 
+    {
+      const on = this.boostTimer > 0;
+      if (on && !this._wasBoostOn) this._wingsT = WINGS_MIN_OPEN;
+      this._wasBoostOn = on;
+      this._wingsT = Math.max(0, (this._wingsT ?? 0) - dt);
+    }
     if (this.boostTimer > 0) {
+      this._boostedAt = 1;
       // (a corner boost's ceiling never pulls speed DOWN: it only stops the climb)
       const ceil = Math.min(this.maxSpeed * 1.18, Math.max(this.speed, this._boostCap ?? Infinity));
       this.speed = Math.min(this.speed + 430 * dt, ceil);
@@ -1190,9 +1203,14 @@ export class RivalCar {
         const taper = Math.max(P.accelScaleMin, Math.min(1, gap / P.accelGapSpan));
         this.speed += this.launchAccelAt(this.speed) * taper * dt;
       } else if (braking) this.speed = Math.max(targetSpeed, this.speed - brakeDecel * dt);
-      else if (!fullBigCurveAttack) this.speed -= 430 * speedFactor * dt;
+      // (half as hard while it is still carrying a boost's extra speed)
+      else if (!fullBigCurveAttack) this.speed -= 430 * speedFactor * (this._boostedAt != null && this.speed > top ? 0.5 : 1) * dt;
       // back from a chase to the usual top: eased down, not snapped
-      const cap = this.chaseSpeed !== 1 && this.speed > top ? Math.max(top, this.speed - 400 * dt) : top;
+      // ...and likewise down from a boost: without this the top speed clamped
+      // it straight back (723 -> 613 in one frame), a lurch the size of the boost
+      const bleed = this.chaseSpeed !== 1 ? 400 : BOOST_BLEED;
+      const cap = this.speed > top && (this.chaseSpeed !== 1 || this._boostedAt != null) ? Math.max(top, this.speed - bleed * dt) : top;
+      if (this.speed <= top) this._boostedAt = null;
       this.speed = Math.max(0, Math.min(cap, this.speed));
     }
     // Just run into the back of the player: back off to under its pace for
