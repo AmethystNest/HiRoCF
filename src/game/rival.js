@@ -318,6 +318,8 @@ export class RivalCar {
     // On the final lap only, boost through every big corner the car can hold
     // at boosted speed (see the boost block in update()); no other boost.
     this.finalLapCornerBoost = tuning.finalLapCornerBoost ?? false;
+    // ...and only from this share of the lap on (the climb's switchbacks before it get none)
+    this.finalLapCornerBoostFrom = tuning.finalLapCornerBoostFrom ?? 0;
     this._cornerBoost = false;
     this._cornerLatch = false;
     this._boostCap = Infinity;
@@ -490,6 +492,7 @@ export class RivalCar {
     // lean gives the player time to back out or commit.
     this.sideBlock = tuning.sideBlock ?? 0;
     this.sideBlockRate = tuning.sideBlockRate ?? 1.4;
+    this.sideBlockInto = tuning.sideBlockInto ?? null;
     // route-distance window, in world units, within which the two count as
     // abreast; and how far the player may get ahead before it gives up
     this.sideBlockWindow = tuning.sideBlockWindow ?? 800;
@@ -890,7 +893,17 @@ export class RivalCar {
         // ignore a player sitting in the rival's own tracks: there is no
         // side to defend, and a zero-width gap would make `side` flicker
         if (side !== 0 && Math.abs(playerLat - myLat) > 30) {
-          target = side * this.sideBlock * this.roadHalf * abreast;
+          // (with sideBlockInto, not once it is clearly in front either: from
+          // there it is the weave's job, and a lean that fast pinned it to the player's side)
+          const front = this.sideBlockInto != null ? Math.max(0, Math.min(1, 1 - Math.max(0, race.gap) / 80)) : 1;
+          target = side * this.sideBlock * this.roadHalf * abreast * front;
+          // `sideBlockInto`: it does not just lean a fixed amount but drives
+          // INTO the player's line, that many units past it -- a lean that
+          // stops short of them is one they can slip past
+          if (this.sideBlockInto != null) {
+            const intoW = abreast * front;
+            target = side * Math.max(Math.abs(target), (Math.abs(playerLat - myLat) + this.sideBlockInto) * intoW);
+          }
         }
       }
       this._sideBlockBias += (target - this._sideBlockBias) * (1 - Math.exp(-dt * this.sideBlockRate));
@@ -1040,7 +1053,7 @@ export class RivalCar {
     this._boostCap = Infinity;
     if (this.finalLapCornerBoost) {
       const finalLap = race && race.lap >= race.totalLaps && !warmingUp;
-      const inCorner = bigCurve >= 0.2;
+      const inCorner = bigCurve >= 0.2 && here / path.curvature.length >= this.finalLapCornerBoostFrom;
       if (!inCorner) this._cornerLatch = false;
       if (finalLap && (inCorner || this._cornerBoost)) {
         const cap = this.cornerLimit(here, CORNER_BOOST_MODEL) * 0.92;

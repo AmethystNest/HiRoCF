@@ -356,7 +356,7 @@ export const STAGES = {
     // pace 220 ahead instead of driving off, brake-checks now and then,
     // and leans on a car drawing alongside (sideBlock). Against a test
     // driver that tries to pass: in its path 15% -> ~25% of the time.
-    rival: { engine: 'straightpipe', maxSpeed: 720, chaseSpeed: 1.1, brake: { decel: 900, grip: 0.9, lineGain: 1.3 }, accel: 120, turn: 3.05, sprite: 'prius', weaveAmp: 0.85, weaveAhead: 1.1, weaveOffRoad: true, weaveLook: 1.3, harass: { gap: 900, weave: 0.5, look: 0.8, predict: 0.35, hold: 220, brakeCheck: true }, sideBlock: 0.5, sideBlockRate: 2.2 },
+    rival: { engine: 'straightpipe', maxSpeed: 720, chaseSpeed: 1.1, brake: { decel: 900, grip: 0.9, lineGain: 1.3 }, accel: 120, turn: 3.05, sprite: 'prius', weaveAmp: 0.85, weaveAhead: 0.6, weaveSpeed: 5.0, weaveOffRoad: true, weaveLook: 0.9, harass: { gap: 900, weave: 0.35, look: 0.8, predict: 0.35, hold: 220, brakeCheck: true }, sideBlock: 0.8, sideBlockRate: 4, sideBlockInto: 30 },
     bestKey: 'topdownRacer_stage2_best_ms',
   },
   3: {
@@ -435,6 +435,8 @@ export const STAGES = {
       // dropped where the road ahead asks for less. No straight boost.
       finalLapBoostOnly: true,
       finalLapCornerBoost: true,
+      // the climb's six switchbacks (first 42% of the lap) get none; it starts on the big curves after them
+      finalLapCornerBoostFrom: 0.42,
     },
     bestKey: 'topdownRacer_stage3_best_ms',
   },
