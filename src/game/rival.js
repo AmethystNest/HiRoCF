@@ -618,7 +618,11 @@ export class RivalCar {
    * too fast and running wide into the wall.
    */
   cornerLimit(here, model = this.brakeModel) {
-    const { decel, grip = 0.9, lineGain = 1.3, scan = 44 } = model;
+    // `plan`: the share of `decel` it PLANS its braking on. Braking is then applied
+    // at the full `decel`, so it has reached a corner's speed before turning in
+    // rather than only by the apex.
+    const { decel: fullDecel, plan = 1, grip = 0.9, lineGain = 1.3, scan = 44 } = model;
+    const decel = fullDecel * plan;
     const path = this.path, ms = P.moveScale;
     const reach = Math.round(scan * P.paceScale);
     let lim = Infinity;
@@ -684,7 +688,7 @@ export class RivalCar {
 
     // Stage 1 opening: keep the launch lane and heading through the entire
     // first straight. Release only when the first real corner is approaching.
-    const holdStartLane = this.holdOpeningStraight && !this.openingStraightReleased;
+    let holdStartLane = this.holdOpeningStraight && !this.openingStraightReleased;
 
     // Clean-race mode: do not target the player and do not snake across the lane.
     if (!this.block) {
@@ -713,6 +717,11 @@ export class RivalCar {
       // Stay dead straight for the opening straight; hand control back to
       // normal AI as the first corner becomes meaningfully visible.
       if (openingCurveAhead >= 0.08) this.openingStraightReleased = true;
+      // Shoved by the player or scraping the wall: the hold steers not at
+      // all, so a car pushed to the barrier down the opening straight just
+      // rode along it. Bumped, it gets its steering back for good.
+      if (this.contactRecoveryTimer > 0 || this._wallCooldown > 0) this.openingStraightReleased = true;
+      holdStartLane = !this.openingStraightReleased;
     }
 
     this.raceTime += dt;

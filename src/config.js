@@ -322,7 +322,7 @@ export const STAGES = {
     // Then asked a little under the player rather than well under: top
     // 760 (the player's) and NORMAL at 0.96 of it (730, was 640). The
     // launch is the same accel, so the first 4 s match to the unit.
-    rival: { engine: 'i6', maxSpeed: 760, difficulty: { normal: { speed: 0.96 } }, accel: 107, turn: 2.25, sprite: 'devilz', block: false, weave: false, raceLine: true, cornerSlow: 0.22, holdOpeningStraight: true, finalLapBoostOnly: true, brake: { decel: 900, grip: 0.9, lineGain: 1.3 } },
+    rival: { engine: 'i6', maxSpeed: 760, difficulty: { normal: { speed: 0.96 } }, accel: 107, turn: 2.25, sprite: 'devilz', block: false, weave: false, raceLine: true, cornerSlow: 0.22, holdOpeningStraight: true, finalLapBoostOnly: true, brake: { decel: 900, plan: 0.3, grip: 0.9, lineGain: 1.3 } },
     bestKey: 'topdownRacer_stage1_best_ms',
   },
   2: {
@@ -412,7 +412,7 @@ export const STAGES = {
       // hairpin it used to hang out the full 29 degrees at 364.
       // 593 -> 613 and cornerSlow 0.52 -> 0.48 below: laps 3.9% quicker,
       // asked for, with accel (the getaway) as it was.
-      engine: 'i4', maxSpeed: 681, driftSpeed: [326, 450], accel: 90, turn: 3.35, sprite: 'ae86',
+      engine: 'i4', maxSpeed: 681, driftSpeed: [290, 400], accel: 90, turn: 3.35, sprite: 'ae86',
       // its nitro is wings of light, not a flame (render/wingsfx.js)
       boostFx: 'wings',
       drift: 0.62, driftVisualBoost: 0.5,
@@ -421,7 +421,7 @@ export const STAGES = {
       // and on switchbacks this narrow the extra bite is most of what
       // makes the AE86 look like it is being driven.
       wallLine: true,
-      block: false, cornerSlow: 0.48, raceLine: true, driftDelay: 4.0,
+      block: false, cornerSlow: 0.59, raceLine: true, driftDelay: 4.0,
       cornerLookAhead: 46,   // ~1200 units: a hairpin here needs a real braking zone
       // The per-lap "big curve boost" is off on this stage. It fires on the
       // leading edge of a long corner and, while it runs, bypasses corner
