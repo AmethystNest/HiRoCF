@@ -12,6 +12,7 @@ import { buildFinishFX } from './render/finishfx.js';
 import { buildSideBolts } from './render/boltfx.js';
 import { buildBoostFlame } from './render/boostfx.js';
 import { buildBoostWings } from './render/wingsfx.js';
+import { buildBoostAura } from './render/aurafx.js';
 import { buildContactFX } from './render/contactfx.js';
 import { LAYOUTS } from './track/layouts.js';
 import { PlayerCar } from './game/player.js';
@@ -1122,7 +1123,10 @@ export class Game {
     // Same effect as the player's, its own instance -- built once here so
     // it works on every stage, not just the one this was added for.
     // (cfg.rival.boostFx: 'wings' swaps the flame for wings of light -- stage 3)
-    this.rivalBoostFlame = cfg.rival.boostFx === 'wings' ? buildBoostWings() : buildBoostFlame();
+    // ('aura': a green aura round the body with light streaming back from the nose -- stage 5)
+    this.rivalBoostFlame = cfg.rival.boostFx === 'wings' ? buildBoostWings()
+      : cfg.rival.boostFx === 'aura' ? buildBoostAura(this.cars[cfg.rival.sprite] || this.cars.devilz)
+        : buildBoostFlame();
     this.actors.addChild(this.rivalBoostFlame.view);
 
     // --- traffic (cfg.traffic: stage 4's expressway only) ---

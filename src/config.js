@@ -480,7 +480,7 @@ export const STAGES = {
       // 0.2 ahead) took 4% off; 1.0 takes 20% there -- 519 through the
       // tightest bends on NORMAL against 599 on the straights, where the
       // player's car holds ~608 on grip alone.
-      cornerSlow: 1.0, cornerLookAhead: 24, launchAccel: 51, block: false, weave: false,
+      cornerSlow: 1.2, cornerLookAhead: 24, launchAccel: 51, block: false, weave: false,
       // Shuts the door on a car coming alongside, and only then -- `block`
       // stays off, because that one weaves about for as long as the rival
       // leads, which on a truck would read as a driver who cannot hold a
@@ -544,14 +544,14 @@ export const STAGES = {
       // the barrier closes in, 12 hits in 3 laps, now none. And its nitro
       // on the player's own rules (a charge every ~22 s) instead of once
       // on the last lap; lap time as it was.
-      brake: { decel: 900, grip: 0.9, lineGain: 1.3 }, wallLineGap: 60, nitro: 'player',
+      brake: { decel: 900, plan: 0.3, grip: 0.82, lineGain: 1.3 }, wallLineGap: 60, nitro: 'player',
       // Off the line as fast as the player (asked for): the player's accel
       // and launch boost on NORMAL too, where accel used to be x0.85 --
       // 1 s: 77 -> 104 against the player's 104. Top speed still NORMAL's.
       // wallLineGap 50 -> 60 with it: a few units quicker out of the chicane
       // at point ~1290, its exit swing reached the barrier (2 hits in 3
       // laps, where 50 had left it 1-2 units clear). 60: none, +0.1 s a lap.
-      engine: 'v10', maxSpeed: PHYSICS.maxSpeed, accel: PHYSICS.accel, launchLikePlayer: true,
+      engine: 'v10', boostFx: 'aura', maxSpeed: PHYSICS.maxSpeed, accel: PHYSICS.accel, launchLikePlayer: true,
       difficulty: { normal: { accel: 1 } }, turn: 2.85, sprite: 'r8',
       // 0.30 -> 0.34 -> 0.44. The first step was about holding the line,
       // not pace: measured over two laps when the line still stopped at
