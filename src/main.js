@@ -149,8 +149,11 @@ const FINISH_CAR_FILL = 0.72;
  * see where it is and which way it is pointing.
  */
 const RIVAL_UNDER_ALPHA = 0.3;
-/** Post-race autopilot's braking for traffic, dial units per second. */
-const POST_RACE_BRAKE = 700;
+/**
+ * After the flag both cars hold this one speed (autoDrivePostRace's units): no
+ * slowing for traffic or for each other, they steer round instead.
+ */
+const POST_RACE_SPEED = 400;
 /**
  * After the flag the cars drive themselves and are still solid, and two of
  * them can wedge each other for good: the player slows to stay clear of a
@@ -1297,33 +1300,22 @@ export class Game {
   }
 
   /**
-   * The player's autopilot after the finish: the side of the road it was
-   * given at the flag (_postRaceLane), unless traffic is in the way -- then
-   * another lane, eased across rather than jumped to, or, with nowhere to
-   * go, held back behind the car in front. Returns the lateral offset and
-   * the cruise speed (autoDrivePostRace's units) to drive at.
+   * The lateral lane a car on autopilot after the finish drives in: the side
+   * of the road it was given at the flag (_postRaceLane), unless traffic or
+   * the other racer is in the way -- then another lane, eased across rather
+   * than jumped to. Only steering: the speed is POST_RACE_SPEED whatever is
+   * ahead. With nowhere to go it drives on into whatever is there (the hits
+   * are real; a car that then stops dead is let through, see trackPostStall).
    */
-  postRacePlayerLane(dt) {
-    const CRUISE = 410;
-    const base = this._postRaceLane.player;
-    if (!this.traffic || this._stall?.player?.ghost) return { lat: base, speed: CRUISE };
-    const p = this.player;
-    if (!this._postPass) this._postPass = { want: base, lat: base };
-    const pass = this._postPass;
-    const rival = this.rival;
-    const plan = this.traffic.planPass(p, pass.want, this.playerSprite.width / 2, [{
-      x: rival.x, y: rival.y, speed: rival.speed, angle: rival.angle, _routeHint: rival._routeHint,
-      halfW: this.rivalDrawSize.w / 2,
-    }]);
+  postRaceLane(key, car, halfW, others, dt) {
+    const base = this._postRaceLane[key];
+    if (!this.traffic || this._stall?.[key]?.ghost) return base;
+    const pass = ((this._postPass ??= {})[key] ??= { want: base, lat: base });
+    const plan = this.traffic.planPass(car, pass.want, halfW, others);
     pass.want = plan.lat;
     const step = 260 * dt;
     pass.lat += Math.max(-step, Math.min(step, pass.want - pass.lat));
-    const speed = Number.isFinite(plan.speed) ? Math.min(CRUISE, plan.speed * PHYSICS.paceScale) : CRUISE;
-    // braked, not eased: autoDrivePostRace only drifts its speed toward the
-    // cruise it is given, far too slowly for a car pulling out ahead
-    const cap = speed / PHYSICS.paceScale;
-    if (p.speed > cap) p.speed = Math.max(cap, p.speed - POST_RACE_BRAKE * dt);
-    return { lat: pass.lat, speed };
+    return pass.lat;
   }
 
   syncDeck(car) {
@@ -1393,7 +1385,7 @@ export class Game {
     } else if (state === 'finished') {
       // Still solid after the flag: the two racers against each other and
       // against the traffic, which the player's autopilot steers round
-      // (see postRacePlayerLane) and the truck does not -- except a car that
+      // (see postRaceLane) and the truck does not -- except a car that
       // has stopped dead (see POST_STALL_SECS), which passes through.
       const ghosting = !!(this._stall?.player?.ghost || this._stall?.rival?.ghost);
       if (!ghosting && (p.deckId ?? 0) === (this.rival.deckId ?? 0)) {
@@ -1422,9 +1414,13 @@ export class Game {
       // After the finish, keep the two cars on separate sides of the road
       // so they don't converge onto the same centreline and overlap --
       // see _postRaceLane, set once above at the moment of crossing.
-      const pass = this.postRacePlayerLane(dt);
-      autoDrivePostRace(p, this.path, dt, pass.speed, pass.lat);
-      autoDrivePostRace(this.rival, this.path, dt, 390, this._postRaceLane.rival);
+      const asObstacle = (car, w) => ({
+        x: car.x, y: car.y, speed: car.speed, angle: car.angle, _routeHint: car._routeHint, halfW: w / 2,
+      });
+      const pLane = this.postRaceLane('player', p, this.playerSprite.width / 2, [asObstacle(this.rival, this.rivalDrawSize.w)], dt);
+      const rLane = this.postRaceLane('rival', this.rival, this.rivalDrawSize.w / 2, [asObstacle(p, this.playerSprite.width)], dt);
+      autoDrivePostRace(p, this.path, dt, POST_RACE_SPEED, pLane);
+      autoDrivePostRace(this.rival, this.path, dt, POST_RACE_SPEED, rLane);
       // a car may only stop passing through things once nothing is close
       // enough to touch it, or it lands back inside whatever it was passing
       const clearOf = (car, others) => others.every((o) => Math.hypot(o.x - car.x, o.y - car.y) > POST_GHOST_CLEAR)

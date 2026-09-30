@@ -588,6 +588,17 @@ export const STAGES = {
 };
 
 /**
+ * The order the stages are played in, by id. The ids stay what each course IS
+ * (its layout, music, best times, engine, traffic), so reordering costs no
+ * saved data; the numbers shown come from the position here. 3 (the pass) and
+ * 4 (the highway) were swapped: the highway is played third.
+ */
+export const STAGE_ORDER = [1, 2, 4, 3, 5];
+STAGE_ORDER.forEach((id, i) => { STAGES[id].name = `STAGE ${i + 1}`; });
+/** The number a stage is shown as (1-based position in play order). */
+export const stageNumber = (id) => STAGE_ORDER.indexOf(id) + 1;
+
+/**
  * Sprite draw sizes. The player size is carried over from the Canvas build;
  * rival sizes are set equal to it by request (previously each rival sprite
  * had its own smaller footprint, e.g. prius 56x88).

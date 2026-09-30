@@ -16,7 +16,7 @@
  * corrupt or hand-edited value must not be able to break the stage list.
  */
 
-import { DIFFICULTY, STAGES } from '../config.js';
+import { DIFFICULTY, STAGES, STAGE_ORDER } from '../config.js';
 
 const KEY = 'hirocf_records_v2';
 // v1 had EASY / NORMAL / HARD. EASY is now NORMAL and NORMAL is now HARD
@@ -111,7 +111,7 @@ function clean(raw, stageIds) {
  *                        untouched (for checking a late stage directly)
  */
 export function createRecords(
-  stageIds = Object.keys(STAGES).map(Number).sort((a, b) => a - b),
+  stageIds = STAGE_ORDER.filter((id) => STAGES[id]),
   { storage = defaultStorage(), unlockAll = false } = {},
 ) {
   let data;

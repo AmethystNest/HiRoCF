@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createRecords, starsFor, nextStarGap, STAR_GAPS } from './records.js';
-import { rivalTuning } from '../config.js';
+import { rivalTuning, STAGES, STAGE_ORDER, stageNumber } from '../config.js';
 
 const IDS = [1, 2, 3, 4, 5];
 
@@ -99,6 +99,27 @@ describe('records', () => {
     const r = createRecords(IDS, { storage, unlockAll: true });
     expect(IDS.every((id) => r.isUnlocked(id))).toBe(true);
     expect(createRecords(IDS, { storage }).isUnlocked(2)).toBe(false);
+  });
+});
+
+describe('play order', () => {
+  it('plays the highway (id 4) third and the pass (id 3) fourth, numbered by position', () => {
+    expect(STAGE_ORDER).toEqual([1, 2, 4, 3, 5]);
+    expect(STAGE_ORDER.map((id) => STAGES[id].name)).toEqual(['STAGE 1', 'STAGE 2', 'STAGE 3', 'STAGE 4', 'STAGE 5']);
+    expect(stageNumber(4)).toBe(3);
+    expect(stageNumber(3)).toBe(4);
+  });
+
+  it('unlocks in that order by default: the pass only after the highway', () => {
+    const r = createRecords(undefined, { storage: memoryStorage() });
+    expect(r.stageIds).toEqual([1, 2, 4, 3, 5]);
+    r.submit(1, 'normal', { won: true, time: 95, gap: 1 });
+    const two = r.submit(2, 'normal', { won: true, time: 95, gap: 1 });
+    expect(two.unlocked).toBe(4);
+    expect(r.isUnlocked(3)).toBe(false);
+    const four = r.submit(4, 'normal', { won: true, time: 95, gap: 1 });
+    expect(four.unlocked).toBe(3);
+    expect(r.isUnlocked(3)).toBe(true);
   });
 });
 
