@@ -616,8 +616,8 @@
     -webkit-mask:var(--lock) center/contain no-repeat;mask:var(--lock) center/contain no-repeat}
   .diffSeg,.stageChips{--lock:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 14'%3E%3Cpath d='M3 6V4a3 3 0 016 0v2h1v8H2V6zm1.5 0h3V4a1.5 1.5 0 00-3 0z'/%3E%3C/svg%3E")}
   /* Stage choice on the title: one chip per stage. */
-  .stageChips{display:flex;gap:6px;margin:0 0 6px}
-  .stageChips button{flex:1;min-width:0;height:58px;border-radius:12px;padding:5px 0 4px;
+  .stageChips{display:flex;gap:6px;margin:0 0 6px;justify-content:center}
+  .stageChips button{flex:0 1 66px;min-width:0;height:58px;border-radius:12px;padding:5px 0 4px;
     display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
     border:1px solid rgba(255,255,255,.18);background:rgba(8,10,14,.55);color:#fff;
     backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
@@ -1205,6 +1205,8 @@
       const id=+b.dataset.id,open=records.isUnlocked(id),rec=records.get(id);
       b.classList.toggle('on',id===titleStage);
       b.classList.toggle('locked',!open);
+      // stages not reached yet are not shown at all (how many there are is a surprise)
+      b.style.display=open?'':'none';
       b.setAttribute('aria-checked',id===titleStage?'true':'false');
       b.setAttribute('aria-disabled',open?'false':'true');
       b.querySelector('.st').innerHTML=[0,1,2].map(i=>i<rec.stars?'★':'<span class="off">★</span>').join('');
