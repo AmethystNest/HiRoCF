@@ -356,7 +356,7 @@ export const STAGES = {
     // pace 220 ahead instead of driving off, brake-checks now and then,
     // and leans on a car drawing alongside (sideBlock). Against a test
     // driver that tries to pass: in its path 15% -> ~25% of the time.
-    rival: { engine: 'straightpipe', maxSpeed: 720, chaseSpeed: 1.1, brake: { decel: 900, grip: 0.9, lineGain: 1.3 }, accel: 120, turn: 3.05, sprite: 'prius', weaveAmp: 0.85, weaveAhead: 1.1, weaveOffRoad: true, weaveLook: 1.3, harass: { gap: 900, weave: 0.3, look: 0.8, predict: 0.35, hold: 220, brakeCheck: true }, sideBlock: 0.5, sideBlockRate: 2.2 },
+    rival: { engine: 'straightpipe', maxSpeed: 720, chaseSpeed: 1.1, brake: { decel: 900, grip: 0.9, lineGain: 1.3 }, accel: 120, turn: 3.05, sprite: 'prius', weaveAmp: 0.85, weaveAhead: 1.1, weaveOffRoad: true, weaveLook: 1.3, harass: { gap: 900, weave: 0.5, look: 0.8, predict: 0.35, hold: 220, brakeCheck: true }, sideBlock: 0.5, sideBlockRate: 2.2 },
     bestKey: 'topdownRacer_stage2_best_ms',
   },
   3: {
@@ -430,7 +430,11 @@ export const STAGES = {
       // means arriving at maxSpeed * 1.18 = 761 and being dragged round. The boost is saved
       // for the valley straight instead, where it is already guarded on
       // curveAhead and bigCurve both being near zero.
+      // Now: no boost before the final lap; on it, a burst through every big
+      // corner it can hold at boosted speed (corner exits, the sweepers),
+      // dropped where the road ahead asks for less. No straight boost.
       finalLapBoostOnly: true,
+      finalLapCornerBoost: true,
     },
     bestKey: 'topdownRacer_stage3_best_ms',
   },
@@ -489,6 +493,8 @@ export const STAGES = {
       // quarter of what a car would (a ninth before) -- still clearly the
       // heavier of the two, just no longer immovable.
       mass: 4,
+      // the truck keeps a car's push power (0.45), so its weight is what counts
+      pushPower: 0.45,
       // Traffic it runs into (game/traffic.js hitRival): cars thrown less
       // hard than at 1 and the truck losing more of its own speed per hit,
       // still harder than the player's car knocks them.

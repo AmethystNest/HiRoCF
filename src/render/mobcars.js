@@ -48,12 +48,14 @@ export function glossFor(paint) {
   return 0.35 * Math.max(0, 0.55 - lum) / 0.55;
 }
 
-/** Body colours, picked at random per car: mostly the whites, silvers and
- *  blacks real traffic is made of, with some colour among them. */
+/** Body colours, picked at random per car: mostly the whites and silvers
+ *  real traffic is made of, with some colour among them. No black: on the
+ *  night highway it disappears into the road, so those slots are orange and
+ *  a light teal. */
 export const MOB_PAINTS = [
   0xf4f4f2, 0xf4f4f2, 0xe9e4d4,   // white, pearl
   0xbfc3c8, 0xbfc3c8, 0x7a7f86,   // silver, grey
-  0x2b2d31, 0x2b2d31,             // black
+  0xe8761f, 0x2bb0c4,             // orange, teal
   0xc2282b, 0x2758b4, 0x1e2b4c,   // red, blue, navy
   0xe3b322, 0x2f6b46, 0x8a1f2a,   // yellow, green, wine
 ];

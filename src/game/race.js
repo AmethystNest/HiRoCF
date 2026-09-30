@@ -327,6 +327,8 @@ export function autoDrivePostRace(car, path, dt, targetSpeed, laneOffset = 0) {
 
 /** Share of the way to a shared speed a rear-end takes both cars. */
 const SHUNT_SHARE = 0.4;
+const PLAYER_PUSH = 0.85;
+const DUEL_REBOUND = 0.6;
 
 /**
  * A hit off the middle of a car turns it. `YAW_KICK` is the yaw rate, rad/s,
@@ -409,17 +411,28 @@ export function resolveContacts(cars, sizes, dt = 1 / 60, passes = 4) {
         // truck sets 9, which is what makes it not get shoved aside.
         const am = Math.max(0.2, a.contactMass ?? 1);
         const bm = Math.max(0.2, b.contactMass ?? 1);
-        let aPower = (aIsPlayer ? 0.55 : 0.45) * am;
-        let bPower = (bIsPlayer ? 0.55 : 0.45) * bm;
-        if (aIsPlayer && a.boosting) aPower += 0.10 * am;
-        if (bIsPlayer && b.boosting) bPower += 0.10 * bm;
+        // The player shoves at PLAYER_PUSH, a rival at its own `pushPower`
+        // (RivalCar sets it low, so a shove from the player sends it well
+        // sideways) times `pushBonus`, which the rival raises while it is
+        // fighting back onto its line or blocking -- it then holds its
+        // ground. Anything else (traffic, test stubs) is 0.45.
+        const power = (car, isPlayer, m) => {
+          if (isPlayer) return (PLAYER_PUSH + (car.boosting ? 0.10 : 0)) * m;
+          return (car.pushPower ?? 0.45) * (car.pushBonus ?? 1) * m;
+        };
+        const aPower = power(a, aIsPlayer, am);
+        const bPower = power(b, bIsPlayer, bm);
         // how much harder a hit lands on each of them, capped so a very
         // heavy rival still cannot delete the player's whole lap in one
         const aHit = Math.min(3, bm / am);
         const bHit = Math.min(3, am / bm);
 
         const totalPower = Math.max(0.001, aPower + bPower);
-        const separate = best.overlap * 1.04;
+        // Player against rival, the bodies are driven a little further
+        // apart than they overlap (a rebound), so a lean on the rival
+        // sends it well over rather than just clearing the overlap.
+        const duel = (aIsPlayer && bIsRival) || (bIsPlayer && aIsRival);
+        const separate = best.overlap * (1.04 + (duel ? DUEL_REBOUND : 0));
         const aMove = separate * (bPower / totalPower);
         const bMove = separate * (aPower / totalPower);
 

@@ -14,6 +14,8 @@ import { bodyPastBarrier } from './race.js';
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 /** How hard a rival brakes to back off after running into the player. */
 const BACK_OFF_BRAKE = 1600;
+// what a boosted car brakes at, for deciding where a corner boost is safe
+const CORNER_BOOST_MODEL = { decel: 430, grip: 0.9, lineGain: 1.3 };
 
 /**
  * Per-point "how committed to the big-corner line should the car be here"
@@ -313,6 +315,12 @@ export class RivalCar {
     this.holdOpeningStraight = tuning.holdOpeningStraight ?? false;
     this.openingStraightReleased = false;
     this.finalLapBoostOnly = tuning.finalLapBoostOnly ?? false;
+    // On the final lap only, boost through every big corner the car can hold
+    // at boosted speed (see the boost block in update()); no other boost.
+    this.finalLapCornerBoost = tuning.finalLapCornerBoost ?? false;
+    this._cornerBoost = false;
+    this._cornerLatch = false;
+    this._boostCap = Infinity;
     // `nitro: 'player'`: boosts on the player's own nitro rules instead --
     // a charge every 100 / boostRecover seconds, none on the grid, the
     // meter frozen while a burst runs -- fired on the first straight once
@@ -373,6 +381,12 @@ export class RivalCar {
     // How much of a body contact the OTHER vehicle absorbs (see
     // resolveContacts in race.js). 1 is a car; stage 4's box truck is 4.
     this.contactMass = tuning.mass ?? 1;
+    // How hard it shoves the player in a contact (race.js `power`), before
+    // `pushBonus`. Lower than the player's push, so being shoved by the
+    // player moves the rival; the bonus takes it back up while it is
+    // getting back to its line or holding the player up.
+    this.pushPower = tuning.pushPower ?? 0.25;
+    this.pushBonus = 1;
     // stage 4: how hard it throws the traffic it runs into (traffic.js)
     this.trafficHit = tuning.trafficHit ?? null;
     this.cornerSlow = tuning.cornerSlow ?? 0.45;
@@ -594,8 +608,8 @@ export class RivalCar {
    * The rivals that use it brake into a corner instead of arriving at it
    * too fast and running wide into the wall.
    */
-  cornerLimit(here) {
-    const { decel, grip = 0.9, lineGain = 1.3, scan = 44 } = this.brakeModel;
+  cornerLimit(here, model = this.brakeModel) {
+    const { decel, grip = 0.9, lineGain = 1.3, scan = 44 } = model;
     const path = this.path, ms = P.moveScale;
     const reach = Math.round(scan * P.paceScale);
     let lim = Infinity;
@@ -639,6 +653,8 @@ export class RivalCar {
     this.raceTime = 0;
     this.boostUsed = false;
     this.boostTimer = 0;
+    this._cornerBoost = false;
+    this._cornerLatch = false;
     this.bigCurveBoostLap = 0;
     this.wasInBigCurveBoostZone = false;
     this.finished = false;
@@ -813,13 +829,21 @@ export class RivalCar {
     // limit while weaving, so an off-road weave is not pulled back on
     let steerLimit = lineLimit;
     if (this.blockEnabled && race?.player && race.gap != null && (ahead || this.weaveBehind)) {
+      // starting a weave it goes straight into a swing (phase at a peak,
+      // on the side away from the last one) instead of easing out of the
+      // middle: the first swerve is the widest, not the smallest
+      if (!this._wasWeaving && this.harass) {
+        this._weaveSide = -(this._weaveSide ?? -1);
+        this.weavePhase = (Math.PI / 2) * this._weaveSide;
+      }
       this._weaving = true;
       this.weavePhase += dt * this.weaveSpeed;
       let ampTarget = ahead ? (this.weaveAhead ?? this.weaveAmplitude) : this.weaveAmplitude;
       // sitting in the player's path, a full-width swerve would open the
       // door on every other half-cycle: keep a smaller swerve about their line
       if (harassing > 0) ampTarget += (this.harass.weave - ampTarget) * harassing;
-      this._weaveAmp = this._weaveAmp == null ? ampTarget : this._weaveAmp + (ampTarget - this._weaveAmp) * (1 - Math.exp(-dt * 1.5));
+      // eased faster while it has the player close behind: the swing must be there when it gets in front
+      this._weaveAmp = this._weaveAmp == null ? ampTarget : this._weaveAmp + (ampTarget - this._weaveAmp) * (1 - Math.exp(-dt * (harassing > 0 ? 4 : 1.5)));
       // eased out through a corner when it weaves at full racing speed
       // (behind, or wherever weaveBehind is set), or out to the wall
       // (weaveOffRoad): swerving on top of the corner's own line there ran
@@ -835,12 +859,18 @@ export class RivalCar {
       }
       // off-road allowed: out to the barrier the course shows, less the
       // car's own drawn half-width and a margin, instead of the kerb
-      const weaveLimit = this.weaveOffRoad ? this.lineBarrier(here) - (this.drawHalf ?? 45) - 14 : lineLimit;
+      // With the player close behind, the swerve stays on the road (it is
+      // there to block, and is wider now); the run out to the wall is for
+      // when it has drawn away
+      const weaveLimit = this.weaveOffRoad
+        ? lineLimit + (this.lineBarrier(here) - (this.drawHalf ?? 45) - 14 - lineLimit) * (1 - harassing)
+        : lineLimit;
       steerLine = Math.max(-weaveLimit, Math.min(weaveLimit, center + weave));
       steerLimit = weaveLimit;
     } else {
       this.weavePhase = 0;
     }
+    this._wasWeaving = this._weaving;
 
     // --- side block: shut the door on a car drawing alongside ---
     // Only while the two actually overlap along the route, and only toward
@@ -914,7 +944,19 @@ export class RivalCar {
     // racing line. Keep following the road, but preserve most of the
     // lateral displacement for a short moment so a player's shove actually
     // moves the rival instead of being cancelled by AI steering next frame.
-    if (this.contactRecoveryTimer > 0) {
+    // Off its line and steering back to it, or holding up the player, it
+    // shoves back hard: the further off, the harder (x1..x3). Without this
+    // the player's stronger push would simply carry it away for good.
+    {
+      const currentLine = path.lateralOf(this.x, this.y, near);
+      const off = Math.abs(steerLine - currentLine);
+      let bonus = 1 + 2 * Math.max(0, Math.min(1, (off - 40) / 120));
+      if (harassing > 0.3) bonus = Math.max(bonus, 2);
+      this.pushBonus = bonus;
+    }
+    // (Not while it is ahead and weaving: the pass itself is contact, and
+    // holding the swing back for it delayed the first swerve by a second.)
+    if (this.contactRecoveryTimer > 0 && !(this._weaving && ahead)) {
       const currentLine = path.lateralOf(this.x, this.y, near);
       const lineRecovery = 0.28;
       aimLine = currentLine + (aimLine - currentLine) * lineRecovery;
@@ -987,6 +1029,45 @@ export class RivalCar {
       this.wasInBigCurveBoostZone = false;
     }
 
+    // --- final lap: boost through each big corner it can hold ---
+    // The boost (1.18x) skips corner braking, so on a hairpin it would only
+    // run the car wide. What it CAN do is add speed up to what the road
+    // ahead lets it keep: cornerLimit (braking at the 430/s a boosted car
+    // sheds speed at, less a margin) is the ceiling while it is on, and the
+    // boost is dropped once there is no room left under it. So a hairpin
+    // exit or a sweeper gets a real burst, and the approach to the next
+    // corner gets none. One burst per corner (latched until it is left).
+    this._boostCap = Infinity;
+    if (this.finalLapCornerBoost) {
+      const finalLap = race && race.lap >= race.totalLaps && !warmingUp;
+      const inCorner = bigCurve >= 0.2;
+      if (!inCorner) this._cornerLatch = false;
+      if (finalLap && (inCorner || this._cornerBoost)) {
+        const cap = this.cornerLimit(here, CORNER_BOOST_MODEL) * 0.92;
+        const room = cap > this.speed + 25;
+        // worth starting only with real room to climb: at the mouth of a
+        // hairpin the ceiling is the car's own speed and it would just flicker
+        const roomToStart = cap > this.speed + 110;
+        // ...and on the way OUT of the corner (the long-curve amount is
+        // falling), not while still braking for it
+        const L = this._longCurveAmount;
+        const leaving = !L || L[here] < L[path.wrap(here - 10)];
+        if (this._cornerBoost && !room) {
+          this._cornerBoost = false;
+          this.boostTimer = 0;
+        } else if (!this._cornerBoost && roomToStart && leaving && inCorner && !this._cornerLatch && this.boostTimer <= 0) {
+          this._cornerBoost = true;
+          this._cornerLatch = true;
+          this.boostTimer = 2.35;
+        }
+        if (this._cornerBoost) this._boostCap = cap;
+      } else if (this._cornerBoost) {
+        this._cornerBoost = false;
+        this.boostTimer = 0;
+      }
+      if (this._cornerBoost && this.boostTimer <= 0) this._cornerBoost = false;
+    }
+
     // --- the player's own nitro rules (stage 5) ---
     if (this.playerNitro && !warmingUp) {
       if (this.boostTimer <= 0 && this.nitroStock < 1) {
@@ -1009,7 +1090,7 @@ export class RivalCar {
     // exit needed it most under control. bigCurve (already computed above)
     // is the same "am I currently in or near a big corner" signal the
     // racing line and drift use, so require it to be essentially zero too.
-    if (!this.playerNitro && !this.boostUsed && race && race.lap >= race.totalLaps && curveAhead < 0.18 && bigCurve < 0.05) {
+    if (!this.playerNitro && !this.finalLapCornerBoost && !this.boostUsed && race && race.lap >= race.totalLaps && curveAhead < 0.18 && bigCurve < 0.05) {
       this.boostUsed = true;
       this.boostTimer = 2.35;
       this._boostOnStraight = true;
@@ -1075,8 +1156,9 @@ export class RivalCar {
     } else this._hBrakeTimer = 0;
 
     if (this.boostTimer > 0) {
-      this.speed += 430 * dt;
-      this.speed = Math.min(this.maxSpeed * 1.18, this.speed);
+      // (a corner boost's ceiling never pulls speed DOWN: it only stops the climb)
+      const ceil = Math.min(this.maxSpeed * 1.18, Math.max(this.speed, this._boostCap ?? Infinity));
+      this.speed = Math.min(this.speed + 430 * dt, ceil);
     } else {
       if (this.speed < targetSpeed) {
         // The same top-end taper the player has (see PHYSICS.accelGapSpan /
@@ -1104,9 +1186,17 @@ export class RivalCar {
     // the moment the contact lasts, as a driver would, rather than keep
     // shoving -- held flat out, a heavy rival pushed the player along at
     // its own speed for as long as it stayed behind.
+    //
+    // Only for that: the player has to be AHEAD, in the direction it is
+    // heading. Shoved from the side by a player a little ahead in the race,
+    // it used to brake just the same -- 0.85 of the player's speed at 900 a
+    // second for as long as the pair touched -- so a rival pushed off the
+    // road also lost a fifth to a third of its speed for nothing.
     if (this.contactRecoveryTimer > 0 && race?.player && race.gap != null && race.gap < 0 && this.boostTimer <= 0) {
+      const pdx = race.player.x - this.x, pdy = race.player.y - this.y;
+      const inFront = (pdx * Math.cos(this.angle) + pdy * Math.sin(this.angle)) / (Math.hypot(pdx, pdy) || 1) > 0.7;
       const under = race.player.speed * 0.85;
-      if (this.speed > under) this.speed = Math.max(under, this.speed - BACK_OFF_BRAKE * dt);
+      if (inFront && this.speed > under) this.speed = Math.max(under, this.speed - BACK_OFF_BRAKE * dt);
     }
 
     // --- drift spec: the car's actual travel direction lags behind where

@@ -59,16 +59,17 @@ describe('resolveContacts mass', () => {
     return { player: Math.hypot(player.x, player.y), rival: Math.abs(rival.y - (CAR.w + size.w) * 0.32) };
   }
 
-  it('splits a contact between two cars the way it always did', () => {
+  it('splits a contact by push power, the player pushing harder', () => {
     const { player, rival } = sideHit(1);
-    // the player's own small advantage: it gives more than it takes
+    // the player's push advantage (0.85 against a stub's 0.45): it gives
+    // more than it takes
     expect(rival).toBeGreaterThan(player);
-    expect(rival / (player + rival)).toBeCloseTo(0.55, 1);
+    expect(rival / (player + rival)).toBeCloseTo(0.85 / 1.3, 1);
   });
 
   it('barely moves a heavy vehicle', () => {
     const { player, rival } = sideHit(9);
-    expect(rival / (player + rival)).toBeLessThan(0.15);
+    expect(rival / (player + rival)).toBeLessThan(0.2);
     expect(player).toBeGreaterThan(rival * 4);
   });
 
