@@ -51,7 +51,7 @@ let blobTexture = null;
  * tongue at once, so the flicker that used to redraw three polygons is
  * now two numbers.
  */
-function makeFlameTexture(w = FLAME_TEX_W, h = FLAME_TEX_H) {
+export function makeFlameTexture(w = FLAME_TEX_W, h = FLAME_TEX_H) {
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;

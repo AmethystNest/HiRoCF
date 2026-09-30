@@ -14,12 +14,17 @@
  *           (Safari on iPhone does not have it).
  *   tint    the car's own picture again, green and additive, over the car:
  *           the body itself takes the colour.
+ *   flame   behind the tail, green tongues in the shape of a flame (the
+ *           same tapered tongue texture the nitro flame uses): a big one
+ *           down the middle and a smaller one either side, flickering, and
+ *           growing and dying with the burst. Green sparks break off them.
  *   streaks pooled particles (particlePool.js), born along the nose, run
  *           back at 2-3 car lengths a second, fade in and out.
  *   pulse   one bright ring on the frame a burst starts.
  */
 import { Container, Sprite, Texture } from '../pixi.js';
 import { makeBlobTexture, makeStreakTexture, makePool, take, release, clearPool } from './particlePool.js';
+import { makeFlameTexture } from './boostfx.js';
 
 const GREEN = 0x3dff7c;
 const GREEN_HOT = 0xc4ffd6;
@@ -27,11 +32,15 @@ const GREEN_HOT = 0xc4ffd6;
 /** The car sits in the middle of the glow canvas, this fraction of its size. */
 const GLOW_CAR_SHARE = 0.4;
 const STREAK_MAX = 64;
-const STREAK_RATE = 120;   // per second while it burns
+const STREAK_RATE = 70;    // per second while it burns
+const EMBER_MAX = 36;
+const EMBER_RATE = 60;     // per second while it burns
+const EMBER_LIFE = 0.55;
 const PULSE_LIFE = 0.4;
 
 let blobTexture = null;
 let streakTexture = null;
+let flameTexture = null;
 const glowTextures = new WeakMap();
 
 /** Halve a canvas `times` over, each step averaging 2x2 (bilinear). */
@@ -82,6 +91,7 @@ function makeGlowTexture(carTexture) {
 export function buildBoostAura(carTexture) {
   if (!blobTexture) blobTexture = makeBlobTexture();
   if (!streakTexture) streakTexture = makeStreakTexture(64, 8);
+  if (!flameTexture) flameTexture = makeFlameTexture();
   let glowTexture = glowTextures.get(carTexture);
   if (!glowTexture) { glowTexture = makeGlowTexture(carTexture); glowTextures.set(carTexture, glowTexture); }
 
@@ -101,6 +111,21 @@ export function buildBoostAura(carTexture) {
   tint.alpha = 0;
   view.addChild(tint);
 
+  // flame tongues at the tail: [x share of the width, length, width] -- the
+  // middle one biggest. Each is an outer green tongue with a pale core over it.
+  const FLAME_TEX_W = 24, FLAME_TEX_H = 64;
+  const tongues = [[0, 1, 1], [-0.25, 0.78, 0.7], [0.25, 0.78, 0.7]].map(([x, len, wid]) => {
+    const outer = new Sprite(flameTexture);
+    const core = new Sprite(flameTexture);
+    for (const sp of [outer, core]) { sp.anchor.set(0.5, 0); sp.blendMode = 'add'; sp.alpha = 0; }
+    outer.tint = GREEN;
+    core.tint = 0xdcffe8;
+    view.addChild(outer, core);
+    return { x, len, wid, outer, core };
+  });
+  const embers = makePool(blobTexture, EMBER_MAX, { blend: 'add' });
+  view.addChild(embers.view);
+
   // texture x runs to the tail (+y) with rotation pi/2, the bright head at the
   // right and anchored, so each streak leads toward the tail
   const streaks = makePool(streakTexture, STREAK_MAX, { anchorX: 1, anchorY: 0.5, blend: 'add' });
@@ -108,13 +133,16 @@ export function buildBoostAura(carTexture) {
   const pulse = makePool(blobTexture, 2, { blend: 'add' });
   view.addChild(pulse.view);
 
-  let amt = 0, clock = 0, accum = 0, wasBoosting = false;
+  let amt = 0, clock = 0, accum = 0, emberAccum = 0, wasBoosting = false;
 
   function reset() {
     glow.alpha = 0;
     tint.alpha = 0;
+    for (const t of tongues) { t.outer.alpha = 0; t.core.alpha = 0; }
+    clearPool(embers);
     clearPool(streaks);
     clearPool(pulse);
+    emberAccum = 0;
     amt = clock = accum = 0;
     wasBoosting = false;
   }
@@ -172,6 +200,54 @@ export function buildBoostAura(carTexture) {
       accum += dt * STREAK_RATE;
       while (accum >= 1) { accum -= 1; spawnStreak(s, size); }
     } else accum = 0;
+
+    // the flame: grows with the burst (amt) and flickers in length and width
+    if (amt > 0) {
+      const w = size.w * s, h = size.h * s;
+      const base = h * 0.44;
+      for (const t of tongues) {
+        const flick = 1 + Math.random() * 0.45;
+        const len = h * 1.3 * t.len * flick * amt;
+        const wid = w * 1.0 * t.wid * (0.85 + Math.random() * 0.3) * (0.4 + 0.6 * amt);
+        const o = t.outer;
+        o.x = t.x * w; o.y = base;
+        o.scale.set(wid / FLAME_TEX_W, len / FLAME_TEX_H);
+        o.alpha = 0.85 * amt;
+        const c = t.core;
+        c.x = t.x * w; c.y = base + s;
+        c.scale.set((wid * 0.45) / FLAME_TEX_W, (len * (0.55 + Math.random() * 0.12)) / FLAME_TEX_H);
+        c.alpha = amt;
+      }
+    } else {
+      for (const t of tongues) { t.outer.alpha = 0; t.core.alpha = 0; }
+    }
+    // sparks breaking off the flame
+    if (boosting) {
+      emberAccum += dt * EMBER_RATE;
+      while (emberAccum >= 1) {
+        emberAccum -= 1;
+        const w = size.w * s, h = size.h * s;
+        const e = take(embers);
+        e.x = (Math.random() * 2 - 1) * w * 0.3;
+        e.y = h * (0.5 + Math.random() * 0.9);
+        e.vx = (Math.random() - 0.5) * w * 1.1;
+        e.vy = h * (0.9 + Math.random() * 1.6);
+        e.age = 0;
+        e.size = (2.2 + Math.random() * 2.6) * s;
+      }
+    } else emberAccum = 0;
+    for (let i = embers.count - 1; i >= 0; i--) {
+      const e = embers.items[i];
+      e.age += dt;
+      if (e.age >= EMBER_LIFE) { release(embers, i); continue; }
+      const t = e.age / EMBER_LIFE;
+      e.x += e.vx * dt; e.y += e.vy * dt;
+      const g = e.particle;
+      g.x = e.x; g.y = e.y;
+      g.scaleX = g.scaleY = (e.size * (1 - t * 0.5) * 2) / 32;
+      g.tint = t < 0.4 ? GREEN_HOT : GREEN;
+      g.alpha = Math.max(0, 1 - t * t);
+    }
 
     for (let i = streaks.count - 1; i >= 0; i--) {
       const f = streaks.items[i];
