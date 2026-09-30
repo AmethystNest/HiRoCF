@@ -11,7 +11,7 @@
     "lint": "eslint src",
     "format": "prettier --write .",
     "build:pwa": "node build/pwa.mjs",
-    "build:pwa:bgm": "node build/pwa.mjs --with-bgm",
+    "build:pwa:nobgm": "node build/pwa.mjs --no-bgm",
     "build:artifact": "node build/artifact.mjs"
   },
   "devDependencies": {

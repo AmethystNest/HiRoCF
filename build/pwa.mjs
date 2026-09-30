@@ -2,9 +2,10 @@
  * The installable build: dist/ as a static site (a PWA) instead of one
  * self-contained HTML file.
  *
- *   node build/pwa.mjs              no stage music (safe to host publicly)
- *   node build/pwa.mjs --with-bgm   copies assets/bgm/stage<N>.mp3 in; for
- *                                   private hosting only (commercial tracks)
+ *   node build/pwa.mjs              with the stage music (assets/bgm/stage<N>.mp3)
+ *                                   and the ending clip (assets/ending/), both
+ *                                   licensed / the owner's own -- fine to host
+ *   node build/pwa.mjs --no-bgm     without the music (the ending clip stays)
  *
  * What changes against build/index.standalone.html, and why:
  *
@@ -29,7 +30,7 @@ import { root, readPage, bundleBoot } from './lib/page.mjs';
 import { toWebp, rewriteImages } from './lib/images.mjs';
 
 const OUT = join(root, 'dist');
-const withBgm = process.argv.includes('--with-bgm');
+const withBgm = !process.argv.includes('--no-bgm');
 const hash = (buf) => createHash('sha256').update(buf).digest('hex').slice(0, 10);
 
 rmSync(OUT, { recursive: true, force: true });
@@ -114,7 +115,7 @@ ${body}
 `;
 write('index.html', html);
 
-// stage music: copied only on request, never precached (see sw.js)
+// stage music: copied unless --no-bgm, never precached (see sw.js)
 let tracks = 0;
 if (withBgm && existsSync(join(root, 'assets/bgm'))) {
   mkdirSync(join(OUT, 'assets/bgm'), { recursive: true });
@@ -122,6 +123,14 @@ if (withBgm && existsSync(join(root, 'assets/bgm'))) {
     if (!/^stage\d+\.mp3$/.test(f)) continue;
     copyFileSync(join(root, 'assets/bgm', f), join(OUT, 'assets/bgm', f));
     tracks++;
+  }
+}
+
+// the ending clip (mp4 for iPhone, webm elsewhere): copied as it is, never precached
+if (existsSync(join(root, 'assets/ending'))) {
+  mkdirSync(join(OUT, 'assets/ending'), { recursive: true });
+  for (const f of readdirSync(join(root, 'assets/ending'))) {
+    if (/^ending\.(mp4|webm)$/.test(f)) copyFileSync(join(root, 'assets/ending', f), join(OUT, 'assets/ending', f));
   }
 }
 

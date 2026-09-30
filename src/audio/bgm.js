@@ -94,8 +94,8 @@ export function makeBgm(ctx, bus, el) {
       tag.textContent = '';
       return { url, owned: false };
     }
-    // A page built without music says so (build/pwa.mjs without
-    // --with-bgm), rather than have every stage ask the server for a track
+    // A page built without music says so (build/pwa.mjs with
+    // --no-bgm), rather than have every stage ask the server for a track
     // it knows is not there.
     if (typeof location !== 'undefined' && /^https?:/.test(location.protocol)
         && !document.querySelector('script[type="application/octet-stream"][id^="bgm-"]')
