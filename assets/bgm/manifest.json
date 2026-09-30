@@ -1,0 +1,42 @@
+{
+  "1": {
+    "source": "05676867-Lightning_Dance_256k.mp3",
+    "secs": 300,
+    "sourceSecs": 340.52,
+    "lufs": -8.1,
+    "gainDb": 0,
+    "kbps": 96
+  },
+  "2": {
+    "source": "1c5fb1dc-________4_BGM_11_-_Dark_Side_Style_Wangan_Midnight_Maximum_Tune_4_256k.mp3",
+    "secs": 187.41,
+    "sourceSecs": 187.41,
+    "lufs": -8.1,
+    "gainDb": -0.2,
+    "kbps": 96
+  },
+  "3": {
+    "source": "62cfb79b-MAX_COVERI_-_RUNNING_IN_THE_90S____D-INITIAL_D__256k.mp3",
+    "secs": 291.39,
+    "sourceSecs": 291.39,
+    "lufs": -8.1,
+    "gainDb": -0.9,
+    "kbps": 96
+  },
+  "4": {
+    "source": "6f0e2ad3-________4_BGM_08_-_Never_Throw_Away_Wangan_Midnight_Maximum_Tune_4_256k.mp3",
+    "secs": 300,
+    "sourceSecs": 368.83,
+    "lufs": -8.1,
+    "gainDb": -1.1,
+    "kbps": 96
+  },
+  "5": {
+    "source": "68d7ee3d-_________3_BGM_01-_Inexhaustible_Energy_Wangan_Midnight_Maximum_Tune_3_256k.mp3",
+    "secs": 232.99,
+    "sourceSecs": 232.99,
+    "lufs": -8.1,
+    "gainDb": -1.8,
+    "kbps": 96
+  }
+}
