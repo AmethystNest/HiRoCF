@@ -9,7 +9,6 @@ import {
 } from './render/city.js';
 import { buildMiniMap } from './render/minimap.js';
 import { buildFinishFX } from './render/finishfx.js';
-import { buildGantry } from './render/gantry.js';
 import { GhostRecorder, ghostAt, loadGhost, saveGhost } from './game/ghost.js';
 import { buildSideBolts } from './render/boltfx.js';
 import { buildBoostFlame } from './render/boostfx.js';
@@ -971,8 +970,6 @@ export class Game {
     for (const oh of surfaceOverheads) this.world.addChild(oh);
     this.world.addChild(props.overhead);
     this.world.addChild(props.deckOverhead);
-    // the start / finish gate, over the line (render/gantry.js)
-    this.world.addChild(buildGantry(path, { roadHalf: halfW ? halfW[1] : cfg.roadHalf }));
 
     // What the under-deck fade drives, and how far each part goes.
     //
