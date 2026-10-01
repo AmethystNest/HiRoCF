@@ -2131,7 +2131,10 @@ export async function boot({ stageId = 1, difficulty = 'normal', onReady, audioC
   await app.init({
     background: '#161a1e',
     resizeTo: window,
-    antialias: true,
+    // MSAA costs a quarter to a third of the frame on a phone's fill rate, and
+    // at 2x or more the pixels are already too fine for its edges to show:
+    // only a 1x screen (a desktop monitor) keeps it.
+    antialias: (window.devicePixelRatio || 1) < 2,
     resolution: resolutionFor(qualityLevel),
     autoDensity: true,
     preference: 'webgl',
