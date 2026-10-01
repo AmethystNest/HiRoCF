@@ -83,9 +83,12 @@ const manifest = {
   lang: 'ja',
   start_url: './',
   scope: './',
-  // a game: no browser chrome at all where the platform allows it (Android
-  // Chrome), standalone where it does not (iOS treats this as standalone)
-  display: 'fullscreen',
+  // a game: no browser chrome at all where the platform allows it (display_override:
+  // Android Chrome goes fullscreen), standalone where it does not (iOS ignores
+  // display_override and treats this as standalone). `display` itself is the
+  // plain standalone so the installability check sees the most widely accepted value.
+  display: 'standalone',
+  display_override: ['fullscreen', 'standalone'],
   orientation: 'any',
   background_color: '#161a1e',
   theme_color: '#161a1e',
@@ -113,7 +116,26 @@ ${style}
 </head><body${bodyTag}>
 ${body}
 <script src="${app}"></script>
-<script>if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));</script>
+<script>
+// the worker is registered at once, not on 'load': that event waits for everything the
+// page pulls in, and the install check wants a worker in place when the menu is opened
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch((e)=>{window.__swError=String(e)});
+// ?pwadebug shows why the browser will or will not offer to install (for a phone with no console)
+if(/[?&]pwadebug/.test(location.search)){
+  const box=document.createElement('pre');
+  box.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:99999;margin:0;padding:8px 10px;font:11px/1.4 monospace;color:#9f9;background:rgba(0,0,0,.85);white-space:pre-wrap;pointer-events:none';
+  document.body.appendChild(box);
+  const st={installPrompt:'not fired',sw:'?',controller:'?',standalone:matchMedia('(display-mode: standalone)').matches||matchMedia('(display-mode: fullscreen)').matches};
+  addEventListener('beforeinstallprompt',(e)=>{e.preventDefault();window.__bip=e;st.installPrompt='FIRED (installable)'});
+  addEventListener('appinstalled',()=>{st.installPrompt='installed'});
+  const draw=async()=>{
+    try{const r=await navigator.serviceWorker.getRegistration();st.sw=r?(r.active?'active':r.installing?'installing':r.waiting?'waiting':'registered'):'none'}catch(e){st.sw='error '+e}
+    st.controller=navigator.serviceWorker.controller?'yes':'no';
+    box.textContent='PWA debug\\n'+Object.entries(st).map(([k,v])=>k+': '+v).join('\\n')+(window.__swError?'\\nsw error: '+window.__swError:'');
+  };
+  draw();setInterval(draw,1000);
+}
+</script>
 </body></html>
 `;
 write('index.html', html);
