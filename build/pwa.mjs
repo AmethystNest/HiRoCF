@@ -74,7 +74,10 @@ for (const f of readdirSync(join(root, 'build/pwa/icons'))) {
 }
 
 const manifest = {
-  id: './',
+  // No `id`: it defaults to start_url (the full address, path included). `id: './'` was
+  // resolved against the ORIGIN, i.e. https://<owner>.github.io/ for every project on
+  // that site -- the same app id as any other app there, which Chrome then treats as
+  // already installed and offers no Install.
   name: 'HiRoCF Top-Down Racer',
   short_name: 'HiRoCF',
   lang: 'ja',
