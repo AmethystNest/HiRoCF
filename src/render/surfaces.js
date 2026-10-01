@@ -602,7 +602,10 @@ export function buildSurface(path, tex, {
   // --- start / finish chequer, painted across the road -- a racing-circuit
   // convention; ordinary street stages opt out (preset.paintStart: false)
   // since a public road has no painted start line ---
-  if (P.paintStart !== false && inSpan(0)) {
+  // The light line (goalline.js) marks the line now; a chequer under it only
+  // muddied it, so the painted one is off (flip this to bring it back).
+  const PAINT_START_CHEQUER = false;
+  if (PAINT_START_CHEQUER && P.paintStart !== false && inSpan(0)) {
     const startSpan = 3;
     markings.addChild(ribbonMesh(path, tex.checker, {
         ...R,

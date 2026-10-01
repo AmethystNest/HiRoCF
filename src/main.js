@@ -9,6 +9,7 @@ import {
 } from './render/city.js';
 import { buildMiniMap } from './render/minimap.js';
 import { buildFinishFX } from './render/finishfx.js';
+import { buildGoalLine } from './render/goalline.js';
 import { GhostRecorder, ghostAt, loadGhost, saveGhost } from './game/ghost.js';
 import { buildSideBolts } from './render/boltfx.js';
 import { buildBoostFlame } from './render/boostfx.js';
@@ -960,6 +961,10 @@ export class Game {
       .map((c) => ({ node: c, x: c.position.x, y: c.position.y, r: c.cullRadius || 0 }))
       .concat(city ? city.under.cull : []);
 
+    // The start / finish line as light, on the road and under the cars.
+    this.goalLine = buildGoalLine(path, { roadHalf: halfW ? halfW[1] : cfg.roadHalf });
+    this.world.addChild(this.goalLine.view);
+
     // actors sit above the surface
     this.actors = new Container();
     this.actors.label = 'actors';
@@ -1771,6 +1776,7 @@ export class Game {
     // which draw at 0.55-0.57x their box.
     this.rivalBoostFlame.update(this.rival, dt, this.worldScale, this.rivalDrawSizePx);
     this.contactFX.update(this.traffic ? [p, this.rival, ...this.traffic.cars] : [p, this.rival], dt, this.worldScale);
+    this.goalLine?.update(dt);
     this.finishFX.update(dt, W, H);
     this.sideBolts.update(dt, W, H);
   }

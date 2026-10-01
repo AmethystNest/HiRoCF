@@ -8,8 +8,8 @@
  * (DOM, see index.html) arrives 1.9s after the line and everything here has
  * to have said its piece and stepped back by then:
  *
- *   0.00  impact   -- flash, two thin shock rings widening off the car and
- *                     (a win) a scatter of four-point glints
+ *   0.00  impact   -- flash, radial speed lines and a burst of lightning
+ *                     bolts blown out from the centre
  *   0.10  banner   -- a chequered band sweeps across and holds, waving
  *   0.15  title    -- FINISH slams down from above and settles
  *   1.30  clear    -- title and banner leave, vignette stays under the card
@@ -19,6 +19,7 @@
  * to a letterbox.
  */
 import { Container, FillGradient, Graphics, Text } from '../pixi.js';
+import { boltPath } from './boltfx.js';
 
 /**
  * The brushed-metal fill the page's headline type uses in CSS (see
@@ -67,12 +68,12 @@ export function buildFinishFX() {
   view.label = 'finishfx';
   view.visible = false;
 
-  const under = new Graphics();      // grade, behind everything
-  const burst = new Graphics();      // rings and glints, over the grade, under the banner
+  const under = new Graphics();      // grade + speed lines, behind everything
+  const bolts = new Graphics();      // lightning burst, over the grade, under the banner
   const banner = new Graphics();     // chequered flag, behind the title
   const over = new Graphics();       // confetti, in front of everything
   view.addChild(under);
-  view.addChild(burst);
+  view.addChild(bolts);
   view.addChild(banner);
 
   const steelFill = chromeFill(CHROME_STEEL);
@@ -106,7 +107,8 @@ export function buildFinishFX() {
   let win = true;
   let timer = 0;
   let confetti = [];
-  let glints = [];
+  let lines = [];
+  let boltShapes = [];
 
   function trigger(place, screenW, screenH) {
     active = true;
@@ -119,20 +121,42 @@ export function buildFinishFX() {
     // paying for the look over and over.
     titleMain.style.fill = win ? goldFill : steelFill;
 
-    // Glints are placed once and only twinkle in place: re-rolling them per
-    // frame would read as noise, not as light catching the chrome.
-    glints = [];
-    if (win) {
-      for (let i = 0; i < 16; i++) {
-        glints.push({
-          x: screenW * (0.06 + Math.random() * 0.88),
-          y: screenH * (0.10 + Math.random() * 0.62),
-          size: 10 + Math.random() * 18,
-          delay: 0.08 + Math.random() * 0.6,
-          life: 0.45 + Math.random() * 0.35,
-          gold: Math.random() < 0.55,
-        });
+    // Speed lines are struck once at the moment of crossing and then only
+    // travel outward -- re-rolling them per frame reads as static noise
+    // rather than as the screen being blown apart.
+    lines = [];
+    const spokes = win ? 46 : 26;
+    for (let i = 0; i < spokes; i++) {
+      lines.push({
+        ang: (Math.PI * 2 / spokes) * i + Math.random() * 0.12,
+        near: 40 + Math.random() * 120,
+        len: 120 + Math.random() * 420,
+        w: 2 + Math.random() * (win ? 7 : 4),
+      });
+    }
+
+    // Lightning, struck once with the same beat as the speed lines --
+    // fewer, cooler-toned forks for a loss than the bright branching
+    // burst a win gets, same grade split the rest of this effect draws
+    // in. Each origin is offset a little from dead centre so a handful
+    // of bolts struck at once do not read as one star pattern.
+    boltShapes = [];
+    const boltCount = win ? 7 : 3;
+    for (let i = 0; i < boltCount; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const dist = 260 + Math.random() * 360;
+      const x0 = (Math.random() - 0.5) * 80, y0 = (Math.random() - 0.5) * 60;
+      const x1 = x0 + Math.cos(ang) * dist, y1 = y0 + Math.sin(ang) * dist;
+      const pts = boltPath(x0, y0, x1, y1, 6, win ? 46 : 30);
+      let branch = null;
+      if (Math.random() < 0.7) {
+        const bi = 2 + ((Math.random() * (pts.length - 4)) | 0);
+        const [bx, by] = pts[bi];
+        const bAng = ang + (Math.random() - 0.5) * 1.4;
+        const bDist = dist * (0.25 + Math.random() * 0.3);
+        branch = boltPath(bx, by, bx + Math.cos(bAng) * bDist, by + Math.sin(bAng) * bDist, 3, 20);
       }
+      boltShapes.push({ pts, branch, w: 1.6 + Math.random() * 1.6, delay: Math.random() * 0.05 });
     }
 
     if (!win) return;
@@ -156,9 +180,10 @@ export function buildFinishFX() {
     active = false;
     view.visible = false;
     confetti = [];
-    glints = [];
+    lines = [];
+    boltShapes = [];
     under.clear();
-    burst.clear();
+    bolts.clear();
     banner.clear();
     over.clear();
     titleMain.text = '';
@@ -169,9 +194,9 @@ export function buildFinishFX() {
     if (!active) return;
     timer += dt;
     const t = timer;
-    const cx = screenW / 2;
+    const cx = screenW / 2, cy = screenH / 2;
     under.clear();
-    burst.clear();
+    bolts.clear();
     banner.clear();
     over.clear();
 
@@ -200,42 +225,52 @@ export function buildFinishFX() {
       under.rect(screenW - d, 0, d, screenH).fill({ color: edge, alpha: a });
     }
 
-    // --- shock rings ---------------------------------------------------
-    // Two thin rings off the car (the camera holds the winner a little
-    // below centre), each a soft wide pass under a fine bright core. They
-    // thin as they widen and are gone in under a second -- the impact as a
-    // clean shape rather than a spray of lines.
-    const ringY = screenH * 0.6;
-    const reach = Math.hypot(screenW, screenH) * 0.62;
-    const ringHue = win ? { core: 0xfff6d6, glow: 0xffd45a } : { core: 0xd7e1ea, glow: 0x6f8aa3 };
-    for (let k = 0; k < (win ? 2 : 1); k++) {
-      const p = clamp01((t - 0.02 - k * 0.14) / 0.95);
-      if (p <= 0 || p >= 1) continue;
-      const r = easeOut(p) * reach * (1 - k * 0.22);
-      const fade = (1 - p) * (1 - p);
-      burst.circle(cx, ringY, r).stroke({ width: 5 + 22 * (1 - p), color: ringHue.glow, alpha: 0.22 * fade });
-      burst.circle(cx, ringY, r).stroke({ width: 1 + 2.4 * (1 - p), color: ringHue.core, alpha: 0.85 * fade });
+    // --- speed lines -------------------------------------------------
+    const lineLife = Math.max(0, 1 - t / 0.85);
+    if (lineLife > 0) {
+      const travel = easeOut(Math.min(1, t / 0.85)) * 620;
+      for (const s of lines) {
+        const cosA = Math.cos(s.ang), sinA = Math.sin(s.ang);
+        const n = s.near + travel, f = n + s.len * lineLife;
+        const nx = -sinA * s.w * lineLife, ny = cosA * s.w * lineLife;
+        under.poly([
+          cx + cosA * n + nx, cy + sinA * n + ny,
+          cx + cosA * f, cy + sinA * f,
+          cx + cosA * n - nx, cy + sinA * n - ny,
+        ]).fill({ color: win ? 0xfff3c4 : 0x8e99a4, alpha: 0.5 * lineLife });
+      }
     }
 
-    // --- glints ----------------------------------------------------------
-    // Four-point stars that swell and shrink in place, a pale halo star
-    // behind a bright one.
-    for (const g of glints) {
-      const p = (t - g.delay) / g.life;
-      if (p <= 0 || p >= 1) continue;
-      const k = Math.sin(Math.PI * p);
-      const r = g.size * k;
-      const star = (rad, pinch) => {
-        const pts = [];
-        for (let i = 0; i < 8; i++) {
-          const ang = (Math.PI / 4) * i - Math.PI / 2;
-          const rr = i % 2 === 0 ? rad : rad * pinch;
-          pts.push(g.x + Math.cos(ang) * rr, g.y + Math.sin(ang) * rr);
-        }
-        return pts;
+    // --- lightning -----------------------------------------------------
+    // Struck once, same instant as the speed lines, and gone well before
+    // the banner arrives -- an accent on the impact, not a sustained
+    // effect. Each bolt is drawn twice, a wide soft glow pass then a
+    // thin bright core, the same two-pass trick the boost flame's and
+    // contact sparks' textures already lean on for "hot at the centre".
+    const boltLife = Math.max(0, 1 - t / 0.34);
+    if (boltLife > 0 && boltShapes.length) {
+      const core = win ? 0xf2ffff : 0xd7e6ee;
+      const glow = win ? 0x9fe8ff : 0x6f8fa8;
+      const punch = Math.max(0, 1 - t / 0.10);
+      const drawPath = (pts) => {
+        bolts.moveTo(cx + pts[0][0], cy + pts[0][1]);
+        for (let i = 1; i < pts.length; i++) bolts.lineTo(cx + pts[i][0], cy + pts[i][1]);
       };
-      burst.poly(star(r * 1.7, 0.12)).fill({ color: g.gold ? 0xffd45a : 0xbfeaff, alpha: 0.28 * k });
-      burst.poly(star(r, 0.16)).fill({ color: 0xffffff, alpha: 0.95 * k });
+      for (const b of boltShapes) {
+        const strike = clamp01((t - b.delay) / 0.05);
+        if (strike <= 0) continue;
+        const alpha = boltLife * strike;
+        drawPath(b.pts);
+        bolts.stroke({ width: b.w * 3.2, color: glow, alpha: alpha * 0.35 * (0.6 + punch * 0.4), cap: 'round', join: 'round' });
+        drawPath(b.pts);
+        bolts.stroke({ width: b.w, color: core, alpha: alpha * (0.75 + punch * 0.25), cap: 'round', join: 'round' });
+        if (b.branch) {
+          drawPath(b.branch);
+          bolts.stroke({ width: b.w * 2.4, color: glow, alpha: alpha * 0.28, cap: 'round', join: 'round' });
+          drawPath(b.branch);
+          bolts.stroke({ width: b.w * 0.75, color: core, alpha: alpha * 0.7, cap: 'round', join: 'round' });
+        }
+      }
     }
 
     // --- chequered banner --------------------------------------------
