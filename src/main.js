@@ -9,6 +9,8 @@ import {
 } from './render/city.js';
 import { buildMiniMap } from './render/minimap.js';
 import { buildFinishFX } from './render/finishfx.js';
+import { buildGantry } from './render/gantry.js';
+import { GhostRecorder, ghostAt, loadGhost, saveGhost } from './game/ghost.js';
 import { buildSideBolts } from './render/boltfx.js';
 import { buildBoostFlame } from './render/boostfx.js';
 import { buildBoostWings } from './render/wingsfx.js';
@@ -361,6 +363,10 @@ export class Game {
     this.stageId = null;
     // Rival strength (config.js DIFFICULTY), applied at the next loadStage.
     this.difficulty = 'normal';
+    // the best-run ghost (game/ghost.js): this race being recorded, and the stored best
+    this.ghostRec = new GhostRecorder();
+    this.ghost = null;
+    this.ghostSprite = null;
 
     this.finishFX = buildFinishFX();
     app.stage.addChild(this.finishFX.view);
@@ -965,6 +971,8 @@ export class Game {
     for (const oh of surfaceOverheads) this.world.addChild(oh);
     this.world.addChild(props.overhead);
     this.world.addChild(props.deckOverhead);
+    // the start / finish gate, over the line (render/gantry.js)
+    this.world.addChild(buildGantry(path, { roadHalf: halfW ? halfW[1] : cfg.roadHalf }));
 
     // What the under-deck fade drives, and how far each part goes.
     //
@@ -1070,6 +1078,21 @@ export class Game {
     // Boost exhaust flame, above the shadow but still behind the car body.
     this.boostFlame = buildBoostFlame();
     this.actors.addChild(this.boostFlame.view);
+
+    // the stage's best run, as a see-through copy of the player's car under it
+    this.ghostRec.reset();
+    this.ghost = loadGhost(stageId, this.difficulty);
+    this.ghostSprite = null;
+    if (this.ghost) {
+      this.ghostSprite = new Sprite(this.cars.player);
+      this.ghostSprite.anchor.set(0.5);
+      this.ghostSprite.width = playerWorldSize.w;
+      this.ghostSprite.height = playerWorldSize.h;
+      this.ghostSprite.tint = 0x9fd8ff;
+      this.ghostSprite.alpha = 0.36;
+      this.ghostSprite.visible = false;
+      this.actors.addChild(this.ghostSprite);
+    }
 
     this.playerSprite = new Sprite(this.cars.player);
     this.playerSprite.anchor.set(0.5);
@@ -1322,6 +1345,11 @@ export class Game {
     return pass.lat;
   }
 
+  /** Keep the race just run as this stage's ghost (call on a new best only). */
+  saveGhost(timeMs) {
+    return saveGhost(this.stageId, this.difficulty, this.ghostRec, timeMs);
+  }
+
   syncDeck(car) {
     const idx = car._routeHint ?? this.path.nearest(car.x, car.y).index;
     const layer = this.path.layerAtIndex(idx);
@@ -1386,6 +1414,7 @@ export class Game {
         );
       }
       this.updateTraffic(dt, true);
+      this.ghostRec.sample(this.race.time, p);
     } else if (state === 'finished') {
       // Still solid after the flag: the two racers against each other and
       // against the traffic, which the player's autopilot steers round
@@ -1640,6 +1669,15 @@ export class Game {
     this.playerSprite.rotation = p.angle + Math.PI / 2 + p.driftVisualAngle;
     this.playerShadow.position.set(p.x + 6, p.y + 8);
     this.playerShadow.rotation = this.playerSprite.rotation;
+
+    if (this.ghostSprite) {
+      const at = this.race.state === 'racing' ? ghostAt(this.ghost, this.race.time) : null;
+      this.ghostSprite.visible = !!at;
+      if (at) {
+        this.ghostSprite.position.set(at.x, at.y);
+        this.ghostSprite.rotation = at.angle + Math.PI / 2;
+      }
+    }
 
     this.rivalSprite.position.set(this.rival.x, this.rival.y);
     this.rivalSprite.rotation = this.rival.angle + Math.PI / 2 + (this.rival.driftVisualAngle || 0);

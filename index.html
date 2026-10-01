@@ -789,6 +789,8 @@
   /* Stage select: every stage, locked until the one before it is won
      (src/game/records.js), with the best time and stars at the chosen
      difficulty. */
+  /* the stage jump and the instant GOAL are for testing: only with ?test in the address */
+  body:not(.testmode) .testOnly{display:none!important}
   #stageOverlay{z-index:40}
   #stageList{
     width:min(420px,88vw);max-height:78vh;overflow:auto;-webkit-overflow-scrolling:touch;
@@ -1051,7 +1053,7 @@
   <!-- Testing-only jump-to-any-stage picker -- see the CSS comment on
        #stageOverlay. Kept until the user signs off, not part of the
        shipped control set. -->
-  <button id="stagePick" class="iconBtn" aria-label="choose stage">
+  <button id="stagePick" class="iconBtn testOnly" aria-label="choose stage">
     <svg class="icon" viewBox="0 0 24 24"><path d="M6 3v18" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/><path d="M6 4.5h11.5l-2.3 3.25L17.5 11H6z" fill="currentColor"/></svg>
     <span class="badge" id="stageBadge">1/5</span>
   </button>
@@ -1060,7 +1062,7 @@
 <!-- Testing-only: cross the line now. A second row under the icons -- a fifth
      icon in the first would run into the minimap on a phone. Kept until the
      user says to remove it, like the stage picker above. -->
-<div class="iconRow testRow">
+<div class="iconRow testRow testOnly">
   <button id="goalPick" class="iconBtn" aria-label="test: finish the race now">
     <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v18" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/><path d="M8 4h11v9H8z" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 4h3.67v3H8zM15.33 4H19v3h-3.67zM11.67 7h3.66v3h-3.66zM8 10h3.67v3H8zM15.33 10H19v3h-3.67z" fill="currentColor"/></svg>
     <span class="badge">GOAL</span>
@@ -1144,6 +1146,8 @@
   const titleScreen=document.getElementById('titleScreen');
   const titleStart=document.getElementById('titleStart');
 
+  // ?test: shows the testing-only buttons (stage jump, instant GOAL). Without it they are not there.
+  if(/[?&]test(&|$)/.test(location.search))document.body.classList.add('testmode');
   // Records, stars, unlocks and the chosen difficulty (src/game/records.js).
   // Loaded before the game boots so the title can offer the difficulty
   // last chosen. ?unlockall opens every stage without touching what is
@@ -1380,6 +1384,8 @@
       // the stage it opened or what the next star needs.
       const paintRecord=(res)=>{
         const out=records.submit(game.stageId,game.difficulty,res);
+        // a new best is also the ghost the next race on this stage runs against
+        if(out.newBest)game.saveGhost(out.best);
         [...finishStars.children].forEach((s,i)=>s.classList.toggle('on',i<out.stars));
         finishStars.setAttribute('aria-label',`${out.stars} / 3`);
         const tag=out.newBest?'<span class="tag">NEW RECORD</span>':'';
