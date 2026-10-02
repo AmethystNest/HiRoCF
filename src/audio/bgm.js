@@ -66,6 +66,10 @@ export function makeBgm(ctx, bus, el) {
   let active = false;   // started for this race and not yet finished
   let stopTimer = 0;
   let pending = false;  // this stage's track is not in the page yet (see sourceFor)
+  let held = false;     // paused on purpose (pause card, page hidden): not the watchdog's to undo
+  let lastAt = -1;      // watchdog: where the track was a second ago...
+  let stuckFor = 0;     // ...and for how many seconds it has not moved
+  let recoverAt = 0;    // when the watchdog last stepped in (ms)
 
   // Embedded tracks decoded so far, by stage. Each is decoded once: the
   // blob URL is kept for the next visit to that stage and the base64 text
@@ -112,11 +116,49 @@ export function makeBgm(ctx, bus, el) {
     gain.gain.setTargetAtTime(to, t, tau);
   }
 
+  /**
+   * Music that stops by itself mid-race is the one failure nothing else
+   * here notices: a stream that stalls or is cut (mobile data, a host that
+   * does not do byte ranges), a browser that pauses the element or lets it
+   * end, a context the OS suspended. Once a second, while the music is
+   * meant to be playing, check it is -- and if not, put it back where it
+   * was: replay, or (after an error or ~5 s without moving) reload the
+   * source and seek to the old position first.
+   */
+  function watch() {
+    if (!active || held || !url || (typeof document !== 'undefined' && document.hidden)) { stuckFor = 0; return; }
+    if (ctx.state !== 'running') { try { const r = ctx.resume(); if (r && r.catch) r.catch(() => {}); } catch { /* next touch */ } }
+    const at = audio.currentTime || 0;
+    const moving = !audio.paused && !audio.ended && Math.abs(at - lastAt) > 0.05;
+    lastAt = at;
+    stuckFor = moving || audio.paused || audio.ended ? 0 : stuckFor + 1;
+    const stopped = audio.paused || audio.ended || !!audio.error;
+    const stuck = !stopped && stuckFor >= 5;
+    if (!stopped && !stuck) return;
+    const now = Date.now();
+    if (now - recoverAt < 2500) return;
+    recoverAt = now;
+    stuckFor = 0;
+    if (audio.error || stuck) {
+      // dead or stuck stream: start it over from here
+      audio.src = url;
+      audio.load();
+      audio.addEventListener('loadedmetadata', () => { try { audio.currentTime = at; } catch { /* from 0 */ } }, { once: true });
+    }
+    const p = audio.play();
+    if (p && p.catch) p.catch(() => {});
+  }
+  const watchTimer = globalThis.setInterval ? globalThis.setInterval(watch, 1000) : 0;
+
   return {
+    /** Stop the watchdog (tests / teardown). */
+    dispose() { globalThis.clearInterval(watchTimer); },
     /** Point the player at a stage's track (or at nothing), stopped. */
     load(stageId) {
       clearTimeout(stopTimer);
       active = false;
+      held = false;
+      stuckFor = 0;
       ramp(0, 0.03);
       audio.pause();
       if (stageId === stage) { try { audio.currentTime = 0; } catch { /* not loaded yet */ } return; }
@@ -162,6 +204,8 @@ export function makeBgm(ctx, bus, el) {
       if (!url) { if (pending) { active = true; ramp(level, FADE_IN / 3); } return; }
       clearTimeout(stopTimer);
       active = true;
+      held = false;
+      stuckFor = 0;
       try { audio.currentTime = 0; } catch { /* not loaded yet: it starts at 0 anyway */ }
       ramp(level, FADE_IN / 3);
       const p = audio.play();
@@ -169,9 +213,12 @@ export function makeBgm(ctx, bus, el) {
     },
     /** Pause card / page hidden. */
     pause() {
+      held = true;
       audio.pause();
     },
     resume() {
+      held = false;
+      stuckFor = 0;
       if (!active || !url) return;
       const p = audio.play();
       if (p && p.catch) p.catch(() => {});
