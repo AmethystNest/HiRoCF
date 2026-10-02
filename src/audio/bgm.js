@@ -116,6 +116,36 @@ export function makeBgm(ctx, bus, el) {
     gain.gain.setTargetAtTime(to, t, tau);
   }
 
+  // --- diagnostics --------------------------------------------------------
+  // For a phone with no console: the last few things that happened to the
+  // element, and its state once a second, in a corner of the screen. Shown
+  // with ?bgmdebug, and on any host that is not the public one (localhost
+  // and github.io are) -- i.e. on the phone test link.
+  const log = [];
+  const stamp = () => (globalThis.performance.now() / 1000).toFixed(1);
+  const note = (what) => { log.push(`${stamp()} ${what}`); if (log.length > 6) log.shift(); };
+  for (const e of ['play', 'pause', 'ended', 'error', 'stalled', 'waiting', 'emptied', 'seeked', 'suspend']) {
+    audio.addEventListener(e, () => note(e + (e === 'error' && audio.error ? ` ${audio.error.code}` : '')));
+  }
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => note(document.hidden ? 'page hidden' : 'page shown'));
+  ctx.addEventListener?.('statechange', () => note(`ctx ${ctx.state}`));
+  function debugText() {
+    const t = (v) => (Number.isFinite(v) ? v.toFixed(1) : '-');
+    return `BGM s${stage} ${active ? 'on' : 'off'}${held ? ' held' : ''} ${audio.paused ? 'PAUSED' : 'play'}${audio.ended ? ' ENDED' : ''}`
+      + ` t${t(audio.currentTime)}/${t(audio.duration)} rs${audio.readyState} ns${audio.networkState}`
+      + ` ctx:${ctx.state} g${gain.gain.value.toFixed(2)}${audio.error ? ' ERR' + audio.error.code : ''}\n${log.join('\n')}`;
+  }
+  const wantDebug = typeof location !== 'undefined' && typeof document !== 'undefined'
+    && (/[?&]bgmdebug/.test(location.search) || !/^(localhost|127\.0\.0\.1|.*\.github\.io)$/.test(location.hostname));
+  if (wantDebug) {
+    const box = document.createElement('pre');
+    box.style.cssText = 'position:fixed;left:2px;top:122px;z-index:99999;margin:0;padding:2px 4px;font:9px/1.25 monospace;color:#9f9;'
+      + 'background:rgba(0,0,0,.55);pointer-events:none;white-space:pre-wrap;max-width:62vw;border-radius:3px';
+    const attach = () => { if (document.body) { document.body.appendChild(box); } };
+    if (document.body) attach(); else document.addEventListener('DOMContentLoaded', attach, { once: true });
+    globalThis.setInterval(() => { box.textContent = debugText(); }, 500);
+  }
+
   /**
    * Music that stops by itself mid-race is the one failure nothing else
    * here notices: a stream that stalls or is cut (mobile data, a host that
@@ -139,6 +169,7 @@ export function makeBgm(ctx, bus, el) {
     if (now - recoverAt < 2500) return;
     recoverAt = now;
     stuckFor = 0;
+    note(`watchdog ${audio.error ? 'error' : stuck ? 'stuck' : audio.ended ? 'ended' : 'paused'}`);
     if (audio.error || stuck) {
       // dead or stuck stream: start it over from here
       audio.src = url;
