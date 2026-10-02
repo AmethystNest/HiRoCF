@@ -1304,11 +1304,18 @@ export class Game {
     });
     for (const c of t.cars) this.syncDeck(c);
     if (!this.audio) return;
+    // Traffic piling into itself is scenery, not the player's hit: one crash
+    // sound per 0.35 s of it, so a jam cannot use up the audio budget (see
+    // crash() in sfx.js) the player's own impacts need.
+    this._trafficCrashCool = Math.max(0, (this._trafficCrashCool ?? 0) - dt);
     for (const e of events) {
       const d = Math.hypot(e.car.x - p.x, e.car.y - p.y);
       const near = Math.max(0, 1 - d / 5000);
       if (e.type === 'player') this.audio.crash(0.35 + 0.65 * e.force);
-      else if (near > 0) this.audio.crash((0.5 + 0.5 * e.force) * near);
+      else if (near > 0 && this._trafficCrashCool <= 0) {
+        this._trafficCrashCool = 0.35;
+        this.audio.crash((0.5 + 0.5 * e.force) * near);
+      }
     }
   }
 
